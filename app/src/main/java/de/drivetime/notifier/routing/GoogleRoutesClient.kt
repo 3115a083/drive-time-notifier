@@ -23,12 +23,29 @@ class GoogleRoutesClient(
         require(apiKey.isNotBlank()) { "Google Routes API-Key fehlt." }
         val origin = geocode(request.origin, apiKey)
         val destination = geocode(request.destination, apiKey)
+
+        // Routes for DRIVE use a future departureTime. First estimate with a conservative
+        // 30-minute guess, then ask again using the estimated duration to approximate
+        // the departure time required for the requested appointment arrival.
+        val firstDeparture = (request.arrivalMillis - 30 * 60_000L).coerceAtLeast(System.currentTimeMillis())
+        val first = compute(origin, destination, firstDeparture, apiKey)
+        val refinedDeparture = (request.arrivalMillis - first.durationSeconds * 1000L)
+            .coerceAtLeast(System.currentTimeMillis())
+        compute(origin, destination, refinedDeparture, apiKey)
+    }
+
+    private fun compute(
+        origin: Pair<Double, Double>,
+        destination: Pair<Double, Double>,
+        departureMillis: Long,
+        apiKey: String
+    ): RouteEstimate {
         val body = JSONObject().apply {
             put("origin", waypoint(origin.first, origin.second))
             put("destination", waypoint(destination.first, destination.second))
             put("travelMode", "DRIVE")
             put("routingPreference", "TRAFFIC_AWARE_OPTIMAL")
-            put("arrivalTime", Instant.ofEpochMilli(request.arrivalMillis).toString())
+            put("departureTime", Instant.ofEpochMilli(departureMillis).toString())
             put("computeAlternativeRoutes", false)
             put("languageCode", "de-DE")
             put("units", "METRIC")
@@ -40,11 +57,14 @@ class GoogleRoutesClient(
             .header("X-Goog-FieldMask", "routes.duration,routes.staticDuration,routes.distanceMeters,routes.polyline.encodedPolyline")
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
+
         client.newCall(http).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("Routingdienst: HTTP ${response.code}")
-            val route = JSONObject(text).getJSONArray("routes").getJSONObject(0)
-            RouteEstimate(
+            val routes = JSONObject(text).optJSONArray("routes")
+            if (routes == null || routes.length() == 0) error("Keine befahrbare Route gefunden.")
+            val route = routes.getJSONObject(0)
+            return RouteEstimate(
                 durationSeconds = seconds(route.getString("duration")),
                 staticDurationSeconds = seconds(route.optString("staticDuration", route.getString("duration"))),
                 distanceMeters = route.optLong("distanceMeters", 0),
