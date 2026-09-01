@@ -613,23 +613,44 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun RouteMap(route: RouteEstimate, pois: List<RoutePoi>) {
-        val points = remember(route.encodedPolyline) { PolylineDecoder.decode(route.encodedPolyline) }
-        if (points.isEmpty()) return
+        val points = remember(route.encodedPolyline) {
+            runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
+        }
+        if (points.size < 2) return
+
         Surface(shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
             androidx.compose.ui.viewinterop.AndroidView(
                 modifier = Modifier.fillMaxWidth().height(280.dp),
-                factory = { ctx -> MapView(ctx).apply { setMultiTouchControls(true); controller.setZoom(12.0) } },
-                update = { map ->
-                    map.overlays.clear()
-                    map.overlays.add(Polyline().apply { setPoints(points); outlinePaint.strokeWidth = 10f })
-                    pois.forEach { poi ->
-                        map.overlays.add(Marker(map).apply {
-                            position = poi.point
-                            title = if (poi.kind == RoutePoi.Kind.SPEED_CAMERA) "Speed camera" else poi.name ?: "Parking"
-                        })
+                factory = { ctx ->
+                    MapView(ctx).apply {
+                        setMultiTouchControls(true)
+                        controller.setZoom(12.0)
                     }
-                    map.zoomToBoundingBox(org.osmdroid.util.BoundingBox.fromGeoPoints(points), true, 72)
-                    map.invalidate()
+                },
+                update = { map ->
+                    runCatching {
+                        map.overlays.clear()
+                        map.overlays.add(Polyline().apply {
+                            setPoints(points)
+                            outlinePaint.strokeWidth = 10f
+                        })
+                        pois.forEach { poi ->
+                            map.overlays.add(Marker(map).apply {
+                                position = poi.point
+                                title = if (poi.kind == RoutePoi.Kind.SPEED_CAMERA) "Speed camera" else poi.name ?: "Parking"
+                            })
+                        }
+                        map.invalidate()
+                        map.post {
+                            runCatching {
+                                map.zoomToBoundingBox(
+                                    org.osmdroid.util.BoundingBox.fromGeoPoints(points),
+                                    true,
+                                    72
+                                )
+                            }
+                        }
+                    }
                 }
             )
         }
