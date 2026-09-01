@@ -8,7 +8,7 @@ import de.drivetime.notifier.core.DrivePlanner
 import de.drivetime.notifier.data.SettingsStore
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteRequest
-import de.drivetime.notifier.routing.GoogleRoutesClient
+import de.drivetime.notifier.routing.RoutingServiceFactory
 import de.drivetime.notifier.security.SecureApiKeyStore
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
