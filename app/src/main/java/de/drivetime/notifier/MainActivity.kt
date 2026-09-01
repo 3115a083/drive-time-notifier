@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -378,21 +379,16 @@ class MainActivity : ComponentActivity() {
                     leadingIcon = { Icon(Icons.Outlined.MyLocation, null) }
                 )
 
-                if (settings.savedPlaces.isNotEmpty()) {
+                if (settings.homeAddress.isNotBlank() || settings.savedPlaces.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        settings.savedPlaces.sorted().take(3).forEach { raw ->
-                            val name = raw.substringBefore("|").trim()
-                            val address = raw.substringAfter("|", "").trim()
-                            if (address.isNotBlank()) {
-                                AssistChip(
-                                    onClick = { origin = address; originInitialized = true; previousEndMillis = null },
-                                    label = { Text(name.ifBlank { address }) },
-                                    leadingIcon = { Icon(Icons.Outlined.HomeWork, null) }
-                                )
-                            }
+                    QuickLocationChips(
+                        settings = settings,
+                        onSelect = { address ->
+                            origin = address
+                            originInitialized = true
+                            previousEndMillis = null
                         }
-                    }
+                    )
                 }
 
                 Spacer(Modifier.height(10.dp))
@@ -1395,6 +1391,36 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun QuickLocationChips(
+        settings: AppSettings,
+        onSelect: (String) -> Unit
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (settings.homeAddress.isNotBlank()) {
+                AssistChip(
+                    onClick = { onSelect(settings.homeAddress) },
+                    label = { Text(tr(settings.language, "Default location", "Standard-Standort")) },
+                    leadingIcon = { Icon(Icons.Outlined.Home, null) }
+                )
+            }
+            settings.savedPlaces.sorted().forEach { raw ->
+                val name = raw.substringBefore("|").trim()
+                val address = raw.substringAfter("|", "").trim()
+                if (address.isNotBlank()) {
+                    AssistChip(
+                        onClick = { onSelect(address) },
+                        label = { Text(name.ifBlank { address }) },
+                        leadingIcon = { Icon(Icons.Outlined.HomeWork, null) }
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun AppCard(content: @Composable ColumnScope.() -> Unit) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -1481,7 +1507,8 @@ class MainActivity : ComponentActivity() {
         var text by remember { mutableStateOf(initialValue.toString()) }
         LaunchedEffect(text) {
             delay(450)
-            text.toIntOrNull()?.let(onValid)
+            val parsed = text.toIntOrNull()
+            if (parsed != null && parsed != initialValue) onValid(parsed)
         }
         OutlinedTextField(
             value = text,
