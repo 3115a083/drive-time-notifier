@@ -5,7 +5,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
+import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -95,6 +98,25 @@ class MainActivity : ComponentActivity() {
         val keyStore = remember { SecureApiKeyStore(context) }
         var showSettings by rememberSaveable { mutableStateOf(false) }
         var permissionTick by remember { mutableIntStateOf(0) }
+        var lastBackPress by remember { mutableLongStateOf(0L) }
+
+        BackHandler {
+            if (showSettings) {
+                showSettings = false
+            } else {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastBackPress <= 1800L) {
+                    this@MainActivity.finish()
+                } else {
+                    lastBackPress = now
+                    Toast.makeText(
+                        context,
+                        tr(settings.language, "Press back again to exit", "Zum Beenden erneut Zurück drücken"),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
 
         val permissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
