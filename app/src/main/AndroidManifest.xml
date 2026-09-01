@@ -17,7 +17,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.DriveTimeNotifier">
 
-        <activity android:name=".MainActivity" android:exported="true">\n            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+        <activity android:name=".MainActivity" android:exported="true">
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
