@@ -415,7 +415,15 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(10.dp))
                     AssistChip(
                         onClick = { destination = settings.homeAddress },
-                        label = { Text(tr(settings.language, "Default location", "Standard-Standort")) },
+                        label = {
+                            Text(
+                                tr(
+                                    settings.language,
+                                    "Default • ${settings.homeAddress}",
+                                    "Standard • ${settings.homeAddress}"
+                                )
+                            )
+                        },
                         leadingIcon = { Icon(Icons.Outlined.Home, null) }
                     )
                 }
@@ -1239,7 +1247,7 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier.fillMaxWidth().clickable { onSelect(event) }
                                 ) {
                                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small) {
+                                        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
                                             Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                                 Text(dateTime.format(DateTimeFormatter.ofPattern("dd")), fontWeight = FontWeight.Bold)
                                                 Text(dateTime.format(DateTimeFormatter.ofPattern("MMM")), style = MaterialTheme.typography.labelSmall)
@@ -1406,7 +1414,7 @@ class MainActivity : ComponentActivity() {
     ) {
         AppCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small) {
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
                     Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(9.dp))
                 }
                 Spacer(Modifier.width(12.dp))
@@ -1420,7 +1428,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun SectionHeader(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small) {
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
                 Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(8.dp))
             }
             Spacer(Modifier.width(12.dp))
