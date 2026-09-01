@@ -240,6 +240,8 @@ class MainActivity : ComponentActivity() {
         var pickingStart by remember { mutableStateOf(false) }
         var events by remember { mutableStateOf<List<CalendarEventRef>>(emptyList()) }
         var calendarNames by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
+        var nextDriveShortcutHandled by rememberSaveable { mutableStateOf(false) }
+        var shortcutCalculatePending by remember { mutableStateOf(false) }
 
         LaunchedEffect(settings.homeAddress) {
             if (!originInitialized && origin.isBlank() && settings.homeAddress.isNotBlank()) {
@@ -268,6 +270,88 @@ class MainActivity : ComponentActivity() {
                     selected
                 )
                 showEventPicker = true
+            }
+        }
+
+        fun calculateRoute() {
+            if (origin.isBlank() || destination.isBlank() || loading) return
+            error = null
+            loading = true
+            estimate = null
+            pois = emptyList()
+            scope.launch {
+                val target = LocalDateTime.of(appointmentDate, appointmentTime)
+                    .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                val result = withTimeoutOrNull(28_000) {
+                    runCatching {
+                        val route = RoutingServiceFactory.create(context, settings)
+                            .route(RouteRequest(origin.trim(), destination.trim(), target))
+                        val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
+                        val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
+                        val routePois = if ((settings.showSpeedCameras || settings.showParking) && points.size >= 2) {
+                            withTimeoutOrNull(13_000) {
+                                OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                            }.orEmpty()
+                        } else emptyList()
+                        Triple(route, plan, routePois)
+                    }
+                }
+                if (result == null) {
+                    error = tr(settings.language, "The routing service timed out. Try again or choose another provider.", "Der Routingdienst hat das Zeitlimit überschritten. Versuche es erneut oder wähle einen anderen Anbieter.")
+                } else {
+                    result.onSuccess { (route, plan, routePois) ->
+                        estimate = route
+                        plannedStart = plan.departureMillis
+                        plannedEnd = plan.arrivalMillis
+                        pois = routePois
+                        planWarning = listOfNotNull(plan.warning, route.warning).joinToString(" ").ifBlank { null }
+                    }.onFailure {
+                        error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
+                    }
+                }
+                loading = false
+            }
+        }
+
+        LaunchedEffect(initialIntent.action, hasCalendarPermission, settings.sourceCalendarIds, settings.homeAddress) {
+            if (initialIntent.action != ACTION_NEXT_DRIVE || nextDriveShortcutHandled) return@LaunchedEffect
+            if (!hasCalendarPermission) {
+                onRequestCalendarPermission()
+                return@LaunchedEffect
+            }
+            val selected = settings.sourceCalendarIds.mapNotNull { it.toLongOrNull() }.toSet()
+            if (selected.isEmpty()) {
+                error = tr(settings.language, "Select at least one source calendar in Settings first.", "Wähle zuerst mindestens einen Quellkalender in den Einstellungen.")
+                nextDriveShortcutHandled = true
+                return@LaunchedEffect
+            }
+            val now = System.currentTimeMillis()
+            val next = runCatching {
+                calendarRepo.events(now, now + 21L * 24 * 60 * 60 * 1000, selected)
+                    .firstOrNull { it.startMillis > now }
+            }.getOrNull()
+            if (next == null) {
+                error = tr(settings.language, "No upcoming appointment with a location was found.", "Kein kommender Termin mit Ort gefunden.")
+                nextDriveShortcutHandled = true
+                return@LaunchedEffect
+            }
+            if (origin.isBlank() && settings.homeAddress.isNotBlank()) {
+                origin = settings.homeAddress
+                originInitialized = true
+            }
+            destination = next.location
+            val dt = Instant.ofEpochMilli(next.startMillis).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            appointmentDate = dt.toLocalDate()
+            appointmentTime = dt.toLocalTime().withSecond(0).withNano(0)
+            previousEndMillis = null
+            nextDriveShortcutHandled = true
+            shortcutCalculatePending = true
+        }
+
+        LaunchedEffect(shortcutCalculatePending, origin, destination, appointmentDate, appointmentTime) {
+            if (shortcutCalculatePending && origin.isNotBlank() && destination.isNotBlank()) {
+                shortcutCalculatePending = false
+                calculateRoute()
             }
         }
 
@@ -326,6 +410,33 @@ class MainActivity : ComponentActivity() {
                     label = tr(settings.language, "Destination", "Ziel"),
                     leadingIcon = { Icon(Icons.Outlined.LocationOn, null) }
                 )
+
+                if (settings.homeAddress.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    AssistChip(
+                        onClick = { destination = settings.homeAddress },
+                        label = { Text(tr(settings.language, "Default location", "Standard-Standort")) },
+                        leadingIcon = { Icon(Icons.Outlined.Home, null) }
+                    )
+                }
+
+                if (settings.savedPlaces.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        settings.savedPlaces.sorted().take(3).forEach { raw ->
+                            val name = raw.substringBefore("|").trim()
+                            val address = raw.substringAfter("|", "").trim()
+                            if (address.isNotBlank()) {
+                                AssistChip(
+                                    onClick = { destination = address },
+                                    label = { Text(name.ifBlank { address }) },
+                                    leadingIcon = { Icon(Icons.Outlined.HomeWork, null) }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(10.dp))
                 FilledTonalButton(onClick = { loadEvents(false) }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.CalendarMonth, null)
@@ -356,44 +467,7 @@ class MainActivity : ComponentActivity() {
             }
 
             Button(
-                onClick = {
-                    error = null
-                    loading = true
-                    estimate = null
-                    pois = emptyList()
-                    scope.launch {
-                        val target = LocalDateTime.of(appointmentDate, appointmentTime)
-                            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                        val result = withTimeoutOrNull(28_000) {
-                            runCatching {
-                                val route = RoutingServiceFactory.create(context, settings)
-                                    .route(RouteRequest(origin.trim(), destination.trim(), target))
-                                val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
-                                val points = PolylineDecoder.decode(route.encodedPolyline)
-                                val routePois = if (settings.showSpeedCameras || settings.showParking) {
-                                    withTimeoutOrNull(13_000) {
-                                        OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
-                                    }.orEmpty()
-                                } else emptyList()
-                                Triple(route, plan, routePois)
-                            }
-                        }
-                        if (result == null) {
-                            error = tr(settings.language, "The routing service timed out. Try again or choose another provider.", "Der Routingdienst hat das Zeitlimit überschritten. Versuche es erneut oder wähle einen anderen Anbieter.")
-                        } else {
-                            result.onSuccess { (route, plan, routePois) ->
-                                estimate = route
-                                plannedStart = plan.departureMillis
-                                plannedEnd = plan.arrivalMillis
-                                pois = routePois
-                                planWarning = listOfNotNull(plan.warning, route.warning).joinToString(" ").ifBlank { null }
-                            }.onFailure {
-                                error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
-                            }
-                        }
-                        loading = false
-                    }
-                },
+                onClick = { calculateRoute() },
                 enabled = origin.isNotBlank() && destination.isNotBlank() && !loading,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = MaterialTheme.shapes.medium
@@ -1460,5 +1534,9 @@ class MainActivity : ComponentActivity() {
         RoutingProvider.GOOGLE -> "https://console.cloud.google.com/google/maps-apis/credentials"
         RoutingProvider.HERE -> "https://platform.here.com/"
         RoutingProvider.TOMTOM -> "https://developer.tomtom.com/"
+    }
+
+    companion object {
+        const val ACTION_NEXT_DRIVE = "de.drivetime.notifier.ACTION_NEXT_DRIVE"
     }
 }
