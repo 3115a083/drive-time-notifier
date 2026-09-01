@@ -14,15 +14,19 @@ enum class RoutingProvider(
     val displayName: String,
     val reliabilityScore: Int,
     val trafficAware: Boolean,
-    val keyRequired: Boolean
+    val keyRequired: Boolean,
+    val costRisk: Boolean
 ) {
-    GOOGLE("google", "Google Routes", 5, true, true),
-    HERE("here", "HERE Routing", 5, true, true),
-    GRAPHHOPPER("graphhopper", "GraphHopper", 4, false, true),
-    OSRM("osrm", "OSRM + Photon", 3, false, false);
+    VALHALLA("valhalla", "Valhalla", 4, false, false, false),
+    OPENROUTESERVICE("openrouteservice", "openrouteservice", 4, false, true, false),
+    OSRM("osrm", "OSRM", 3, false, false, false),
+    GRAPHHOPPER("graphhopper", "GraphHopper", 4, false, true, false),
+    GOOGLE("google", "Google Routes", 5, true, true, true),
+    HERE("here", "HERE Routing", 5, true, true, true),
+    TOMTOM("tomtom", "TomTom Routing", 5, true, true, true);
 
     companion object {
-        fun fromId(id: String?): RoutingProvider = entries.firstOrNull { it.id == id } ?: GOOGLE
+        fun fromId(id: String?): RoutingProvider = entries.firstOrNull { it.id == id } ?: VALHALLA
     }
 }
 
@@ -41,31 +45,50 @@ enum class AppAppearance(val id: String) {
     }
 }
 
-enum class ColorPalette(val id: String) {
-    PROTON("proton"), OCEAN("ocean"), FOREST("forest"), AURORA("aurora"), SUNSET("sunset"), GRAPHITE("graphite");
+enum class ColorPalette(val id: String, val label: String) {
+    MATERIAL_YOU("material_you", "Material You"),
+    VIOLET("violet", "Violet"),
+    OCEAN("ocean", "Ocean"),
+    FOREST("forest", "Forest"),
+    SUNSET("sunset", "Sunset"),
+    ROSE("rose", "Rose"),
+    GRAPHITE("graphite", "Graphite");
+
     companion object {
-        fun fromId(id: String?): ColorPalette = entries.firstOrNull { it.id == id } ?: PROTON
+        fun fromId(id: String?): ColorPalette = when (id) {
+            "proton", "aurora" -> VIOLET
+            else -> entries.firstOrNull { it.id == id } ?: MATERIAL_YOU
+        }
     }
 }
 
 data class ProviderCaps(
+    val valhalla: Int = 100,
+    val openRouteService: Int = 250,
+    val osrm: Int = 100,
+    val graphHopper: Int = 400,
     val google: Int = 100,
     val here: Int = 100,
-    val graphHopper: Int = 400,
-    val osrm: Int = 100
+    val tomTom: Int = 100
 ) {
     fun forProvider(provider: RoutingProvider): Int = when (provider) {
+        RoutingProvider.VALHALLA -> valhalla
+        RoutingProvider.OPENROUTESERVICE -> openRouteService
+        RoutingProvider.OSRM -> osrm
+        RoutingProvider.GRAPHHOPPER -> graphHopper
         RoutingProvider.GOOGLE -> google
         RoutingProvider.HERE -> here
-        RoutingProvider.GRAPHHOPPER -> graphHopper
-        RoutingProvider.OSRM -> osrm
+        RoutingProvider.TOMTOM -> tomTom
     }
 
     fun withProvider(provider: RoutingProvider, value: Int): ProviderCaps = when (provider) {
+        RoutingProvider.VALHALLA -> copy(valhalla = value)
+        RoutingProvider.OPENROUTESERVICE -> copy(openRouteService = value)
+        RoutingProvider.OSRM -> copy(osrm = value)
+        RoutingProvider.GRAPHHOPPER -> copy(graphHopper = value)
         RoutingProvider.GOOGLE -> copy(google = value)
         RoutingProvider.HERE -> copy(here = value)
-        RoutingProvider.GRAPHHOPPER -> copy(graphHopper = value)
-        RoutingProvider.OSRM -> copy(osrm = value)
+        RoutingProvider.TOMTOM -> copy(tomTom = value)
     }
 }
 
@@ -82,12 +105,13 @@ data class AppSettings(
     val showParking: Boolean = false,
     val targetCalendarId: Long = -1L,
     val sourceCalendarIds: Set<String> = emptySet(),
-    val routingProvider: RoutingProvider = RoutingProvider.GOOGLE,
+    val routingProvider: RoutingProvider = RoutingProvider.VALHALLA,
     val osrmBaseUrl: String = "https://router.project-osrm.org",
+    val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
     val language: AppLanguage = if (Locale.getDefault().language.equals("de", true)) AppLanguage.GERMAN else AppLanguage.ENGLISH,
     val appearance: AppAppearance = AppAppearance.SYSTEM,
-    val palette: ColorPalette = ColorPalette.PROTON,
+    val palette: ColorPalette = ColorPalette.MATERIAL_YOU,
     val providerCaps: ProviderCaps = ProviderCaps()
 )
 
@@ -107,15 +131,19 @@ class SettingsStore(private val context: Context) {
         val SOURCES = stringSetPreferencesKey("source_calendar_ids")
         val ROUTING = stringPreferencesKey("routing_provider")
         val OSRM = stringPreferencesKey("osrm_base_url")
+        val VALHALLA = stringPreferencesKey("valhalla_base_url")
         val PHOTON = stringPreferencesKey("photon_base_url")
         val LEGACY_NOMINATIM = stringPreferencesKey("nominatim_base_url")
         val LANGUAGE = stringPreferencesKey("app_language")
         val APPEARANCE = stringPreferencesKey("appearance")
         val PALETTE = stringPreferencesKey("palette")
+        val CAP_VALHALLA = intPreferencesKey("cap_valhalla")
+        val CAP_ORS = intPreferencesKey("cap_openrouteservice")
         val CAP_GOOGLE = intPreferencesKey("cap_google")
         val CAP_HERE = intPreferencesKey("cap_here")
         val CAP_GRAPHHOPPER = intPreferencesKey("cap_graphhopper")
         val CAP_OSRM = intPreferencesKey("cap_osrm")
+        val CAP_TOMTOM = intPreferencesKey("cap_tomtom")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -134,15 +162,19 @@ class SettingsStore(private val context: Context) {
             sourceCalendarIds = p[K.SOURCES] ?: emptySet(),
             routingProvider = RoutingProvider.fromId(p[K.ROUTING]),
             osrmBaseUrl = p[K.OSRM] ?: "https://router.project-osrm.org",
+            valhallaBaseUrl = p[K.VALHALLA] ?: "https://valhalla1.openstreetmap.de",
             photonBaseUrl = p[K.PHOTON] ?: "https://photon.komoot.io",
             language = AppLanguage.fromId(p[K.LANGUAGE]),
             appearance = AppAppearance.fromId(p[K.APPEARANCE]),
             palette = ColorPalette.fromId(p[K.PALETTE]),
             providerCaps = ProviderCaps(
+                valhalla = p[K.CAP_VALHALLA] ?: 100,
+                openRouteService = p[K.CAP_ORS] ?: 250,
+                osrm = p[K.CAP_OSRM] ?: 100,
+                graphHopper = p[K.CAP_GRAPHHOPPER] ?: 400,
                 google = p[K.CAP_GOOGLE] ?: 100,
                 here = p[K.CAP_HERE] ?: 100,
-                graphHopper = p[K.CAP_GRAPHHOPPER] ?: 400,
-                osrm = p[K.CAP_OSRM] ?: 100
+                tomTom = p[K.CAP_TOMTOM] ?: 100
             )
         )
     }
@@ -162,14 +194,18 @@ class SettingsStore(private val context: Context) {
         p[K.SOURCES] = s.sourceCalendarIds
         p[K.ROUTING] = s.routingProvider.id
         p[K.OSRM] = sanitizeHttpsBaseUrl(s.osrmBaseUrl, "https://router.project-osrm.org")
+        p[K.VALHALLA] = sanitizeHttpsBaseUrl(s.valhallaBaseUrl, "https://valhalla1.openstreetmap.de")
         p[K.PHOTON] = sanitizeHttpsBaseUrl(s.photonBaseUrl, "https://photon.komoot.io")
         p[K.LANGUAGE] = s.language.id
         p[K.APPEARANCE] = s.appearance.id
         p[K.PALETTE] = s.palette.id
+        p[K.CAP_VALHALLA] = sanitizeCap(s.providerCaps.valhalla)
+        p[K.CAP_ORS] = sanitizeCap(s.providerCaps.openRouteService)
         p[K.CAP_GOOGLE] = sanitizeCap(s.providerCaps.google)
         p[K.CAP_HERE] = sanitizeCap(s.providerCaps.here)
         p[K.CAP_GRAPHHOPPER] = sanitizeCap(s.providerCaps.graphHopper)
         p[K.CAP_OSRM] = sanitizeCap(s.providerCaps.osrm)
+        p[K.CAP_TOMTOM] = sanitizeCap(s.providerCaps.tomTom)
         p.remove(K.LEGACY_NOMINATIM)
     }
 

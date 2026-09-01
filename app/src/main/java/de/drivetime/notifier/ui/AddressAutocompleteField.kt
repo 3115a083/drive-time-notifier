@@ -2,16 +2,18 @@ package de.drivetime.notifier.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.model.AddressSuggestion
-import de.drivetime.notifier.routing.RoutingServiceFactory
+import de.drivetime.notifier.routing.PhotonSearchService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -25,19 +27,22 @@ fun AddressAutocompleteField(
     modifier: Modifier = Modifier,
     supportingText: String? = null
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var suggestions by remember { mutableStateOf<List<AddressSuggestion>>(emptyList()) }
-    var acceptedValue by remember { mutableStateOf<String?>(null) }
     var searching by remember { mutableStateOf(false) }
+    var focused by remember { mutableStateOf(false) }
+    var userEdited by remember { mutableStateOf(false) }
 
-    LaunchedEffect(value, settings.routingProvider, settings.language) {
+    LaunchedEffect(value, focused, userEdited, settings.language, settings.photonBaseUrl) {
         suggestions = emptyList()
-        if (value.trim().length < 3 || value == acceptedValue) return@LaunchedEffect
-        delay(550)
+        searching = false
+        if (!focused || !userEdited || value.trim().length < 3) return@LaunchedEffect
+
+        delay(500)
         searching = true
         suggestions = withTimeoutOrNull(8_000) {
             runCatching {
-                RoutingServiceFactory.addressSearch(context, settings)
+                PhotonSearchService(settings.photonBaseUrl, context.packageName)
                     .suggest(value.trim(), settings.language.id)
             }.getOrDefault(emptyList())
         }.orEmpty()
@@ -48,7 +53,7 @@ fun AddressAutocompleteField(
         OutlinedTextField(
             value = value,
             onValueChange = {
-                acceptedValue = null
+                userEdited = true
                 onValueChange(it)
             },
             label = { Text(label) },
@@ -57,7 +62,7 @@ fun AddressAutocompleteField(
                 when {
                     searching -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     value.isNotEmpty() -> IconButton(onClick = {
-                        acceptedValue = ""
+                        userEdited = true
                         suggestions = emptyList()
                         onValueChange("")
                     }) {
@@ -66,9 +71,16 @@ fun AddressAutocompleteField(
                 }
             },
             supportingText = supportingText?.let { { Text(it) } },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().onFocusChanged {
+                focused = it.isFocused
+                if (!it.isFocused) {
+                    suggestions = emptyList()
+                    userEdited = false
+                }
+            },
             singleLine = true
         )
+
         if (suggestions.isNotEmpty()) {
             Surface(
                 shape = MaterialTheme.shapes.medium,
@@ -81,13 +93,13 @@ fun AddressAutocompleteField(
                         Row(
                             Modifier.fillMaxWidth()
                                 .clickable {
-                                    acceptedValue = suggestion.label
+                                    userEdited = false
                                     suggestions = emptyList()
                                     onValueChange(suggestion.label)
                                 }
                                 .padding(horizontal = 16.dp, vertical = 13.dp)
                         ) {
-                            androidx.compose.material3.Icon(
+                            Icon(
                                 Icons.Outlined.LocationOn,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
@@ -95,7 +107,9 @@ fun AddressAutocompleteField(
                             Spacer(Modifier.width(12.dp))
                             Text(suggestion.label, style = MaterialTheme.typography.bodyMedium)
                         }
-                        if (index != suggestions.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                        if (index != suggestions.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                        }
                     }
                 }
             }

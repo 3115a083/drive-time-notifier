@@ -16,46 +16,18 @@ interface AddressSearchService {
     suspend fun suggest(query: String, language: String): List<AddressSuggestion>
 }
 
-data class ProviderServices(
-    val routing: RoutingService,
-    val search: AddressSearchService
-)
-
 object RoutingServiceFactory {
     fun create(context: Context, settings: AppSettings): RoutingService =
-        services(context, settings).routing
+        UnifiedRoutingService(
+            context = context,
+            settings = settings,
+            keyStore = SecureApiKeyStore(context),
+            budget = RequestBudgetStore(context)
+        )
 
     fun addressSearch(context: Context, settings: AppSettings): AddressSearchService =
-        services(context, settings).search
-
-    private fun services(context: Context, settings: AppSettings): ProviderServices {
-        val keys = SecureApiKeyStore(context)
-        val budget = RequestBudgetStore(context)
-        val cap = settings.providerCaps.forProvider(settings.routingProvider)
-        val service = when (settings.routingProvider) {
-            RoutingProvider.GOOGLE -> GoogleProviderService(
-                apiKey = keys.read(RoutingProvider.GOOGLE).orEmpty(),
-                budget = budget,
-                dailyCap = cap
-            )
-            RoutingProvider.HERE -> HereProviderService(
-                apiKey = keys.read(RoutingProvider.HERE).orEmpty(),
-                budget = budget,
-                dailyCap = cap
-            )
-            RoutingProvider.GRAPHHOPPER -> GraphHopperProviderService(
-                apiKey = keys.read(RoutingProvider.GRAPHHOPPER).orEmpty(),
-                budget = budget,
-                dailyCap = cap
-            )
-            RoutingProvider.OSRM -> OsrmPhotonProviderService(
-                osrmBaseUrl = settings.osrmBaseUrl,
-                photonBaseUrl = settings.photonBaseUrl,
-                userAgent = context.packageName,
-                budget = budget,
-                dailyCap = cap
-            )
+        object : AddressSearchService {
+            override suspend fun suggest(query: String, language: String): List<AddressSuggestion> =
+                PhotonSearchService(settings.photonBaseUrl, context.packageName).suggest(query, language)
         }
-        return ProviderServices(service, service)
-    }
 }

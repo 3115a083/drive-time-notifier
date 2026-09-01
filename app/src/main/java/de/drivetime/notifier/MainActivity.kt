@@ -5,7 +5,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
+import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -95,6 +98,25 @@ class MainActivity : ComponentActivity() {
         val keyStore = remember { SecureApiKeyStore(context) }
         var showSettings by rememberSaveable { mutableStateOf(false) }
         var permissionTick by remember { mutableIntStateOf(0) }
+        var lastBackPress by remember { mutableLongStateOf(0L) }
+
+        BackHandler {
+            if (showSettings) {
+                showSettings = false
+            } else {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastBackPress <= 1800L) {
+                    this@MainActivity.finish()
+                } else {
+                    lastBackPress = now
+                    Toast.makeText(
+                        context,
+                        tr(settings.language, "Press back again to exit", "Zum Beenden erneut Zurück drücken"),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
 
         val permissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
@@ -493,9 +515,14 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun HeroCard(settings: AppSettings, estimate: RouteEstimate?, loading: Boolean) {
         val palette = paletteSpec(settings.palette)
+        val heroColors = if (settings.palette == ColorPalette.MATERIAL_YOU) {
+            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)
+        } else {
+            listOf(palette.heroStart, palette.heroEnd)
+        }
         Surface(shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
             Column(
-                Modifier.background(Brush.linearGradient(listOf(palette.heroStart, palette.heroEnd))).padding(24.dp),
+                Modifier.background(Brush.linearGradient(heroColors)).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -591,23 +618,44 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun RouteMap(route: RouteEstimate, pois: List<RoutePoi>) {
-        val points = remember(route.encodedPolyline) { PolylineDecoder.decode(route.encodedPolyline) }
-        if (points.isEmpty()) return
+        val points = remember(route.encodedPolyline) {
+            runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
+        }
+        if (points.size < 2) return
+
         Surface(shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
             androidx.compose.ui.viewinterop.AndroidView(
                 modifier = Modifier.fillMaxWidth().height(280.dp),
-                factory = { ctx -> MapView(ctx).apply { setMultiTouchControls(true); controller.setZoom(12.0) } },
-                update = { map ->
-                    map.overlays.clear()
-                    map.overlays.add(Polyline().apply { setPoints(points); outlinePaint.strokeWidth = 10f })
-                    pois.forEach { poi ->
-                        map.overlays.add(Marker(map).apply {
-                            position = poi.point
-                            title = if (poi.kind == RoutePoi.Kind.SPEED_CAMERA) "Speed camera" else poi.name ?: "Parking"
-                        })
+                factory = { ctx ->
+                    MapView(ctx).apply {
+                        setMultiTouchControls(true)
+                        controller.setZoom(12.0)
                     }
-                    map.zoomToBoundingBox(org.osmdroid.util.BoundingBox.fromGeoPoints(points), true, 72)
-                    map.invalidate()
+                },
+                update = { map ->
+                    runCatching {
+                        map.overlays.clear()
+                        map.overlays.add(Polyline().apply {
+                            setPoints(points)
+                            outlinePaint.strokeWidth = 10f
+                        })
+                        pois.forEach { poi ->
+                            map.overlays.add(Marker(map).apply {
+                                position = poi.point
+                                title = if (poi.kind == RoutePoi.Kind.SPEED_CAMERA) "Speed camera" else poi.name ?: "Parking"
+                            })
+                        }
+                        map.invalidate()
+                        map.post {
+                            runCatching {
+                                map.zoomToBoundingBox(
+                                    org.osmdroid.util.BoundingBox.fromGeoPoints(points),
+                                    true,
+                                    72
+                                )
+                            }
+                        }
+                    }
                 }
             )
         }
@@ -632,6 +680,7 @@ class MainActivity : ComponentActivity() {
         var showAddPlace by remember { mutableStateOf(false) }
         var homeDraft by remember { mutableStateOf(settings.homeAddress) }
         var osrmDraft by remember { mutableStateOf(settings.osrmBaseUrl) }
+        var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
         var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
 
         LaunchedEffect(hasCalendarPermission) {
@@ -644,6 +693,10 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(osrmDraft) {
             delay(600)
             if (osrmDraft != settings.osrmBaseUrl) onChange(settings.copy(osrmBaseUrl = osrmDraft))
+        }
+        LaunchedEffect(valhallaDraft) {
+            delay(600)
+            if (valhallaDraft != settings.valhallaBaseUrl) onChange(settings.copy(valhallaBaseUrl = valhallaDraft))
         }
         LaunchedEffect(photonDraft) {
             delay(600)
@@ -873,8 +926,10 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     keyStore = keyStore,
                     osrmDraft = osrmDraft,
+                    valhallaDraft = valhallaDraft,
                     photonDraft = photonDraft,
                     onOsrmDraft = { osrmDraft = it },
+                    onValhallaDraft = { valhallaDraft = it },
                     onPhotonDraft = { photonDraft = it },
                     onOpenUrl = { uriHandler.openUri(it) }
                 )
@@ -955,7 +1010,13 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    if (provider.trafficAware) AssistChip(onClick = {}, label = { Text(tr(settings.language, "Traffic", "Verkehr")) })
+                    if (provider.costRisk) {
+                        AssistChip(onClick = {}, label = { Text("$") })
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    if (provider.trafficAware) {
+                        AssistChip(onClick = {}, label = { Text(tr(settings.language, "Traffic", "Verkehr")) })
+                    }
                 }
                 Text(
                     providerDescription(provider, settings.language),
@@ -988,35 +1049,48 @@ class MainActivity : ComponentActivity() {
         settings: AppSettings,
         keyStore: SecureApiKeyStore,
         osrmDraft: String,
+        valhallaDraft: String,
         photonDraft: String,
         onOsrmDraft: (String) -> Unit,
+        onValhallaDraft: (String) -> Unit,
         onPhotonDraft: (String) -> Unit,
         onOpenUrl: (String) -> Unit
     ) {
+        Text(
+            tr(
+                settings.language,
+                "Address search: Photon. It is independent from the routing provider and is not counted against routing caps.",
+                "Adresssuche: Photon. Sie ist unabhängig vom Routingdienst und wird nicht auf dessen Anfrage-Limit angerechnet."
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = photonDraft,
+            onValueChange = onPhotonDraft,
+            label = { Text("Photon HTTPS endpoint") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        Spacer(Modifier.height(10.dp))
+
         when (val provider = settings.routingProvider) {
-            RoutingProvider.OSRM -> {
-                OutlinedTextField(
-                    value = osrmDraft,
-                    onValueChange = onOsrmDraft,
-                    label = { Text("OSRM HTTPS endpoint") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = photonDraft,
-                    onValueChange = onPhotonDraft,
-                    label = { Text("Photon HTTPS endpoint") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Text(
-                    tr(settings.language, "Photon is used for address suggestions. The public demo may throttle heavy usage; self-hosting is recommended for regular production use.", "Photon wird für Adressvorschläge verwendet. Der öffentliche Demo-Server kann starke Nutzung drosseln; für regelmäßigen Produktivbetrieb wird Self-Hosting empfohlen."),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            else -> {
+            RoutingProvider.OSRM -> OutlinedTextField(
+                value = osrmDraft,
+                onValueChange = onOsrmDraft,
+                label = { Text("OSRM HTTPS endpoint") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            RoutingProvider.VALHALLA -> OutlinedTextField(
+                value = valhallaDraft,
+                onValueChange = onValhallaDraft,
+                label = { Text("Valhalla HTTPS endpoint") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            else -> if (provider.keyRequired) {
                 ProviderApiKeyField(provider, settings, keyStore)
                 Spacer(Modifier.height(4.dp))
                 TextButton(onClick = { onOpenUrl(providerKeyUrl(provider)) }) {
@@ -1353,29 +1427,38 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.size(14.dp).clip(CircleShape).background(spec.tertiary))
                 }
                 Spacer(Modifier.height(5.dp))
-                Text(palette.name.lowercase().replaceFirstChar { it.titlecase() }, style = MaterialTheme.typography.labelSmall)
+                Text(palette.label, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
 
     private fun providerDescription(provider: RoutingProvider, language: AppLanguage): String = when (provider) {
-        RoutingProvider.GOOGLE -> tr(language, "Predictive traffic and closures. Highest request cost potential.", "Prognostischer Verkehr und Sperrungen. Höchstes mögliches Kostenrisiko pro Anfrage.")
-        RoutingProvider.HERE -> tr(language, "Live and historical traffic with time-aware routing.", "Live- und historischer Verkehr mit zeitabhängigem Routing.")
-        RoutingProvider.GRAPHHOPPER -> tr(language, "Fast OSM-based routing and geocoding. No predictive traffic in this integration.", "Schnelles OSM-basiertes Routing und Geocoding. Keine prognostischen Verkehrsdaten in dieser Integration.")
-        RoutingProvider.OSRM -> tr(language, "Open-source OSRM routing plus Photon address search. Static travel-time estimate.", "Open-Source-Routing mit OSRM plus Photon-Adresssuche. Statische Fahrzeitschätzung.")
+        RoutingProvider.VALHALLA -> tr(language, "Free open-source OSM routing on a public fair-use server. Good static ETA, no guaranteed live traffic.", "Kostenloses Open-Source-OSM-Routing auf einem Fair-Use-Server. Gute statische ETA, keine garantierten Live-Verkehrsdaten.")
+        RoutingProvider.OPENROUTESERVICE -> tr(language, "Free API plan with an API key. OSM-based routing, no predictive live traffic in this integration.", "Kostenloser API-Tarif mit API-Key. OSM-basiertes Routing, keine prognostischen Live-Verkehrsdaten in dieser Integration.")
+        RoutingProvider.OSRM -> tr(language, "Very fast open-source OSM routing. Public server is fair-use and provides static travel times.", "Sehr schnelles Open-Source-OSM-Routing. Öffentlicher Server ist Fair-Use und liefert statische Fahrzeiten.")
+        RoutingProvider.GRAPHHOPPER -> tr(language, "Free tier available. Fast OSM-based routing without predictive traffic in this integration.", "Kostenloser Tarif verfügbar. Schnelles OSM-basiertes Routing ohne prognostische Verkehrsdaten in dieser Integration.")
+        RoutingProvider.GOOGLE -> tr(language, "Predictive traffic and closures. Billing can apply beyond included credits.", "Prognostischer Verkehr und Sperrungen. Über enthaltene Guthaben hinaus können Kosten entstehen.")
+        RoutingProvider.HERE -> tr(language, "Time-aware routing with live and historical traffic. Pay-as-you-grow pricing can apply.", "Zeitabhängiges Routing mit Live- und historischen Verkehrsdaten. Pay-as-you-grow-Kosten können anfallen.")
+        RoutingProvider.TOMTOM -> tr(language, "Strong live and historical traffic routing. Free evaluation exists, paid usage can apply.", "Starkes Live- und historisches Verkehrs-Routing. Kostenlose Evaluation vorhanden, bezahlte Nutzung kann anfallen.")
     }
 
     private fun providerLimitInfo(provider: RoutingProvider, language: AppLanguage): String = when (provider) {
-        RoutingProvider.GOOGLE -> tr(language, "Google pricing and quotas depend on enabled Maps APIs. The local cap counts raw requests made by this app.", "Google-Preise und Kontingente hängen von den aktivierten Maps-APIs ab. Das lokale Limit zählt rohe Anfragen dieser App.")
-        RoutingProvider.HERE -> tr(language, "HERE quotas depend on your plan. Requests over quota can return HTTP 429/503.", "HERE-Kontingente hängen vom Tarif ab. Überzogene Kontingente können HTTP 429/503 liefern.")
-        RoutingProvider.GRAPHHOPPER -> tr(language, "GraphHopper Free currently includes 500 credits/day; paid plans have additional per-second and credit limits.", "GraphHopper Free enthält derzeit 500 Credits/Tag; bezahlte Tarife haben zusätzliche Sekunden- und Credit-Limits.")
-        RoutingProvider.OSRM -> tr(language, "Public OSRM/Photon services are fair-use/demo infrastructure with no SLA. Keep the cap conservative or self-host.", "Öffentliche OSRM-/Photon-Dienste sind Fair-Use-/Demo-Infrastruktur ohne SLA. Limit niedrig halten oder selbst hosten.")
+        RoutingProvider.VALHALLA -> tr(language, "Public demo: fair use, about 1 request/second per user. Self-host for heavy use.", "Öffentlicher Demo-Server: Fair Use, etwa 1 Anfrage/Sekunde pro Nutzer. Für hohe Nutzung selbst hosten.")
+        RoutingProvider.OPENROUTESERVICE -> tr(language, "Free API access has quotas. The app uses the current api.heigit.org endpoint and stops at your local daily cap.", "Kostenloser API-Zugang hat Kontingente. Die App nutzt den aktuellen api.heigit.org-Endpunkt und stoppt am lokalen Tageslimit.")
+        RoutingProvider.OSRM -> tr(language, "Public OSRM is fair-use infrastructure without an SLA. Keep the local cap conservative or self-host.", "Öffentliches OSRM ist Fair-Use-Infrastruktur ohne SLA. Lokales Limit niedrig halten oder selbst hosten.")
+        RoutingProvider.GRAPHHOPPER -> tr(language, "Free plan currently includes 500 credits/day. A normal two-point route costs one credit.", "Der Free-Tarif enthält derzeit 500 Credits/Tag. Eine normale Route mit zwei Punkten kostet einen Credit.")
+        RoutingProvider.GOOGLE -> tr(language, "Google Maps Platform pricing depends on enabled APIs. This app applies a local hard cap before requests.", "Google-Maps-Platform-Preise hängen von aktivierten APIs ab. Diese App setzt vor Anfragen ein lokales hartes Limit.")
+        RoutingProvider.HERE -> tr(language, "HERE Base Plan includes free thresholds, then pay-as-you-grow pricing may apply.", "Der HERE Base Plan enthält kostenlose Schwellenwerte, danach können Pay-as-you-grow-Kosten anfallen.")
+        RoutingProvider.TOMTOM -> tr(language, "TomTom offers a limited free evaluation; paid plans remove the daily evaluation limit.", "TomTom bietet eine begrenzte kostenlose Evaluation; bezahlte Tarife entfernen das tägliche Evaluationslimit.")
     }
 
     private fun providerKeyUrl(provider: RoutingProvider): String = when (provider) {
+        RoutingProvider.VALHALLA -> "https://valhalla.github.io/valhalla/"
+        RoutingProvider.OPENROUTESERVICE -> "https://openrouteservice.org/dev/#/signup"
+        RoutingProvider.OSRM -> "https://project-osrm.org/"
+        RoutingProvider.GRAPHHOPPER -> "https://www.graphhopper.com/dashboard/"
         RoutingProvider.GOOGLE -> "https://console.cloud.google.com/google/maps-apis/credentials"
         RoutingProvider.HERE -> "https://platform.here.com/"
-        RoutingProvider.GRAPHHOPPER -> "https://www.graphhopper.com/dashboard/"
-        RoutingProvider.OSRM -> "https://project-osrm.org/"
+        RoutingProvider.TOMTOM -> "https://developer.tomtom.com/"
     }
 }
