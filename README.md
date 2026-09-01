@@ -12,7 +12,7 @@ Enthalten sind:
 - gespeicherter Standard-Startort
 - Zieltermin aus dem Android-Kalender wählen
 - vorherigen Kalendereintrag als temporären Start verwenden
-- verkehrsabhängige Fahrzeit mit Google Routes API
+- auswählbare Routingdienste: Google Routes oder Open-Source-Routing mit OSRM + Nominatim
 - Karte mit Route auf OpenStreetMap/osmdroid
 - Stauindikator aus Verkehrsdauer gegenüber statischer Fahrzeit
 - optional OSM-Blitzerhinweise und Parkmöglichkeiten
@@ -38,7 +38,7 @@ Die App verwendet bewusst Android-Standard-APIs, um OEM-Kalender-Apps möglichst
 - Hintergrundjobs: WorkManager
 - Einstellungen: DataStore
 - Geheimnisse: Android Keystore, AES/GCM
-- Routing: Google Routes API und Google Geocoding API
+- Routing: auswählbar zwischen Google Routes/Geocoding und OSRM/Nominatim
 - Karte: osmdroid/OpenStreetMap
 - optionale POIs: OpenStreetMap Overpass API
 - HTTP: OkHttp
@@ -53,9 +53,10 @@ Die App legt Kalendereinträge direkt über den Android Calendar Provider an. Si
 - Android Studio mit JDK 17
 - Android SDK 35
 - minSdk 26
-- Google Cloud Projekt mit aktivierter Routes API und Geocoding API
+- für Google Routing: Google Cloud Projekt mit aktivierter Routes API und Geocoding API
+- für Open-Source-Routing ist kein API-Key erforderlich
 
-Die App enthält keinen fest einkompilierten API-Key. Den Key trägt der Nutzer in den Einstellungen ein. Er wird lokal mit einem Schlüssel aus dem Android Keystore verschlüsselt.
+Die App enthält keinen fest einkompilierten API-Key. Bei Google trägt der Nutzer den Key in den Einstellungen ein. Er wird lokal mit einem Schlüssel aus dem Android Keystore verschlüsselt. Alternativ kann OSRM mit Nominatim gewählt werden. Standardmäßig sind öffentliche HTTPS-Endpunkte vorbelegt, eigene selbst gehostete Instanzen können eingetragen werden.
 
 Für Produktionsbetrieb sollte der Google-Key zusätzlich serverseitig auf die wirklich benötigten APIs und ein enges Kontingent beschränkt werden. Ein REST-API-Key in einer Client-App kann trotz Keystore nicht absolut gegen Extraktion auf einem kompromittierten Gerät geschützt werden.
 
@@ -90,6 +91,20 @@ Wenn zwei Termine mit vollem Puffer nicht erreichbar sind, die direkte Fahrt abe
 
 Wenn die direkte Fahrt selbst nicht rechtzeitig möglich ist, zeigt die App eine deutliche Warnung. Die erzeugte Fahrt endet trotzdem zum Beginn des zweiten Termins. Dadurch kann sich der Fahrtbeginn mit dem vorherigen Termin überschneiden.
 
+## Routingdienste
+
+In den Einstellungen kann der Routingdienst gewählt werden.
+
+### Google Routes
+
+Google Routes liefert eine zukünftige Verkehrsschätzung. Dafür wird zusätzlich die Google Geocoding API verwendet. Ein API-Key ist erforderlich und wird lokal mit Android Keystore geschützt.
+
+### OSRM + Nominatim
+
+OSRM und Nominatim sind Open-Source-Komponenten. Die App kann die vorbelegten öffentlichen HTTPS-Dienste verwenden oder auf eigene Instanzen zeigen. Dabei ist kein Google-Key nötig.
+
+Der öffentliche OSRM-Dienst liefert keine prognostizierten Staus. Deshalb zeigt die App bei OSRM keinen künstlich berechneten Live-Verkehr an und weist ausdrücklich darauf hin. Für produktive oder häufige Nutzung empfiehlt sich eine eigene OSRM-/Nominatim-Instanz, damit öffentliche Community-Dienste nicht unnötig belastet werden.
+
 ## Automatik
 
 In den Einstellungen können Quellkalender, Zielkalender, Uhrzeit und automatischer Modus gewählt werden.
@@ -106,6 +121,8 @@ Für den nächsten Tag:
 6. Fahrten werden in den Zielkalender geschrieben oder als ICS in `Download/DriveTimeNotifier` gespeichert.
 
 WorkManager wird absichtlich verwendet, weil er Doze, App-Standby, Neustarts und viele OEM-Energiesparmechanismen besser behandelt als ein dauerhaft laufender Dienst. Android garantiert bei periodischer Hintergrundarbeit keine sekundengenaue Ausführung. Die konfigurierte Uhrzeit ist daher ein Zielzeitpunkt, kein Echtzeit-Alarm.
+
+Wenn die Automatik ausgeschaltet ist, existiert kein periodischer WorkManager-Job. Zusätzlich ist der Receiver für Boot-, Zeit- und Zeitzonenänderungen deaktiviert. Die App wacht dann nicht selbstständig für Kalenderprüfungen auf. Sie läuft nur nach manuellem Öffnen oder über einen externen Trigger.
 
 ## Kalender und OEM-Kompatibilität
 
@@ -145,12 +162,14 @@ Nicht an Routing- oder POI-Dienste gesendet werden:
 - Kalendername
 - Konto-/E-Mail-Adresse des Kalenders
 
-An Google werden für eine Berechnung gesendet:
+Bei Google-Routing werden für eine Berechnung gesendet:
 
 - Startadresse
 - Zieladresse
 - gewünschte Ankunftszeit
 - daraus geocodierte Start- und Zielkoordinaten
+
+Bei OSRM/Nominatim werden Start- und Zieladresse an Nominatim und die daraus gewonnenen Koordinaten an OSRM gesendet. Bei eigenen Instanzen gehen diese Daten ausschließlich an die vom Nutzer eingetragenen Server.
 
 Wenn Blitzer oder Parkplätze aktiviert sind, wird ein geografischer Routenausschnitt an die Overpass API gesendet. Diese Abfrage ist standardmäßig deaktiviert.
 
@@ -269,8 +288,9 @@ Die CI führt Unit-Tests und `assembleDebug` aus.
 
 ## Bekannte Grenzen
 
-- Verkehrsqualität hängt von Google Routes ab.
+- Verkehrsqualität hängt vom gewählten Routingdienst ab.
 - Google Routes und Geocoding benötigen einen vom Nutzer bereitgestellten API-Key.
+- Der öffentliche OSRM-Dienst liefert keine zukünftige Verkehrslage.
 - OSM-Blitzer und Parkplätze sind Community-Daten und nicht garantiert vollständig.
 - Die automatische Uhrzeit über WorkManager ist nicht sekundengenau.
 - Ein Zielkalender muss Schreibzugriff erlauben. Schreibt ein Konto nur lesbar, schlägt der Insert sauber fehl.
