@@ -18,7 +18,11 @@ data class RouteEstimate(
     val staticDurationSeconds: Long,
     val distanceMeters: Long,
     val encodedPolyline: String,
-    val warning: String? = null
+    val warning: String? = null,
+    val originLatitude: Double? = null,
+    val originLongitude: Double? = null,
+    val destinationLatitude: Double? = null,
+    val destinationLongitude: Double? = null
 ) {
     val trafficDelaySeconds: Long get() = (durationSeconds - staticDurationSeconds).coerceAtLeast(0)
     val trafficProbabilityPercent: Int
@@ -31,4 +35,10 @@ data class DrivePlan(
     val arrivalMillis: Long,
     val appliedBufferMinutes: Int,
     val warning: String?
+)
+
+data class AddressSuggestion(
+    val label: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
