@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import de.drivetime.notifier.data.RoutingProvider
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -12,33 +13,64 @@ import javax.crypto.spec.GCMParameterSpec
 
 class SecureApiKeyStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("secure_api", Context.MODE_PRIVATE)
-    private val alias = "routing_api_key"
 
-    fun save(value: String) {
+    fun save(value: String) = save(RoutingProvider.GOOGLE, value)
+    fun read(): String? = read(RoutingProvider.GOOGLE)
+
+    fun save(provider: RoutingProvider, value: String) {
+        val keyName = provider.id
         if (value.isBlank()) {
-            prefs.edit().clear().apply()
+            prefs.edit().remove("${keyName}_cipher").remove("${keyName}_iv").apply()
             return
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, key())
-        val ciphertext = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        cipher.init(Cipher.ENCRYPT_MODE, key(provider))
         prefs.edit()
-            .putString("cipher", Base64.encodeToString(ciphertext, Base64.NO_WRAP))
-            .putString("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+            .putString("${keyName}_cipher", Base64.encodeToString(cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP))
+            .putString("${keyName}_iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .apply()
     }
 
-    fun read(): String? {
-        val cipherText = prefs.getString("cipher", null) ?: return null
-        val iv = prefs.getString("iv", null) ?: return null
-        return runCatching {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)))
-            String(cipher.doFinal(Base64.decode(cipherText, Base64.NO_WRAP)), Charsets.UTF_8)
-        }.getOrNull()
+    fun read(provider: RoutingProvider): String? {
+        val keyName = provider.id
+        val cipherText = prefs.getString("${keyName}_cipher", null)
+        val iv = prefs.getString("${keyName}_iv", null)
+        if (cipherText != null && iv != null) {
+            return decrypt(provider, cipherText, iv)
+        }
+
+        // Migrate the key format used by versions before multiple providers.
+        if (provider == RoutingProvider.GOOGLE) {
+            val legacyCipher = prefs.getString("cipher", null)
+            val legacyIv = prefs.getString("iv", null)
+            if (legacyCipher != null && legacyIv != null) {
+                val value = runCatching { decryptLegacy(legacyCipher, legacyIv) }.getOrNull()
+                if (!value.isNullOrBlank()) {
+                    save(provider, value)
+                    prefs.edit().remove("cipher").remove("iv").apply()
+                    return value
+                }
+            }
+        }
+        return null
     }
 
-    private fun key(): SecretKey {
+    private fun decrypt(provider: RoutingProvider, cipherText: String, iv: String): String? = runCatching {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(provider), GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)))
+        String(cipher.doFinal(Base64.decode(cipherText, Base64.NO_WRAP)), Charsets.UTF_8)
+    }.getOrNull()
+
+    private fun decryptLegacy(cipherText: String, iv: String): String {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val legacy = store.getKey("routing_api_key", null) as SecretKey
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, legacy, GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)))
+        return String(cipher.doFinal(Base64.decode(cipherText, Base64.NO_WRAP)), Charsets.UTF_8)
+    }
+
+    private fun key(provider: RoutingProvider): SecretKey {
+        val alias = "routing_api_key_${provider.id}"
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return it }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
