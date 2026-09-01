@@ -1010,7 +1010,13 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    if (provider.trafficAware) AssistChip(onClick = {}, label = { Text(tr(settings.language, "Traffic", "Verkehr")) })
+                    if (provider.costRisk) {
+                        AssistChip(onClick = {}, label = { Text("$") })
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    if (provider.trafficAware) {
+                        AssistChip(onClick = {}, label = { Text(tr(settings.language, "Traffic", "Verkehr")) })
+                    }
                 }
                 Text(
                     providerDescription(provider, settings.language),
@@ -1043,35 +1049,48 @@ class MainActivity : ComponentActivity() {
         settings: AppSettings,
         keyStore: SecureApiKeyStore,
         osrmDraft: String,
+        valhallaDraft: String,
         photonDraft: String,
         onOsrmDraft: (String) -> Unit,
+        onValhallaDraft: (String) -> Unit,
         onPhotonDraft: (String) -> Unit,
         onOpenUrl: (String) -> Unit
     ) {
+        Text(
+            tr(
+                settings.language,
+                "Address search: Photon. It is independent from the routing provider and is not counted against routing caps.",
+                "Adresssuche: Photon. Sie ist unabhängig vom Routingdienst und wird nicht auf dessen Anfrage-Limit angerechnet."
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = photonDraft,
+            onValueChange = onPhotonDraft,
+            label = { Text("Photon HTTPS endpoint") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        Spacer(Modifier.height(10.dp))
+
         when (val provider = settings.routingProvider) {
-            RoutingProvider.OSRM -> {
-                OutlinedTextField(
-                    value = osrmDraft,
-                    onValueChange = onOsrmDraft,
-                    label = { Text("OSRM HTTPS endpoint") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = photonDraft,
-                    onValueChange = onPhotonDraft,
-                    label = { Text("Photon HTTPS endpoint") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Text(
-                    tr(settings.language, "Photon is used for address suggestions. The public demo may throttle heavy usage; self-hosting is recommended for regular production use.", "Photon wird für Adressvorschläge verwendet. Der öffentliche Demo-Server kann starke Nutzung drosseln; für regelmäßigen Produktivbetrieb wird Self-Hosting empfohlen."),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            else -> {
+            RoutingProvider.OSRM -> OutlinedTextField(
+                value = osrmDraft,
+                onValueChange = onOsrmDraft,
+                label = { Text("OSRM HTTPS endpoint") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            RoutingProvider.VALHALLA -> OutlinedTextField(
+                value = valhallaDraft,
+                onValueChange = onValhallaDraft,
+                label = { Text("Valhalla HTTPS endpoint") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            else -> if (provider.keyRequired) {
                 ProviderApiKeyField(provider, settings, keyStore)
                 Spacer(Modifier.height(4.dp))
                 TextButton(onClick = { onOpenUrl(providerKeyUrl(provider)) }) {
