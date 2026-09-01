@@ -12,7 +12,7 @@ Enthalten sind:
 - gespeicherter Standard-Startort
 - Zieltermin aus dem Android-Kalender wählen
 - vorherigen Kalendereintrag als temporären Start verwenden
-- auswählbare Routingdienste: Google Routes oder Open-Source-Routing mit OSRM + Nominatim
+- auswählbare Routingdienste: Google Routes oder Open-Source-Routing mit OSRM + Photon
 - Karte mit Route auf OpenStreetMap/osmdroid
 - Stauindikator aus Verkehrsdauer gegenüber statischer Fahrzeit
 - optional OSM-Blitzerhinweise und Parkmöglichkeiten
@@ -26,7 +26,8 @@ Enthalten sind:
 - frei wählbare Quellkalender für die Automatik
 - Tasker/Broadcast-Integration mit 256-Bit-Token
 - App-Shortcut zum Auslösen der Verarbeitung des nächsten Tages
-- Light/Dark Mode und Material-You-Farben
+- moderner Proton-inspirierter Material-3-Look mit Light/Dark/System-Modus und sechs Farbpaletten
+- App-Sprache Englisch oder Deutsch; Standard Englisch, außer bei deutscher Systemsprache
 - Android-Keystore für API-Key und Automation-Token
 
 ## Architektur
@@ -38,7 +39,8 @@ Die App verwendet bewusst Android-Standard-APIs, um OEM-Kalender-Apps möglichst
 - Hintergrundjobs: WorkManager
 - Einstellungen: DataStore
 - Geheimnisse: Android Keystore, AES/GCM
-- Routing: auswählbar zwischen Google Routes/Geocoding und OSRM/Nominatim
+- Routing: Google Routes, HERE Routing, GraphHopper oder Open-Source OSRM + Photon
+- Adressvorschläge: anbieterspezifisch, bei OSRM über Photon statt öffentlichem Photon
 - Karte: osmdroid/OpenStreetMap
 - optionale POIs: OpenStreetMap Overpass API
 - HTTP: OkHttp
@@ -56,7 +58,7 @@ Die App legt Kalendereinträge direkt über den Android Calendar Provider an. Si
 - für Google Routing: Google Cloud Projekt mit aktivierter Routes API und Geocoding API
 - für Open-Source-Routing ist kein API-Key erforderlich
 
-Die App enthält keinen fest einkompilierten API-Key. Bei Google trägt der Nutzer den Key in den Einstellungen ein. Er wird lokal mit einem Schlüssel aus dem Android Keystore verschlüsselt. Alternativ kann OSRM mit Nominatim gewählt werden. Standardmäßig sind öffentliche HTTPS-Endpunkte vorbelegt, eigene selbst gehostete Instanzen können eingetragen werden.
+Die App enthält keinen fest einkompilierten API-Key. Bei Google trägt der Nutzer den Key in den Einstellungen ein. Er wird lokal mit einem Schlüssel aus dem Android Keystore verschlüsselt. Alternativ kann OSRM mit Photon gewählt werden. Standardmäßig sind öffentliche HTTPS-Endpunkte vorbelegt, eigene selbst gehostete Instanzen können eingetragen werden.
 
 Für Produktionsbetrieb sollte der Google-Key zusätzlich serverseitig auf die wirklich benötigten APIs und ein enges Kontingent beschränkt werden. Ein REST-API-Key in einer Client-App kann trotz Keystore nicht absolut gegen Extraktion auf einem kompromittierten Gerät geschützt werden.
 
@@ -99,11 +101,11 @@ In den Einstellungen kann der Routingdienst gewählt werden.
 
 Google Routes liefert eine zukünftige Verkehrsschätzung. Dafür wird zusätzlich die Google Geocoding API verwendet. Ein API-Key ist erforderlich und wird lokal mit Android Keystore geschützt.
 
-### OSRM + Nominatim
+### OSRM + Photon
 
-OSRM und Nominatim sind Open-Source-Komponenten. Die App kann die vorbelegten öffentlichen HTTPS-Dienste verwenden oder auf eigene Instanzen zeigen. Dabei ist kein Google-Key nötig.
+OSRM und Photon sind Open-Source-Komponenten. Die App kann die vorbelegten öffentlichen HTTPS-Dienste verwenden oder auf eigene Instanzen zeigen. Dabei ist kein Google-Key nötig.
 
-Der öffentliche OSRM-Dienst liefert keine prognostizierten Staus. Deshalb zeigt die App bei OSRM keinen künstlich berechneten Live-Verkehr an und weist ausdrücklich darauf hin. Für produktive oder häufige Nutzung empfiehlt sich eine eigene OSRM-/Nominatim-Instanz, damit öffentliche Community-Dienste nicht unnötig belastet werden.
+Der öffentliche OSRM-Dienst liefert keine prognostizierten Staus. Deshalb zeigt die App bei OSRM keinen künstlich berechneten Live-Verkehr an und weist ausdrücklich darauf hin. Für produktive oder häufige Nutzung empfiehlt sich eine eigene OSRM-/Photon-Instanz, damit öffentliche Community-Dienste nicht unnötig belastet werden.
 
 ## Automatik
 
@@ -169,7 +171,7 @@ Bei Google-Routing werden für eine Berechnung gesendet:
 - gewünschte Ankunftszeit
 - daraus geocodierte Start- und Zielkoordinaten
 
-Bei OSRM/Nominatim werden Start- und Zieladresse an Nominatim und die daraus gewonnenen Koordinaten an OSRM gesendet. Bei eigenen Instanzen gehen diese Daten ausschließlich an die vom Nutzer eingetragenen Server.
+Bei OSRM/Photon werden Start- und Zieladresse an Photon und die daraus gewonnenen Koordinaten an OSRM gesendet. Bei eigenen Instanzen gehen diese Daten ausschließlich an die vom Nutzer eingetragenen Server.
 
 Wenn Blitzer oder Parkplätze aktiviert sind, wird ein geografischer Routenausschnitt an die Overpass API gesendet. Diese Abfrage ist standardmäßig deaktiviert.
 
@@ -300,3 +302,57 @@ Die CI führt Unit-Tests und `assembleDebug` aus.
 ## Lizenz
 
 Noch keine Lizenzdatei hinterlegt. Vor Veröffentlichung sollte eine passende Open-Source-Lizenz gewählt werden.
+
+
+## Routinganbieter und Anfrage-Limits
+
+Die App bietet vier Routinganbieter. Die angezeigte Zuverlässigkeit ist eine qualitative Einschätzung für die erwartete Fahrzeit, keine statistisch kalibrierte Wahrscheinlichkeit.
+
+| Anbieter | Bewertung | Verkehr | Schlüssel |
+| --- | --- | --- | --- |
+| Google Routes | 5/5 | prognostisch, verkehrsabhängig | Google Maps Platform API-Key |
+| HERE Routing | 5/5 | live/historisch, zeitabhängig | HERE API-Key |
+| GraphHopper | 4/5 | statisches Routingmodell in dieser Integration | GraphHopper API-Key |
+| OSRM + Photon | 3/5 | statische OSM-basierte Fahrzeit | kein Key erforderlich |
+
+Für jeden Anbieter gibt es ein lokales tägliches Anfrage-Limit. Sobald dieses Limit erreicht ist, stoppt die App weitere API-Aufrufe dieses Anbieters. Das schützt vor versehentlicher hoher Nutzung. Der lokale Zähler ist kein Abrechnungszähler des jeweiligen Dienstes, weil Anbieter unterschiedliche Billing- und Credit-Modelle verwenden.
+
+GraphHopper bietet aktuell im Free-Tarif 500 Credits pro Tag. HERE-Kontingente hängen vom gebuchten Plan ab. Google Maps Platform wird nach aktivierten APIs und deren Preisen abgerechnet. Bei OSRM/Photon handelt es sich bei den vorbelegten öffentlichen Servern um Fair-Use-/Demo-Infrastruktur ohne SLA; für regelmäßige oder größere Nutzung sollte eine eigene Instanz verwendet werden.
+
+Die API-Key-Felder in den Einstellungen enthalten direkte Links zu den jeweiligen Dashboards.
+
+## Adressvorschläge
+
+Adressfelder suchen während der Eingabe nach passenden Orten. Die Suche startet erst ab drei Zeichen, wird verzögert ausgelöst und hat ein festes Timeout.
+
+- Google: Places Autocomplete
+- HERE: Geocoding & Search Autocomplete
+- GraphHopper: Geocoding API
+- OSRM: Photon Search-as-you-type
+
+Der öffentliche OSMF-Nominatim-Dienst wird bewusst nicht für Autocomplete verwendet, da dessen öffentliche Nutzungsrichtlinie Client-Autocomplete ausdrücklich untersagt.
+
+## Kalenderbeschreibung der Fahrt
+
+Bei einem normalen Kalendereintrag enthält die Beschreibung zusätzlich:
+
+- direkten Google-Maps-Navigationslink zum Ziel
+- einen `geo:`-Link für installierte Android-Navigations-Apps
+- gewählten Routinganbieter, Fahrzeit und Distanz
+- bei aktivierter Parkplatzsuche bis zu fünf Parkplätze nahe dem Ziel, sortiert nach ungefährer Laufentfernung, jeweils mit Navigationslink
+- bei aktivierter Blitzeranzeige Anzahl und Koordinaten der Blitzer auf der berechneten Strecke
+
+Blitzer stammen aus OpenStreetMap-Einträgen mit `highway=speed_camera`, abgefragt über Overpass. Die App verwirft Treffer, die nicht in einem etwa 120-Meter-Korridor um die tatsächlich gewählte Route liegen. Die Daten sind Community-Daten und können unvollständig oder veraltet sein.
+
+## Kalenderauswahl
+
+Ziel- und Quellkalender werden in getrennten Popups gewählt. Der Zielkalender ist ein einzelner Kalender. Quellkalender können mehrfach ausgewählt werden.
+
+Der Termin-Picker und die automatische Verarbeitung lesen ausschließlich Termine aus den ausgewählten Quellkalendern. Andere Kalender werden ignoriert.
+
+## Einstellungen und Eingaben
+
+Einstellungen werden automatisch gespeichert. Text- und Zahlenfelder verwenden einen lokalen Entwurfszustand, damit Inhalte vollständig gelöscht und neu eingegeben werden können, ohne dass ein älterer gespeicherter Wert während der Eingabe wieder erscheint.
+
+Terminzeit und automatische Verarbeitungszeit werden über native Date-/Time-Picker gewählt.
+
