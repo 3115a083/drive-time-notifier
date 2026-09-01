@@ -80,8 +80,9 @@ class MainActivity : ComponentActivity() {
 
         val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
-        LaunchedEffect(settings.homeAddress) {
+        LaunchedEffect(settings.homeAddress, settings.automaticEnabled, settings.autoHour) {
             if (origin.isBlank() && settings.homeAddress.isNotBlank()) origin = settings.homeAddress
+            AutomationScheduler.configure(context, settings.automaticEnabled, settings.autoHour)
         }
 
         fun hasCalendarPermission() =
@@ -204,7 +205,7 @@ class MainActivity : ComponentActivity() {
                                                 estimate = route
                                                 plannedStart = p.departureMillis
                                                 plannedEnd = p.arrivalMillis
-                                                planWarning = listOfNotNull(p.warning, route.warning).joinToString(" ") .ifBlank { null }
+                                                planWarning = listOfNotNull(p.warning, route.warning).joinToString(" ").ifBlank { null }
                                             }.onFailure { error = it.message ?: "Berechnung fehlgeschlagen." }
                                             loading = false
                                         }
