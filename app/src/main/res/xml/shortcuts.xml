@@ -1,0 +1,14 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="process_next_day"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:shortcutShortLabel="@string/shortcut_process_next_day_short"
+        android:shortcutLongLabel="@string/shortcut_process_next_day_long">
+        <intent
+            android:action="de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY"
+            android:targetPackage="de.drivetime.notifier"
+            android:targetClass="de.drivetime.notifier.MainActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+</shortcuts>
