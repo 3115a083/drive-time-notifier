@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import de.drivetime.notifier.automation.AutomationReceiver
 import de.drivetime.notifier.automation.AutomationScheduler
 import de.drivetime.notifier.calendar.CalendarInfo
 import de.drivetime.notifier.calendar.CalendarRepository
@@ -30,14 +31,14 @@ import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.CalendarEventRef
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
-import de.drivetime.notifier.routing.GoogleRoutesClient
-import de.drivetime.notifier.routing.PolylineDecoder
+import de.drivetime.notifier.routing.*
 import de.drivetime.notifier.security.AutomationTokenStore
 import de.drivetime.notifier.security.SecureApiKeyStore
 import de.drivetime.notifier.ui.DriveTimeTheme
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -47,11 +48,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Configuration.getInstance().userAgentValue = packageName
-        setContent {
-            DriveTimeTheme {
-                DriveTimeScreen(intent)
-            }
-        }
+        if (intent.action == AutomationReceiver.ACTION_PROCESS_NEXT_DAY) AutomationScheduler.runNow(this)
+        setContent { DriveTimeTheme { DriveTimeScreen(intent) } }
     }
 
     @Composable
@@ -65,13 +63,12 @@ class MainActivity : ComponentActivity() {
         var origin by remember { mutableStateOf(initialIntent.getStringExtra("origin").orEmpty()) }
         var destination by remember { mutableStateOf(initialIntent.getStringExtra("destination").orEmpty()) }
         var dateTime by remember {
-            mutableStateOf(
-                initialIntent.getStringExtra("datetime")
-                    ?: LocalDateTime.now().plusHours(1).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
-            )
+            mutableStateOf(initialIntent.getStringExtra("datetime")
+                ?: LocalDateTime.now().plusHours(1).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
         }
-        var previousEndMillis by remember { mutableStateOf<Long?>(null) }
+        var previousEndMillis by remember { mutableStateOf<Long?>(initialIntent.getLongExtra("previous_end_millis", -1L).takeIf { it > 0 }) }
         var estimate by remember { mutableStateOf<RouteEstimate?>(null) }
+        var pois by remember { mutableStateOf<List<RoutePoi>>(emptyList()) }
         var planWarning by remember { mutableStateOf<String?>(null) }
         var plannedStart by remember { mutableStateOf<Long?>(null) }
         var plannedEnd by remember { mutableStateOf<Long?>(null) }
@@ -79,18 +76,30 @@ class MainActivity : ComponentActivity() {
         var loading by remember { mutableStateOf(false) }
         var events by remember { mutableStateOf<List<CalendarEventRef>>(emptyList()) }
         var showEvents by remember { mutableStateOf(false) }
+        var pickingStart by remember { mutableStateOf(false) }
 
-        val permissionLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.RequestMultiplePermissions()
-        ) {}
+        val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
-        LaunchedEffect(Unit) {
-            if (origin.isBlank()) origin = settings.homeAddress
+        LaunchedEffect(settings.homeAddress) {
+            if (origin.isBlank() && settings.homeAddress.isNotBlank()) origin = settings.homeAddress
         }
 
         fun hasCalendarPermission() =
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+
+        fun openEventPicker(forStart: Boolean) {
+            if (!hasCalendarPermission()) {
+                permissionLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
+                return
+            }
+            pickingStart = forStart
+            lifecycleScope.launch {
+                val now = System.currentTimeMillis()
+                events = calendarRepo.events(now - 24L * 60 * 60 * 1000, now + 14L * 24 * 60 * 60 * 1000)
+                showEvents = true
+            }
+        }
 
         Scaffold(
             topBar = {
@@ -136,44 +145,30 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("Fahrt planen", style = MaterialTheme.typography.titleLarge)
                             OutlinedTextField(
-                                value = origin,
-                                onValueChange = { origin = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Start") },
-                                leadingIcon = { Icon(Icons.Outlined.MyLocation, null) },
-                                singleLine = true
+                                value = origin, onValueChange = { origin = it },
+                                modifier = Modifier.fillMaxWidth(), label = { Text("Start") },
+                                leadingIcon = { Icon(Icons.Outlined.MyLocation, null) }, singleLine = true
+                            )
+                            FilledTonalButton(onClick = { openEventPicker(true) }) {
+                                Icon(Icons.Outlined.EventRepeat, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Start aus Kalenderevent")
+                            }
+                            OutlinedTextField(
+                                value = destination, onValueChange = { destination = it },
+                                modifier = Modifier.fillMaxWidth(), label = { Text("Ziel") },
+                                leadingIcon = { Icon(Icons.Outlined.Place, null) }, singleLine = true
                             )
                             OutlinedTextField(
-                                value = destination,
-                                onValueChange = { destination = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Ziel") },
-                                leadingIcon = { Icon(Icons.Outlined.Place, null) },
-                                singleLine = true
-                            )
-                            OutlinedTextField(
-                                value = dateTime,
-                                onValueChange = { dateTime = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Terminzeit, yyyy-MM-dd HH:mm") },
-                                leadingIcon = { Icon(Icons.Outlined.Schedule, null) },
-                                singleLine = true
+                                value = dateTime, onValueChange = { dateTime = it },
+                                modifier = Modifier.fillMaxWidth(), label = { Text("Terminzeit, yyyy-MM-dd HH:mm") },
+                                leadingIcon = { Icon(Icons.Outlined.Schedule, null) }, singleLine = true
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                FilledTonalButton(onClick = {
-                                    if (!hasCalendarPermission()) {
-                                        permissionLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
-                                    } else {
-                                        lifecycleScope.launch {
-                                            val now = System.currentTimeMillis()
-                                            events = calendarRepo.events(now, now + 14L * 24 * 60 * 60 * 1000)
-                                            showEvents = true
-                                        }
-                                    }
-                                }) {
+                                FilledTonalButton(onClick = { openEventPicker(false) }) {
                                     Icon(Icons.Outlined.Event, null)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Kalender")
+                                    Text("Zieltermin")
                                 }
                                 Button(
                                     onClick = {
@@ -183,12 +178,14 @@ class MainActivity : ComponentActivity() {
                                             runCatching {
                                                 val target = LocalDateTime.parse(dateTime, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
                                                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                                                val r = GoogleRoutesClient().route(
+                                                val route = GoogleRoutesClient().route(
                                                     RouteRequest(origin.trim(), destination.trim(), target),
                                                     keyStore.read().orEmpty()
                                                 )
-                                                val p = DrivePlanner.plan(target, r.durationSeconds, settings.bufferMinutes, previousEndMillis)
-                                                estimate = r
+                                                val p = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
+                                                val points = PolylineDecoder.decode(route.encodedPolyline)
+                                                pois = OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                                                estimate = route
                                                 plannedStart = p.departureMillis
                                                 plannedEnd = p.arrivalMillis
                                                 planWarning = p.warning
@@ -207,8 +204,8 @@ class MainActivity : ComponentActivity() {
                     }
 
                     estimate?.let { route ->
-                        RouteMap(route)
-                        SummaryCard(route, planWarning)
+                        RouteMap(route, pois)
+                        SummaryCard(route, pois, planWarning)
                         Button(
                             onClick = {
                                 val start = plannedStart ?: return@Button
@@ -217,13 +214,13 @@ class MainActivity : ComponentActivity() {
                                     runCatching {
                                         if (settings.outputIcs) {
                                             val uri = IcsExporter(context).create(origin, destination, start, end)
-                                            context.startActivity(
+                                            context.startActivity(Intent.createChooser(
                                                 Intent(Intent.ACTION_SEND).apply {
                                                     type = "text/calendar"
                                                     putExtra(Intent.EXTRA_STREAM, uri)
                                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                }
-                                            )
+                                                }, "ICS exportieren"
+                                            ))
                                         } else {
                                             calendarRepo.insertDrive(
                                                 settings.targetCalendarId, origin, destination, start, end, settings.reminderLeadMinutes
@@ -259,18 +256,21 @@ class MainActivity : ComponentActivity() {
             AlertDialog(
                 onDismissRequest = { showEvents = false },
                 confirmButton = {},
-                title = { Text("Kommende Termine") },
+                title = { Text(if (pickingStart) "Starttermin wählen" else "Zieltermin wählen") },
                 text = {
                     Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
                         events.forEach { event ->
                             TextButton(
                                 onClick = {
-                                    destination = event.location
-                                    dateTime = LocalDateTime.ofInstant(
-                                        java.time.Instant.ofEpochMilli(event.startMillis),
-                                        ZoneId.systemDefault()
-                                    ).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
-                                    previousEndMillis = null
+                                    if (pickingStart) {
+                                        origin = event.location
+                                        previousEndMillis = event.endMillis
+                                    } else {
+                                        destination = event.location
+                                        dateTime = LocalDateTime.ofInstant(
+                                            java.time.Instant.ofEpochMilli(event.startMillis), ZoneId.systemDefault()
+                                        ).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                                    }
                                     showEvents = false
                                 },
                                 modifier = Modifier.fillMaxWidth()
@@ -303,16 +303,14 @@ class MainActivity : ComponentActivity() {
                     },
                     style = MaterialTheme.typography.headlineMedium
                 )
-                estimate?.let {
-                    Text("ca. ${it.durationSeconds / 60} min · ${"%.1f".format(it.distanceMeters / 1000.0)} km")
-                }
+                estimate?.let { Text("ca. ${it.durationSeconds / 60} min · ${"%.1f".format(it.distanceMeters / 1000.0)} km") }
                 if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
         }
     }
 
     @Composable
-    private fun SummaryCard(route: RouteEstimate, warning: String?) {
+    private fun SummaryCard(route: RouteEstimate, pois: List<RoutePoi>, warning: String?) {
         Card {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Zusammenfassung", style = MaterialTheme.typography.titleLarge)
@@ -320,27 +318,34 @@ class MainActivity : ComponentActivity() {
                 Text("Normale Fahrzeit: ${route.staticDurationSeconds / 60} Minuten")
                 Text("Verkehrsaufschlag: ${route.trafficDelaySeconds / 60} Minuten")
                 Text("Stauindikator: ${route.trafficProbabilityPercent} %")
+                if (pois.any { it.kind == RoutePoi.Kind.SPEED_CAMERA }) {
+                    Text("Blitzerhinweise: ${pois.count { it.kind == RoutePoi.Kind.SPEED_CAMERA }} OSM-Punkte")
+                }
+                if (pois.any { it.kind == RoutePoi.Kind.PARKING }) {
+                    Text("Parkmöglichkeiten: ${pois.count { it.kind == RoutePoi.Kind.PARKING }} OSM-Einträge im Routenausschnitt")
+                }
                 warning?.let { Text(it, color = MaterialTheme.colorScheme.tertiary) }
             }
         }
     }
 
     @Composable
-    private fun RouteMap(route: RouteEstimate) {
+    private fun RouteMap(route: RouteEstimate, pois: List<RoutePoi>) {
         val points = remember(route.encodedPolyline) { PolylineDecoder.decode(route.encodedPolyline) }
         if (points.isEmpty()) return
         Card(Modifier.fillMaxWidth()) {
             androidx.compose.ui.viewinterop.AndroidView(
                 modifier = Modifier.fillMaxWidth().height(260.dp),
-                factory = { ctx ->
-                    MapView(ctx).apply {
-                        setMultiTouchControls(true)
-                        controller.setZoom(12.0)
-                    }
-                },
+                factory = { ctx -> MapView(ctx).apply { setMultiTouchControls(true); controller.setZoom(12.0) } },
                 update = { map ->
                     map.overlays.clear()
                     map.overlays.add(Polyline().apply { setPoints(points); outlinePaint.strokeWidth = 10f })
+                    pois.forEach { poi ->
+                        map.overlays.add(Marker(map).apply {
+                            position = poi.point
+                            title = if (poi.kind == RoutePoi.Kind.SPEED_CAMERA) "Blitzerhinweis" else "Parkplatz"
+                        })
+                    }
                     map.zoomToBoundingBox(org.osmdroid.util.BoundingBox.fromGeoPoints(points), true, 70)
                     map.invalidate()
                 }
@@ -362,9 +367,7 @@ class MainActivity : ComponentActivity() {
         var calendars by remember { mutableStateOf<List<CalendarInfo>>(emptyList()) }
         val token = remember { AutomationTokenStore(this).token() }
 
-        LaunchedEffect(Unit) {
-            runCatching { calendars = calendarRepo.calendars() }
-        }
+        LaunchedEffect(Unit) { runCatching { calendars = calendarRepo.calendars() } }
 
         Column(
             modifier.padding(horizontal = 18.dp).verticalScroll(rememberScrollState()),
@@ -381,7 +384,7 @@ class MainActivity : ComponentActivity() {
                 calendars.forEach { cal ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("${cal.name} · ${cal.accountName}", modifier = Modifier.weight(1f))
-                        RadioButton(selected = s.targetCalendarId == cal.id, onClick = { s = s.copy(targetCalendarId = cal.id) })
+                        RadioButton(s.targetCalendarId == cal.id, onClick = { s = s.copy(targetCalendarId = cal.id) })
                     }
                 }
                 Text("Quellkalender für Automatik")
@@ -418,12 +421,10 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-        Card {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(title, style = MaterialTheme.typography.titleLarge)
-                content()
-            }
-        }
+        Card { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge)
+            content()
+        } }
     }
 
     @Composable
