@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore("settings")
 
 data class AppSettings(
-    val homeAddress: String = "",
+    val homeAddress: String = "",\n    val savedPlaces: Set<String> = emptySet(),
     val bufferMinutes: Int = 15,
     val reminderLeadMinutes: Int = 0,
     val automaticEnabled: Boolean = false,
@@ -23,7 +23,7 @@ data class AppSettings(
 
 class SettingsStore(private val context: Context) {
     private object K {
-        val HOME = stringPreferencesKey("home_address")
+        val HOME = stringPreferencesKey("home_address")\n        val PLACES = stringSetPreferencesKey("saved_places")
         val BUFFER = intPreferencesKey("buffer_minutes")
         val REMINDER = intPreferencesKey("reminder_lead")
         val AUTO = booleanPreferencesKey("automatic_enabled")
@@ -37,7 +37,7 @@ class SettingsStore(private val context: Context) {
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
         AppSettings(
-            homeAddress = p[K.HOME].orEmpty(),
+            homeAddress = p[K.HOME].orEmpty(),\n            savedPlaces = p[K.PLACES] ?: emptySet(),
             bufferMinutes = p[K.BUFFER] ?: 15,
             reminderLeadMinutes = p[K.REMINDER] ?: 0,
             automaticEnabled = p[K.AUTO] ?: false,
@@ -51,7 +51,7 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun update(s: AppSettings) = context.dataStore.edit { p ->
-        p[K.HOME] = s.homeAddress
+        p[K.HOME] = s.homeAddress\n        p[K.PLACES] = s.savedPlaces
         p[K.BUFFER] = s.bufferMinutes.coerceIn(0, 180)
         p[K.REMINDER] = s.reminderLeadMinutes.coerceIn(0, 180)
         p[K.AUTO] = s.automaticEnabled
