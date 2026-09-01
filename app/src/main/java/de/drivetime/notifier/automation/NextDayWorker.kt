@@ -33,10 +33,7 @@ class NextDayWorker(
             val events = calendar.events(from, to, sourceIds)
             if (events.isEmpty()) return Result.success()
 
-            val apiKey = SecureApiKeyStore(applicationContext).read().orEmpty()
-            if (apiKey.isBlank()) return Result.failure()
-
-            val routes = GoogleRoutesClient()
+            val routes = RoutingServiceFactory.create(applicationContext, settings)
             var origin = settings.homeAddress
             var previousEnd: Long? = null
 
@@ -46,7 +43,7 @@ class NextDayWorker(
                     previousEnd = event.endMillis
                     continue
                 }
-                val estimate = routes.route(RouteRequest(origin, event.location, event.startMillis), apiKey)
+                val estimate = routes.route(RouteRequest(origin, event.location, event.startMillis))
                 val plan = DrivePlanner.plan(
                     destinationStartMillis = event.startMillis,
                     routeDurationSeconds = estimate.durationSeconds,
