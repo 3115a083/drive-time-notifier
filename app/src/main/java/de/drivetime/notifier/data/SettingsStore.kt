@@ -56,7 +56,8 @@ enum class ColorPalette(val id: String, val label: String) {
 
     companion object {
         fun fromId(id: String?): ColorPalette = when (id) {
-            "proton", "aurora" -> VIOLET
+            "proton" -> MATERIAL_YOU
+            "aurora" -> VIOLET
             else -> entries.firstOrNull { it.id == id } ?: MATERIAL_YOU
         }
     }
