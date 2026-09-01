@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Drive Time Notifier</string>
+    <string name="shortcut_process_next_day_short">Fahrten morgen</string>
+    <string name="shortcut_process_next_day_long">Fahrten für morgen berechnen</string>
+</resources>
