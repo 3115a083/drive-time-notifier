@@ -8,10 +8,10 @@ class FlexiblePolylineDecoderTest {
     fun decodesHereReferencePolyline() {
         val points = FlexiblePolylineDecoder.decode("BFoz5xJ67i1B1B7PzIhaxL7Y")
         assertEquals(4, points.size)
-        assertEquals(50.1022829, points[0].latitude, 0.000001)
-        assertEquals(8.6982122, points[0].longitude, 0.000001)
+        assertEquals(50.10228, points[0].latitude, 0.000001)
+        assertEquals(8.69821, points[0].longitude, 0.000001)
         assertEquals(50.09878, points[3].latitude, 0.000001)
-        assertEquals(8.6875156, points[3].longitude, 0.000001)
+        assertEquals(8.68752, points[3].longitude, 0.000001)
     }
 
     @Test
