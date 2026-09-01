@@ -3,8 +3,8 @@
         android:shortcutId="process_next_day"
         android:enabled="true"
         android:icon="@drawable/ic_launcher_foreground"
-        android:shortcutShortLabel="Fahrten morgen"
-        android:shortcutLongLabel="Fahrten für morgen berechnen">
+        android:shortcutShortLabel="@string/shortcut_process_next_day_short"
+        android:shortcutLongLabel="@string/shortcut_process_next_day_long">
         <intent
             android:action="de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY"
             android:targetPackage="de.drivetime.notifier"
