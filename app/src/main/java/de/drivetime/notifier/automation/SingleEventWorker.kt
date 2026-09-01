@@ -24,8 +24,8 @@ class SingleEventWorker(
         val origin = inputData.getString("origin").orEmpty().trim().ifBlank { settings.homeAddress }
         require(origin.isNotBlank() && destination.isNotBlank() && arrival > 0) { "Ungültige Triggerdaten." }
 
-        val apiKey = SecureApiKeyStore(applicationContext).read().orEmpty()
-        val route = GoogleRoutesClient().route(RouteRequest(origin, destination, arrival), apiKey)
+        val route = RoutingServiceFactory.create(applicationContext, settings)
+            .route(RouteRequest(origin, destination, arrival))
         val plan = DrivePlanner.plan(arrival, route.durationSeconds, settings.bufferMinutes, previousEnd)
         if (settings.outputIcs) {
             IcsExporter(applicationContext).saveToDownloads(origin, destination, plan.departureMillis, plan.arrivalMillis)
