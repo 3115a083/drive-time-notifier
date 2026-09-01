@@ -14,15 +14,19 @@ enum class RoutingProvider(
     val displayName: String,
     val reliabilityScore: Int,
     val trafficAware: Boolean,
-    val keyRequired: Boolean
+    val keyRequired: Boolean,
+    val costRisk: Boolean
 ) {
-    GOOGLE("google", "Google Routes", 5, true, true),
-    HERE("here", "HERE Routing", 5, true, true),
-    GRAPHHOPPER("graphhopper", "GraphHopper", 4, false, true),
-    OSRM("osrm", "OSRM + Photon", 3, false, false);
+    VALHALLA("valhalla", "Valhalla", 4, false, false, false),
+    OPENROUTESERVICE("openrouteservice", "openrouteservice", 4, false, true, false),
+    OSRM("osrm", "OSRM", 3, false, false, false),
+    GRAPHHOPPER("graphhopper", "GraphHopper", 4, false, true, false),
+    GOOGLE("google", "Google Routes", 5, true, true, true),
+    HERE("here", "HERE Routing", 5, true, true, true),
+    TOMTOM("tomtom", "TomTom Routing", 5, true, true, true);
 
     companion object {
-        fun fromId(id: String?): RoutingProvider = entries.firstOrNull { it.id == id } ?: GOOGLE
+        fun fromId(id: String?): RoutingProvider = entries.firstOrNull { it.id == id } ?: VALHALLA
     }
 }
 
@@ -41,10 +45,20 @@ enum class AppAppearance(val id: String) {
     }
 }
 
-enum class ColorPalette(val id: String) {
-    PROTON("proton"), OCEAN("ocean"), FOREST("forest"), AURORA("aurora"), SUNSET("sunset"), GRAPHITE("graphite");
+enum class ColorPalette(val id: String, val label: String) {
+    MATERIAL_YOU("material_you", "Material You"),
+    VIOLET("violet", "Violet"),
+    OCEAN("ocean", "Ocean"),
+    FOREST("forest", "Forest"),
+    SUNSET("sunset", "Sunset"),
+    ROSE("rose", "Rose"),
+    GRAPHITE("graphite", "Graphite");
+
     companion object {
-        fun fromId(id: String?): ColorPalette = entries.firstOrNull { it.id == id } ?: PROTON
+        fun fromId(id: String?): ColorPalette = when (id) {
+            "proton", "aurora" -> VIOLET
+            else -> entries.firstOrNull { it.id == id } ?: MATERIAL_YOU
+        }
     }
 }
 
