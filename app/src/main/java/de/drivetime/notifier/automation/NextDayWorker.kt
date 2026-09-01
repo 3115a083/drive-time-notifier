@@ -4,12 +4,14 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import de.drivetime.notifier.calendar.CalendarRepository
+import de.drivetime.notifier.calendar.DriveEventDescriptionBuilder
 import de.drivetime.notifier.core.DrivePlanner
 import de.drivetime.notifier.data.SettingsStore
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.routing.OsmEnrichmentClient
+import de.drivetime.notifier.routing.PolylineDecoder
 import de.drivetime.notifier.routing.RoutingServiceFactory
-import de.drivetime.notifier.security.SecureApiKeyStore
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import java.time.ZoneId
@@ -50,6 +52,18 @@ class NextDayWorker(
                     requestedBufferMinutes = settings.bufferMinutes,
                     previousEventEndMillis = previousEnd
                 )
+                val pois = if (settings.showSpeedCameras || settings.showParking) {
+                    val points = PolylineDecoder.decode(estimate.encodedPolyline)
+                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                } else emptyList()
+                val description = DriveEventDescriptionBuilder.build(
+                    settings.language,
+                    settings.routingProvider,
+                    origin,
+                    event.location,
+                    estimate,
+                    pois
+                )
 
                 if (settings.outputIcs) {
                     IcsExporter(applicationContext).saveToDownloads(
@@ -62,7 +76,8 @@ class NextDayWorker(
                         event.location,
                         plan.departureMillis,
                         plan.arrivalMillis,
-                        settings.reminderLeadMinutes
+                        settings.reminderLeadMinutes,
+                        description
                     )
                 }
                 origin = event.location

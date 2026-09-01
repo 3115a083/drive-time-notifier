@@ -11,18 +11,18 @@ import java.util.concurrent.TimeUnit
 object AutomationScheduler {
     private const val NAME = "nightly-drive-planning"
 
-    fun configure(context: Context, enabled: Boolean, hour: Int = 21) {
+    fun configure(context: Context, enabled: Boolean, hour: Int = 21, minute: Int = 0) {
         setRescheduleReceiverEnabled(context, enabled)
         if (!enabled) {
             WorkManager.getInstance(context).cancelUniqueWork(NAME)
             return
         }
-        schedule(context, hour)
+        schedule(context, hour, minute)
     }
 
-    private fun schedule(context: Context, hour: Int) {
+    private fun schedule(context: Context, hour: Int, minute: Int) {
         val now = ZonedDateTime.now()
-        var next = now.withHour(hour.coerceIn(0, 23)).withMinute(0).withSecond(0).withNano(0)
+        var next = now.withHour(hour.coerceIn(0, 23)).withMinute(minute.coerceIn(0, 59)).withSecond(0).withNano(0)
         if (!next.isAfter(now)) next = next.plusDays(1)
         val delay = Duration.between(now, next).toMillis()
 

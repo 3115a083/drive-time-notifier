@@ -68,7 +68,11 @@ class GoogleRoutesClient(
                 durationSeconds = seconds(route.getString("duration")),
                 staticDurationSeconds = seconds(route.optString("staticDuration", route.getString("duration"))),
                 distanceMeters = route.optLong("distanceMeters", 0),
-                encodedPolyline = route.getJSONObject("polyline").getString("encodedPolyline")
+                encodedPolyline = route.getJSONObject("polyline").getString("encodedPolyline"),
+                originLatitude = origin.first,
+                originLongitude = origin.second,
+                destinationLatitude = destination.first,
+                destinationLongitude = destination.second
             )
         }
     }

@@ -15,7 +15,7 @@ class RescheduleReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val settings = SettingsStore(context).flow.first()
-                AutomationScheduler.configure(context, settings.automaticEnabled, settings.autoHour)
+                AutomationScheduler.configure(context, settings.automaticEnabled, settings.autoHour, settings.autoMinute)
             } finally {
                 pending.finish()
             }
