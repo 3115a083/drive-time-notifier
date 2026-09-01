@@ -49,6 +49,19 @@ fun paletteSpec(palette: ColorPalette): PaletteSpec = when (palette) {
     )
 }
 
+private fun blend(a: Color, b: Color, amount: Float): Color = Color(
+    red = a.red * (1f - amount) + b.red * amount,
+    green = a.green * (1f - amount) + b.green * amount,
+    blue = a.blue * (1f - amount) + b.blue * amount,
+    alpha = 1f
+)
+
+private fun lightContainer(color: Color) = blend(color, Color.White, 0.82f)
+private fun darkContainer(color: Color) = blend(color, Color.Black, 0.58f)
+private fun lightOnContainer(color: Color) = blend(color, Color.Black, 0.42f)
+private fun darkOnContainer(color: Color) = blend(color, Color.White, 0.76f)
+private fun darkAccent(color: Color) = blend(color, Color.White, 0.24f)
+
 @Composable
 fun resolvedDarkMode(appearance: AppAppearance): Boolean = when (appearance) {
     AppAppearance.SYSTEM -> isSystemInDarkTheme()
@@ -71,27 +84,53 @@ fun DriveTimeTheme(
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
 
         dark -> darkColorScheme(
-            primary = p.primary.copy(
-                red = (p.primary.red + 0.16f).coerceAtMost(1f),
-                green = (p.primary.green + 0.16f).coerceAtMost(1f),
-                blue = (p.primary.blue + 0.16f).coerceAtMost(1f)
-            ),
-            secondary = p.secondary,
-            tertiary = p.tertiary,
+            primary = darkAccent(p.primary),
+            onPrimary = Color(0xFF111318),
+            primaryContainer = darkContainer(p.primary),
+            onPrimaryContainer = darkOnContainer(p.primary),
+            secondary = darkAccent(p.secondary),
+            onSecondary = Color(0xFF111318),
+            secondaryContainer = darkContainer(p.secondary),
+            onSecondaryContainer = darkOnContainer(p.secondary),
+            tertiary = darkAccent(p.tertiary),
+            onTertiary = Color(0xFF111318),
+            tertiaryContainer = darkContainer(p.tertiary),
+            onTertiaryContainer = darkOnContainer(p.tertiary),
             background = Color(0xFF111318),
+            onBackground = Color(0xFFE7E8ED),
             surface = Color(0xFF191B21),
+            onSurface = Color(0xFFE7E8ED),
             surfaceVariant = Color(0xFF24272E),
-            outlineVariant = Color(0xFF363A44)
+            onSurfaceVariant = Color(0xFFC3C6CE),
+            outline = Color(0xFF858A95),
+            outlineVariant = Color(0xFF363A44),
+            errorContainer = Color(0xFF5C1D24),
+            onErrorContainer = Color(0xFFFFD9DB)
         )
 
         else -> lightColorScheme(
             primary = p.primary,
+            onPrimary = Color.White,
+            primaryContainer = lightContainer(p.primary),
+            onPrimaryContainer = lightOnContainer(p.primary),
             secondary = p.secondary,
+            onSecondary = Color.White,
+            secondaryContainer = lightContainer(p.secondary),
+            onSecondaryContainer = lightOnContainer(p.secondary),
             tertiary = p.tertiary,
+            onTertiary = Color.White,
+            tertiaryContainer = lightContainer(p.tertiary),
+            onTertiaryContainer = lightOnContainer(p.tertiary),
             background = Color(0xFFF6F7F9),
-            surface = Color(0xFFFFFFFF),
+            onBackground = Color(0xFF1B1D22),
+            surface = Color.White,
+            onSurface = Color(0xFF1B1D22),
             surfaceVariant = Color(0xFFF0F2F5),
-            outlineVariant = Color(0xFFE1E4E9)
+            onSurfaceVariant = Color(0xFF5C6069),
+            outline = Color(0xFF777C86),
+            outlineVariant = Color(0xFFE1E4E9),
+            errorContainer = Color(0xFFFFDAD6),
+            onErrorContainer = Color(0xFF410002)
         )
     }
 
