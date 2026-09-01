@@ -122,7 +122,7 @@ class MainActivity : ComponentActivity() {
                     onSave = {
                         lifecycleScope.launch {
                             settingsStore.update(it)
-                            AutomationScheduler.schedule(context, it.autoHour)
+                            AutomationScheduler.configure(context, it.automaticEnabled, it.autoHour)
                         }
                         showSettings = false
                     },
@@ -195,9 +195,8 @@ class MainActivity : ComponentActivity() {
                                             runCatching {
                                                 val target = LocalDateTime.parse(dateTime, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
                                                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                                                val route = GoogleRoutesClient().route(
-                                                    RouteRequest(origin.trim(), destination.trim(), target),
-                                                    keyStore.read().orEmpty()
+                                                val route = RoutingServiceFactory.create(context, settings).route(
+                                                    RouteRequest(origin.trim(), destination.trim(), target)
                                                 )
                                                 val p = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
                                                 val points = PolylineDecoder.decode(route.encodedPolyline)
@@ -205,7 +204,7 @@ class MainActivity : ComponentActivity() {
                                                 estimate = route
                                                 plannedStart = p.departureMillis
                                                 plannedEnd = p.arrivalMillis
-                                                planWarning = p.warning
+                                                planWarning = listOfNotNull(p.warning, route.warning).joinToString(" ") .ifBlank { null }
                                             }.onFailure { error = it.message ?: "Berechnung fehlgeschlagen." }
                                             loading = false
                                         }
@@ -433,8 +432,46 @@ class MainActivity : ComponentActivity() {
                 SwitchRow("Parkplätze anzeigen", s.showParking) { s = s.copy(showParking = it) }
             }
             SettingsCard("Routing & Sicherheit") {
-                OutlinedTextField(apiKey, { apiKey = it }, label = { Text("Google Routes/Geocoding API-Key") }, modifier = Modifier.fillMaxWidth())
-                Text("Der Schlüssel wird mit Android Keystore verschlüsselt gespeichert.", style = MaterialTheme.typography.bodySmall)
+                Text("Routingdienst", style = MaterialTheme.typography.labelLarge)
+                de.drivetime.notifier.data.RoutingProvider.entries.forEach { provider ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text(provider.label)
+                            if (provider == de.drivetime.notifier.data.RoutingProvider.OSRM) {
+                                Text("Open Source. Keine prognostizierten Staus im öffentlichen Standarddienst.", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        RadioButton(
+                            selected = s.routingProvider == provider,
+                            onClick = { s = s.copy(routingProvider = provider) }
+                        )
+                    }
+                }
+
+                if (s.routingProvider == de.drivetime.notifier.data.RoutingProvider.GOOGLE) {
+                    OutlinedTextField(
+                        apiKey,
+                        { apiKey = it },
+                        label = { Text("Google Routes/Geocoding API-Key") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Der Schlüssel wird mit Android Keystore verschlüsselt gespeichert.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    OutlinedTextField(
+                        s.osrmBaseUrl,
+                        { s = s.copy(osrmBaseUrl = it) },
+                        label = { Text("OSRM HTTPS-Endpunkt") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        s.nominatimBaseUrl,
+                        { s = s.copy(nominatimBaseUrl = it) },
+                        label = { Text("Nominatim HTTPS-Endpunkt") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Standardmäßig werden die öffentlichen OSRM- und Nominatim-Dienste verwendet. Eigene Instanzen können eingetragen werden.", style = MaterialTheme.typography.bodySmall)
+                }
+
                 Text("Tasker-Token", style = MaterialTheme.typography.labelLarge)
                 Text(token, style = MaterialTheme.typography.bodySmall)
             }
