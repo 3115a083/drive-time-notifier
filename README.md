@@ -356,3 +356,61 @@ Einstellungen werden automatisch gespeichert. Text- und Zahlenfelder verwenden e
 
 Terminzeit und automatische Verarbeitungszeit werden über native Date-/Time-Picker gewählt.
 
+
+
+## Routinganbieter ab v3
+
+Neue Installationen verwenden standardmäßig **Valhalla**, da kein API-Key erforderlich ist und der öffentliche FOSSGIS-Demo-Endpunkt kostenlos nutzbar ist. Der öffentliche Dienst unterliegt Fair Use und Rate Limits und ist nicht für große kommerzielle Lasten gedacht.
+
+Weitere Anbieter:
+
+- **openrouteservice**: kostenloser API-Zugang mit Key und Quoten, OSM-basiert
+- **OSRM**: kostenloser öffentlicher Fair-Use-Dienst, statische Fahrzeiten
+- **GraphHopper**: Free-Tarif mit derzeit 500 Credits pro Tag
+- **Google Routes**: sehr gute prognostische Verkehrsdaten, potenziell kostenpflichtig
+- **HERE Routing**: zeitabhängige Live-/historische Verkehrsdaten, potenziell kostenpflichtig
+- **TomTom Routing**: Live- und historische Verkehrsdaten, kostenlose Evaluation und potenziell kostenpflichtige Nutzung
+
+Anbieter, bei denen je nach Tarif Kosten entstehen können, werden in der App mit **$** markiert.
+
+Die App besitzt weiterhin ein lokales tägliches Anfrage-Limit pro Routinganbieter. Dieses Limit ist ein lokaler Schutzmechanismus und kein Abrechnungszähler des Anbieters.
+
+## Adresssuche
+
+Autocomplete und die Umwandlung von Adressen in Koordinaten sind vom Routingdienst getrennt. Dafür verwendet die App **Photon**.
+
+Die Suche startet nur, wenn ein Adressfeld fokussiert ist und der Nutzer den Inhalt tatsächlich bearbeitet. Bereits gespeicherte oder automatisch eingesetzte Adressen lösen keine Suche aus.
+
+Treffer aus dem Land der aktuellen Geräte-Locale werden zuerst abgefragt. Danach werden bei Bedarf globale Treffer ergänzt.
+
+Die Photon-Suche wird nicht auf die Routing-Anfrage-Caps angerechnet.
+
+## Material You und Farbpaletten
+
+Die Farbpaletten heißen neutral:
+
+- Material You
+- Violet
+- Ocean
+- Forest
+- Sunset
+- Rose
+- Graphite
+
+Unter Android 12 und neuer verwendet **Material You** die dynamischen Systemfarben des Geräts. Die anderen Paletten färben Primär-, Sekundär-, Tertiär- und Hero-Flächen jeweils konsistent mit ihrer eigenen Farbfamilie.
+
+## Stabilität der Routenanzeige
+
+Die Routenberechnung hat feste Netzwerk-Timeouts. Die Kartenansicht validiert die Route vor dem Rendern und fängt Fehler des nativen MapView ab. Das Zoomen auf die Route erfolgt erst nach dem Layout der Karte.
+
+## Zurück-Navigation
+
+- In den Einstellungen führt Zurück zur Hauptansicht.
+- Auf der Hauptansicht zeigt der erste Druck einen Hinweis.
+- Ein zweiter Druck innerhalb kurzer Zeit beendet die App.
+
+## Blitzer.de
+
+Blitzer.de wird nicht als Datenquelle eingebunden, solange keine offiziell dokumentierte und lizenzierte Entwickler-API verfügbar ist. Die öffentlich einsehbaren Nutzungsbedingungen räumen nur eine eingeschränkte Nutzungslizenz für die eigenen Dienste ein und schützen die Datenbankinhalte.
+
+Die App nutzt daher weiterhin OpenStreetMap/Overpass für `highway=speed_camera` und filtert Treffer auf die tatsächlich gewählte Route.
