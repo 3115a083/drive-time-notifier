@@ -149,6 +149,23 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxWidth(), label = { Text("Start") },
                                 leadingIcon = { Icon(Icons.Outlined.MyLocation, null) }, singleLine = true
                             )
+                            if (settings.savedPlaces.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("Gespeicherte Startpunkte", style = MaterialTheme.typography.labelLarge)
+                                    settings.savedPlaces.sorted().forEach { raw ->
+                                        val parts = raw.split("|", limit = 2)
+                                        val name = parts.firstOrNull()?.trim().orEmpty()
+                                        val address = parts.getOrNull(1)?.trim().orEmpty()
+                                        if (address.isNotBlank()) {
+                                            AssistChip(
+                                                onClick = { origin = address; previousEndMillis = null },
+                                                label = { Text(name.ifBlank { address }) },
+                                                leadingIcon = { Icon(Icons.Outlined.HomeWork, null) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             FilledTonalButton(onClick = { openEventPicker(true) }) {
                                 Icon(Icons.Outlined.EventRepeat, null)
                                 Spacer(Modifier.width(8.dp))
@@ -365,6 +382,7 @@ class MainActivity : ComponentActivity() {
         var s by remember(initial) { mutableStateOf(initial) }
         var apiKey by remember { mutableStateOf(keyStore.read().orEmpty()) }
         var calendars by remember { mutableStateOf<List<CalendarInfo>>(emptyList()) }
+        var savedPlacesText by remember(initial.savedPlaces) { mutableStateOf(initial.savedPlaces.sorted().joinToString("\n")) }
         val token = remember { AutomationTokenStore(this).token() }
 
         LaunchedEffect(Unit) { runCatching { calendars = calendarRepo.calendars() } }
@@ -376,6 +394,14 @@ class MainActivity : ComponentActivity() {
             Text("Einstellungen", style = MaterialTheme.typography.headlineSmall)
             SettingsCard("Start & Planung") {
                 OutlinedTextField(s.homeAddress, { s = s.copy(homeAddress = it) }, label = { Text("Standard-Startort") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    savedPlacesText,
+                    { savedPlacesText = it },
+                    label = { Text("Weitere Startpunkte, Name | Adresse") },
+                    supportingText = { Text("Eine Zeile pro Startpunkt, z. B. Büro | Musterstraße 1, Berlin") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
                 OutlinedTextField(s.bufferMinutes.toString(), { s = s.copy(bufferMinutes = it.toIntOrNull() ?: 0) }, label = { Text("Puffer in Minuten") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(s.reminderLeadMinutes.toString(), { s = s.copy(reminderLeadMinutes = it.toIntOrNull() ?: 0) }, label = { Text("Erinnerung vor Abfahrt in Minuten") }, modifier = Modifier.fillMaxWidth())
             }
@@ -412,7 +438,14 @@ class MainActivity : ComponentActivity() {
                 Text("Tasker-Token", style = MaterialTheme.typography.labelLarge)
                 Text(token, style = MaterialTheme.typography.bodySmall)
             }
-            Button(onClick = { keyStore.save(apiKey.trim()); onSave(s) }, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = {
+                keyStore.save(apiKey.trim())
+                val places = savedPlacesText.lineSequence()
+                    .map { it.trim() }
+                    .filter { it.contains("|") && it.substringAfter("|").isNotBlank() }
+                    .toSet()
+                onSave(s.copy(savedPlaces = places))
+            }, modifier = Modifier.fillMaxWidth()) {
                 Text("Einstellungen speichern")
             }
             Spacer(Modifier.height(24.dp))
