@@ -3,6 +3,9 @@ package de.drivetime.notifier.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -58,7 +61,7 @@ fun AddressAutocompleteField(
                         suggestions = emptyList()
                         onValueChange("")
                     }) {
-                        Icon(androidx.compose.material.icons.Icons.Outlined.Close, contentDescription = tr(settings.language, "Clear", "Löschen"))
+                        Icon(Icons.Outlined.Close, contentDescription = tr(settings.language, "Clear", "Löschen"))
                     }
                 }
             },
@@ -85,7 +88,7 @@ fun AddressAutocompleteField(
                                 .padding(horizontal = 16.dp, vertical = 13.dp)
                         ) {
                             androidx.compose.material3.Icon(
-                                androidx.compose.material.icons.Icons.Outlined.LocationOn,
+                                Icons.Outlined.LocationOn,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
                             )
