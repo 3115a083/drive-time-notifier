@@ -11,6 +11,8 @@ object FlexiblePolylineDecoder {
 
     fun decode(encoded: String): List<GeoPoint> {
         var index = 0
+        val version = decodeUnsigned(encoded, index).also { index = it.second }.first
+        require(version == 1L) { "Unsupported flexible polyline version." }
         val header = decodeUnsigned(encoded, index).also { index = it.second }.first
         val precision = (header and 15).toInt()
         val thirdDim = ((header shr 4) and 7).toInt()
