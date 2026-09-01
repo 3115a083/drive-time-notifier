@@ -75,7 +75,7 @@ class UnifiedRoutingService(
             .header("X-Client-Id", context.packageName)
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
-        client.newCall(request).execute().use { response ->
+        return client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("Valhalla: HTTP ${response.code}")
             val trip = JSONObject(text).getJSONObject("trip")
@@ -112,7 +112,7 @@ class UnifiedRoutingService(
             .header("Authorization", key)
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
-        client.newCall(request).execute().use { response ->
+        return client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("openrouteservice: HTTP ${response.code}")
             val feature = JSONObject(text).getJSONArray("features").getJSONObject(0)
@@ -138,7 +138,7 @@ class UnifiedRoutingService(
             .addQueryParameter("overview", "full")
             .addQueryParameter("geometries", "polyline")
             .build()
-        client.newCall(Request.Builder().url(url).header("User-Agent", context.packageName).get().build()).execute().use { response ->
+        return client.newCall(Request.Builder().url(url).header("User-Agent", context.packageName).get().build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("OSRM: HTTP ${response.code}")
             val root = JSONObject(body)
@@ -162,7 +162,7 @@ class UnifiedRoutingService(
             .addQueryParameter("points_encoded", "true")
             .addQueryParameter("instructions", "false")
             .addQueryParameter("key", key).build()
-        client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+        return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("GraphHopper: HTTP ${response.code}")
             val route = JSONObject(body).getJSONArray("paths").getJSONObject(0)
@@ -193,7 +193,7 @@ class UnifiedRoutingService(
                 .header("X-Goog-FieldMask", "routes.duration,routes.staticDuration,routes.distanceMeters,routes.polyline.encodedPolyline")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
-            client.newCall(request).execute().use { response ->
+            return client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) error("Google Routes: HTTP ${response.code}")
                 val route = JSONObject(text).getJSONArray("routes").getJSONObject(0)
@@ -218,7 +218,7 @@ class UnifiedRoutingService(
             .addQueryParameter("arrivalTime", Instant.ofEpochMilli(arrival).toString())
             .addQueryParameter("return", "summary,polyline")
             .addQueryParameter("apiKey", key).build()
-        client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+        return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("HERE Routing: HTTP ${response.code}")
             val sections = JSONObject(body).getJSONArray("routes").getJSONObject(0).getJSONArray("sections")
@@ -252,7 +252,7 @@ class UnifiedRoutingService(
             .addQueryParameter("arriveAt", Instant.ofEpochMilli(arrival).toString())
             .addQueryParameter("routeRepresentation", "polyline")
             .build()
-        client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+        return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("TomTom Routing: HTTP ${response.code}")
             val route = JSONObject(body).getJSONArray("routes").getJSONObject(0)
