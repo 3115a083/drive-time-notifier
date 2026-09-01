@@ -27,9 +27,10 @@ class OsrmRoutingService(
         val base = osrmBaseUrl.toHttpUrl()
         require(base.isHttps) { "OSRM-Endpunkt muss HTTPS verwenden." }
 
-        val url = base.newBuilder()
-            .addPathSegments("route/v1/driving")
-            .addPathSegment("${origin.second},${origin.first};${destination.second},${destination.first}")
+        val routePath = "${origin.second},${origin.first};${destination.second},${destination.first}"
+        val url = "${base.toString().removeSuffix("/")}/route/v1/driving/$routePath"
+            .toHttpUrl()
+            .newBuilder()
             .addQueryParameter("overview", "full")
             .addQueryParameter("geometries", "polyline")
             .addQueryParameter("steps", "false")
