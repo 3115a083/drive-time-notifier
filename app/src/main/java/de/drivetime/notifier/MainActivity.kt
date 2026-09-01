@@ -515,9 +515,14 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun HeroCard(settings: AppSettings, estimate: RouteEstimate?, loading: Boolean) {
         val palette = paletteSpec(settings.palette)
+        val heroColors = if (settings.palette == ColorPalette.MATERIAL_YOU) {
+            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)
+        } else {
+            listOf(palette.heroStart, palette.heroEnd)
+        }
         Surface(shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
             Column(
-                Modifier.background(Brush.linearGradient(listOf(palette.heroStart, palette.heroEnd))).padding(24.dp),
+                Modifier.background(Brush.linearGradient(heroColors)).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -675,6 +680,7 @@ class MainActivity : ComponentActivity() {
         var showAddPlace by remember { mutableStateOf(false) }
         var homeDraft by remember { mutableStateOf(settings.homeAddress) }
         var osrmDraft by remember { mutableStateOf(settings.osrmBaseUrl) }
+        var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
         var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
 
         LaunchedEffect(hasCalendarPermission) {
@@ -687,6 +693,10 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(osrmDraft) {
             delay(600)
             if (osrmDraft != settings.osrmBaseUrl) onChange(settings.copy(osrmBaseUrl = osrmDraft))
+        }
+        LaunchedEffect(valhallaDraft) {
+            delay(600)
+            if (valhallaDraft != settings.valhallaBaseUrl) onChange(settings.copy(valhallaBaseUrl = valhallaDraft))
         }
         LaunchedEffect(photonDraft) {
             delay(600)
@@ -916,8 +926,10 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     keyStore = keyStore,
                     osrmDraft = osrmDraft,
+                    valhallaDraft = valhallaDraft,
                     photonDraft = photonDraft,
                     onOsrmDraft = { osrmDraft = it },
+                    onValhallaDraft = { valhallaDraft = it },
                     onPhotonDraft = { photonDraft = it },
                     onOpenUrl = { uriHandler.openUri(it) }
                 )
@@ -1396,7 +1408,7 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.size(14.dp).clip(CircleShape).background(spec.tertiary))
                 }
                 Spacer(Modifier.height(5.dp))
-                Text(palette.name.lowercase().replaceFirstChar { it.titlecase() }, style = MaterialTheme.typography.labelSmall)
+                Text(palette.label, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
