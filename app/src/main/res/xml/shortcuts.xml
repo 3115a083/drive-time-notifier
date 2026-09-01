@@ -9,6 +9,17 @@
             android:action="de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY"
             android:targetPackage="de.drivetime.notifier"
             android:targetClass="de.drivetime.notifier.MainActivity" />
-        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="next_drive"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:shortcutShortLabel="@string/shortcut_next_drive_short"
+        android:shortcutLongLabel="@string/shortcut_next_drive_long">
+        <intent
+            android:action="de.drivetime.notifier.ACTION_NEXT_DRIVE"
+            android:targetPackage="de.drivetime.notifier"
+            android:targetClass="de.drivetime.notifier.MainActivity" />
     </shortcut>
 </shortcuts>
