@@ -1,9 +1,11 @@
 package de.drivetime.notifier.ui
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import de.drivetime.notifier.data.AppAppearance
 import de.drivetime.notifier.data.ColorPalette
@@ -17,29 +19,33 @@ data class PaletteSpec(
 )
 
 fun paletteSpec(palette: ColorPalette): PaletteSpec = when (palette) {
-    ColorPalette.PROTON -> PaletteSpec(
-        Color(0xFF6D4AFF), Color(0xFF9A63FF), Color(0xFF3D7BFF),
-        Color(0xFF5A37F2), Color(0xFF8D58F5)
+    ColorPalette.MATERIAL_YOU -> PaletteSpec(
+        Color(0xFF506082), Color(0xFF687395), Color(0xFF70617E),
+        Color(0xFF4B5D82), Color(0xFF66759D)
+    )
+    ColorPalette.VIOLET -> PaletteSpec(
+        Color(0xFF6558C5), Color(0xFF8174D8), Color(0xFF9C6DB7),
+        Color(0xFF5547B7), Color(0xFF7B69D0)
     )
     ColorPalette.OCEAN -> PaletteSpec(
-        Color(0xFF1267D6), Color(0xFF03A9C8), Color(0xFF4D6BFF),
-        Color(0xFF095BC7), Color(0xFF00A7C4)
+        Color(0xFF1667B7), Color(0xFF168AA4), Color(0xFF3D67C6),
+        Color(0xFF0E5EAA), Color(0xFF168C9C)
     )
     ColorPalette.FOREST -> PaletteSpec(
-        Color(0xFF147D64), Color(0xFF53A451), Color(0xFF0E7C86),
-        Color(0xFF0E6E59), Color(0xFF499747)
-    )
-    ColorPalette.AURORA -> PaletteSpec(
-        Color(0xFF5C55E6), Color(0xFF00A89C), Color(0xFFB54BCD),
-        Color(0xFF4A47CF), Color(0xFF00A18D)
+        Color(0xFF26745E), Color(0xFF5B854B), Color(0xFF2E7279),
+        Color(0xFF1F6854), Color(0xFF58824B)
     )
     ColorPalette.SUNSET -> PaletteSpec(
-        Color(0xFFD85D45), Color(0xFFE58B3B), Color(0xFFB84B8A),
-        Color(0xFFC9485A), Color(0xFFE68A3B)
+        Color(0xFFC75C45), Color(0xFFD7833F), Color(0xFFA95179),
+        Color(0xFFB94D42), Color(0xFFD68240)
+    )
+    ColorPalette.ROSE -> PaletteSpec(
+        Color(0xFFB55474), Color(0xFFD16B7D), Color(0xFF8E5AA8),
+        Color(0xFFA74868), Color(0xFFC8667A)
     )
     ColorPalette.GRAPHITE -> PaletteSpec(
-        Color(0xFF4B5565), Color(0xFF65758B), Color(0xFF766B94),
-        Color(0xFF374151), Color(0xFF667085)
+        Color(0xFF4F5B6C), Color(0xFF6C7889), Color(0xFF71687C),
+        Color(0xFF3D4756), Color(0xFF606C7C)
     )
 }
 
@@ -57,36 +63,44 @@ fun DriveTimeTheme(
     content: @Composable () -> Unit
 ) {
     val dark = resolvedDarkMode(appearance)
+    val context = LocalContext.current
     val p = paletteSpec(palette)
 
-    val colors = if (dark) {
-        darkColorScheme(
-            primary = p.primary.copy(red = (p.primary.red + 0.18f).coerceAtMost(1f), green = (p.primary.green + 0.18f).coerceAtMost(1f), blue = (p.primary.blue + 0.18f).coerceAtMost(1f)),
+    val colors = when {
+        palette == ColorPalette.MATERIAL_YOU && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+
+        dark -> darkColorScheme(
+            primary = p.primary.copy(
+                red = (p.primary.red + 0.16f).coerceAtMost(1f),
+                green = (p.primary.green + 0.16f).coerceAtMost(1f),
+                blue = (p.primary.blue + 0.16f).coerceAtMost(1f)
+            ),
             secondary = p.secondary,
             tertiary = p.tertiary,
-            background = Color(0xFF111217),
-            surface = Color(0xFF191A21),
-            surfaceVariant = Color(0xFF23252E),
-            outlineVariant = Color(0xFF343741)
+            background = Color(0xFF111318),
+            surface = Color(0xFF191B21),
+            surfaceVariant = Color(0xFF24272E),
+            outlineVariant = Color(0xFF363A44)
         )
-    } else {
-        lightColorScheme(
+
+        else -> lightColorScheme(
             primary = p.primary,
             secondary = p.secondary,
             tertiary = p.tertiary,
-            background = Color(0xFFF6F7FB),
+            background = Color(0xFFF6F7F9),
             surface = Color(0xFFFFFFFF),
-            surfaceVariant = Color(0xFFF0F1F6),
-            outlineVariant = Color(0xFFE3E5ED)
+            surfaceVariant = Color(0xFFF0F2F5),
+            outlineVariant = Color(0xFFE1E4E9)
         )
     }
 
     MaterialTheme(
         colorScheme = colors,
         typography = Typography(
-            headlineSmall = MaterialTheme.typography.headlineSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-            headlineMedium = MaterialTheme.typography.headlineMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-            titleLarge = MaterialTheme.typography.titleLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+            headlineSmall = Typography().headlineSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+            headlineMedium = Typography().headlineMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+            titleLarge = Typography().titleLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         ),
         shapes = Shapes(
             extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
