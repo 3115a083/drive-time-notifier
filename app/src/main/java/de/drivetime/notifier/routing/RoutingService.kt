@@ -32,7 +32,7 @@ object RoutingServiceFactory {
         val keys = SecureApiKeyStore(context)
         val budget = RequestBudgetStore(context)
         val cap = settings.providerCaps.forProvider(settings.routingProvider)
-        return when (settings.routingProvider) {
+        val service = when (settings.routingProvider) {
             RoutingProvider.GOOGLE -> GoogleProviderService(
                 apiKey = keys.read(RoutingProvider.GOOGLE).orEmpty(),
                 budget = budget,
@@ -56,5 +56,6 @@ object RoutingServiceFactory {
                 dailyCap = cap
             )
         }
+        return ProviderServices(service, service)
     }
 }
