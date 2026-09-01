@@ -63,23 +63,32 @@ enum class ColorPalette(val id: String, val label: String) {
 }
 
 data class ProviderCaps(
+    val valhalla: Int = 100,
+    val openRouteService: Int = 250,
+    val osrm: Int = 100,
+    val graphHopper: Int = 400,
     val google: Int = 100,
     val here: Int = 100,
-    val graphHopper: Int = 400,
-    val osrm: Int = 100
+    val tomTom: Int = 100
 ) {
     fun forProvider(provider: RoutingProvider): Int = when (provider) {
+        RoutingProvider.VALHALLA -> valhalla
+        RoutingProvider.OPENROUTESERVICE -> openRouteService
+        RoutingProvider.OSRM -> osrm
+        RoutingProvider.GRAPHHOPPER -> graphHopper
         RoutingProvider.GOOGLE -> google
         RoutingProvider.HERE -> here
-        RoutingProvider.GRAPHHOPPER -> graphHopper
-        RoutingProvider.OSRM -> osrm
+        RoutingProvider.TOMTOM -> tomTom
     }
 
     fun withProvider(provider: RoutingProvider, value: Int): ProviderCaps = when (provider) {
+        RoutingProvider.VALHALLA -> copy(valhalla = value)
+        RoutingProvider.OPENROUTESERVICE -> copy(openRouteService = value)
+        RoutingProvider.OSRM -> copy(osrm = value)
+        RoutingProvider.GRAPHHOPPER -> copy(graphHopper = value)
         RoutingProvider.GOOGLE -> copy(google = value)
         RoutingProvider.HERE -> copy(here = value)
-        RoutingProvider.GRAPHHOPPER -> copy(graphHopper = value)
-        RoutingProvider.OSRM -> copy(osrm = value)
+        RoutingProvider.TOMTOM -> copy(tomTom = value)
     }
 }
 
@@ -96,12 +105,13 @@ data class AppSettings(
     val showParking: Boolean = false,
     val targetCalendarId: Long = -1L,
     val sourceCalendarIds: Set<String> = emptySet(),
-    val routingProvider: RoutingProvider = RoutingProvider.GOOGLE,
+    val routingProvider: RoutingProvider = RoutingProvider.VALHALLA,
     val osrmBaseUrl: String = "https://router.project-osrm.org",
+    val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
     val language: AppLanguage = if (Locale.getDefault().language.equals("de", true)) AppLanguage.GERMAN else AppLanguage.ENGLISH,
     val appearance: AppAppearance = AppAppearance.SYSTEM,
-    val palette: ColorPalette = ColorPalette.PROTON,
+    val palette: ColorPalette = ColorPalette.MATERIAL_YOU,
     val providerCaps: ProviderCaps = ProviderCaps()
 )
 
