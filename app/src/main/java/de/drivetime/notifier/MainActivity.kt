@@ -1433,23 +1433,32 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun providerDescription(provider: RoutingProvider, language: AppLanguage): String = when (provider) {
-        RoutingProvider.GOOGLE -> tr(language, "Predictive traffic and closures. Highest request cost potential.", "Prognostischer Verkehr und Sperrungen. Höchstes mögliches Kostenrisiko pro Anfrage.")
-        RoutingProvider.HERE -> tr(language, "Live and historical traffic with time-aware routing.", "Live- und historischer Verkehr mit zeitabhängigem Routing.")
-        RoutingProvider.GRAPHHOPPER -> tr(language, "Fast OSM-based routing and geocoding. No predictive traffic in this integration.", "Schnelles OSM-basiertes Routing und Geocoding. Keine prognostischen Verkehrsdaten in dieser Integration.")
-        RoutingProvider.OSRM -> tr(language, "Open-source OSRM routing plus Photon address search. Static travel-time estimate.", "Open-Source-Routing mit OSRM plus Photon-Adresssuche. Statische Fahrzeitschätzung.")
+        RoutingProvider.VALHALLA -> tr(language, "Free open-source OSM routing on a public fair-use server. Good static ETA, no guaranteed live traffic.", "Kostenloses Open-Source-OSM-Routing auf einem Fair-Use-Server. Gute statische ETA, keine garantierten Live-Verkehrsdaten.")
+        RoutingProvider.OPENROUTESERVICE -> tr(language, "Free API plan with an API key. OSM-based routing, no predictive live traffic in this integration.", "Kostenloser API-Tarif mit API-Key. OSM-basiertes Routing, keine prognostischen Live-Verkehrsdaten in dieser Integration.")
+        RoutingProvider.OSRM -> tr(language, "Very fast open-source OSM routing. Public server is fair-use and provides static travel times.", "Sehr schnelles Open-Source-OSM-Routing. Öffentlicher Server ist Fair-Use und liefert statische Fahrzeiten.")
+        RoutingProvider.GRAPHHOPPER -> tr(language, "Free tier available. Fast OSM-based routing without predictive traffic in this integration.", "Kostenloser Tarif verfügbar. Schnelles OSM-basiertes Routing ohne prognostische Verkehrsdaten in dieser Integration.")
+        RoutingProvider.GOOGLE -> tr(language, "Predictive traffic and closures. Billing can apply beyond included credits.", "Prognostischer Verkehr und Sperrungen. Über enthaltene Guthaben hinaus können Kosten entstehen.")
+        RoutingProvider.HERE -> tr(language, "Time-aware routing with live and historical traffic. Pay-as-you-grow pricing can apply.", "Zeitabhängiges Routing mit Live- und historischen Verkehrsdaten. Pay-as-you-grow-Kosten können anfallen.")
+        RoutingProvider.TOMTOM -> tr(language, "Strong live and historical traffic routing. Free evaluation exists, paid usage can apply.", "Starkes Live- und historisches Verkehrs-Routing. Kostenlose Evaluation vorhanden, bezahlte Nutzung kann anfallen.")
     }
 
     private fun providerLimitInfo(provider: RoutingProvider, language: AppLanguage): String = when (provider) {
-        RoutingProvider.GOOGLE -> tr(language, "Google pricing and quotas depend on enabled Maps APIs. The local cap counts raw requests made by this app.", "Google-Preise und Kontingente hängen von den aktivierten Maps-APIs ab. Das lokale Limit zählt rohe Anfragen dieser App.")
-        RoutingProvider.HERE -> tr(language, "HERE quotas depend on your plan. Requests over quota can return HTTP 429/503.", "HERE-Kontingente hängen vom Tarif ab. Überzogene Kontingente können HTTP 429/503 liefern.")
-        RoutingProvider.GRAPHHOPPER -> tr(language, "GraphHopper Free currently includes 500 credits/day; paid plans have additional per-second and credit limits.", "GraphHopper Free enthält derzeit 500 Credits/Tag; bezahlte Tarife haben zusätzliche Sekunden- und Credit-Limits.")
-        RoutingProvider.OSRM -> tr(language, "Public OSRM/Photon services are fair-use/demo infrastructure with no SLA. Keep the cap conservative or self-host.", "Öffentliche OSRM-/Photon-Dienste sind Fair-Use-/Demo-Infrastruktur ohne SLA. Limit niedrig halten oder selbst hosten.")
+        RoutingProvider.VALHALLA -> tr(language, "Public demo: fair use, about 1 request/second per user. Self-host for heavy use.", "Öffentlicher Demo-Server: Fair Use, etwa 1 Anfrage/Sekunde pro Nutzer. Für hohe Nutzung selbst hosten.")
+        RoutingProvider.OPENROUTESERVICE -> tr(language, "Free API access has quotas. The app uses the current api.heigit.org endpoint and stops at your local daily cap.", "Kostenloser API-Zugang hat Kontingente. Die App nutzt den aktuellen api.heigit.org-Endpunkt und stoppt am lokalen Tageslimit.")
+        RoutingProvider.OSRM -> tr(language, "Public OSRM is fair-use infrastructure without an SLA. Keep the local cap conservative or self-host.", "Öffentliches OSRM ist Fair-Use-Infrastruktur ohne SLA. Lokales Limit niedrig halten oder selbst hosten.")
+        RoutingProvider.GRAPHHOPPER -> tr(language, "Free plan currently includes 500 credits/day. A normal two-point route costs one credit.", "Der Free-Tarif enthält derzeit 500 Credits/Tag. Eine normale Route mit zwei Punkten kostet einen Credit.")
+        RoutingProvider.GOOGLE -> tr(language, "Google Maps Platform pricing depends on enabled APIs. This app applies a local hard cap before requests.", "Google-Maps-Platform-Preise hängen von aktivierten APIs ab. Diese App setzt vor Anfragen ein lokales hartes Limit.")
+        RoutingProvider.HERE -> tr(language, "HERE Base Plan includes free thresholds, then pay-as-you-grow pricing may apply.", "Der HERE Base Plan enthält kostenlose Schwellenwerte, danach können Pay-as-you-grow-Kosten anfallen.")
+        RoutingProvider.TOMTOM -> tr(language, "TomTom offers a limited free evaluation; paid plans remove the daily evaluation limit.", "TomTom bietet eine begrenzte kostenlose Evaluation; bezahlte Tarife entfernen das tägliche Evaluationslimit.")
     }
 
     private fun providerKeyUrl(provider: RoutingProvider): String = when (provider) {
+        RoutingProvider.VALHALLA -> "https://valhalla.github.io/valhalla/"
+        RoutingProvider.OPENROUTESERVICE -> "https://openrouteservice.org/dev/#/signup"
+        RoutingProvider.OSRM -> "https://project-osrm.org/"
+        RoutingProvider.GRAPHHOPPER -> "https://www.graphhopper.com/dashboard/"
         RoutingProvider.GOOGLE -> "https://console.cloud.google.com/google/maps-apis/credentials"
         RoutingProvider.HERE -> "https://platform.here.com/"
-        RoutingProvider.GRAPHHOPPER -> "https://www.graphhopper.com/dashboard/"
-        RoutingProvider.OSRM -> "https://project-osrm.org/"
+        RoutingProvider.TOMTOM -> "https://developer.tomtom.com/"
     }
 }
