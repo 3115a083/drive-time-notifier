@@ -414,3 +414,19 @@ Die Routenberechnung hat feste Netzwerk-Timeouts. Die Kartenansicht validiert di
 Blitzer.de wird nicht als Datenquelle eingebunden, solange keine offiziell dokumentierte und lizenzierte Entwickler-API verfügbar ist. Die öffentlich einsehbaren Nutzungsbedingungen räumen nur eine eingeschränkte Nutzungslizenz für die eigenen Dienste ein und schützen die Datenbankinhalte.
 
 Die App nutzt daher weiterhin OpenStreetMap/Overpass für `highway=speed_camera` und filtert Treffer auf die tatsächlich gewählte Route.
+
+
+## Launcher-Shortcuts
+
+Beim langen Drücken auf das App-Symbol stehen zwei Aktionen zur Verfügung:
+
+- **Fahrten abrufen**: startet die Verarbeitung der Fahrten für den nächsten Tag.
+- **Nächste Fahrt berechnen**: öffnet die App, sucht den nächsten Termin mit Ort ausschließlich in den gewählten Quellkalendern, übernimmt ihn als Ziel und berechnet die Fahrt.
+
+## Schnellwahl für gespeicherte Orte
+
+Der Standard-Standort und alle zusätzlichen gespeicherten Startpunkte werden auf dem Hauptscreen als horizontale Schnellwahl-Chips angeboten. Sie können sowohl als Start als auch als Ziel übernommen werden.
+
+## Farbpaletten
+
+Alte Installationen mit dem früheren internen Palette-Wert `proton` werden nicht mehr automatisch auf Violet gesetzt. Sie wechseln auf Material You. Verzögerte Auto-Save-Felder schreiben eine gerade gewählte Farbpalette nicht mehr mit einem älteren Settings-Snapshot zurück.
