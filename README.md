@@ -194,32 +194,6 @@ Vollständige Prüfung:
 gradle clean test lint assembleDebug assembleRelease
 ```
 
-GitHub Actions führt diesen Prüfpfad automatisch aus.
-
-## Veröffentlichung über GitHub
-
-Der Release-Prozess ist über GitHub Actions automatisiert. Nach dem Merge nach `main` kann unter **Actions → Release APK → Run workflow** entweder nur ein signierter Testbuild oder direkt ein öffentliches Release erstellt werden.
-
-Für ein öffentliches Release muss:
-
-1. die eingegebene Version zur `versionName` in `app/build.gradle.kts` passen,
-2. der Workflow auf `main` laufen,
-3. das GitHub-Environment `release` die vier Signing-Secrets enthalten.
-
-Der Workflow führt Tests und Lint aus, baut die signierte APK, prüft die Signatur mit `apksigner`, erzeugt SHA-256-Prüfsummen und erstellt bei Freigabe automatisch den Tag und das GitHub Release.
-
-Details: [docs/RELEASE.md](docs/RELEASE.md)
-
-## F-Droid
-
-Das Projekt enthält keine proprietären Routing-SDKs. Kommerzielle Routingdienste werden optional über HTTPS-APIs genutzt. Freie Routingalternativen sind vorhanden.
-
-Die vorbereiteten F-Droid-Metadaten deklarieren deshalb `NonFreeNet`. Drittanbieter-Grafiken und deren Herkunft/Lizenzen sind in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) dokumentiert.
-
-Fastlane-Metadaten für Deutsch und Englisch sind vorbereitet. Vor der Einreichung müssen noch reale, anonymisierte Screenshots ergänzt werden.
-
-Details: [docs/F-DROID.md](docs/F-DROID.md)
-
 ## Lizenz
 
 MIT, siehe [LICENSE](LICENSE).
