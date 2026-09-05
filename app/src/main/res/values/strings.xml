@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Drive Time Notifier</string>
-    <string name="shortcut_process_next_day_short">Fahrten abrufen</string>
-    <string name="shortcut_process_next_day_long">Fahrten abrufen</string>
-    <string name="shortcut_next_drive_short">Nächste Fahrt berechnen</string>
-    <string name="shortcut_next_drive_long">Nächste Fahrt berechnen</string>
+    <string name="shortcut_process_next_day_short">Process tomorrow\'s drives</string>
+    <string name="shortcut_process_next_day_long">Process tomorrow\'s drives</string>
+    <string name="shortcut_next_drive_short">Calculate next drive</string>
+    <string name="shortcut_next_drive_long">Calculate next drive</string>
 </resources>

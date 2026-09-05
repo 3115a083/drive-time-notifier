@@ -1,0 +1,38 @@
+AntiFeatures:
+  NonFreeAssets:
+    en-US: Uses small third-party provider marks; licensing and sources are documented upstream.
+    de-DE: Verwendet kleine Drittanbieter-Provider-Marken; Lizenzen und Quellen sind im Upstream dokumentiert.
+  NonFreeNet:
+    en-US: Offers optional TomTom, Google Routes and HERE network services. Free routing alternatives are available.
+    de-DE: Bietet optional TomTom, Google Routes und HERE als Netzwerkdienste an. Freie Routingalternativen sind verfügbar.
+
+Categories:
+  - Navigation
+License: MIT
+AuthorName: 3115a083
+WebSite: https://github.com/3115a083/drive-time-notifier
+SourceCode: https://github.com/3115a083/drive-time-notifier
+IssueTracker: https://github.com/3115a083/drive-time-notifier/issues
+Changelog: https://github.com/3115a083/drive-time-notifier/blob/main/CHANGELOG.md
+
+AutoName: Drive Time Notifier
+
+RepoType: git
+Repo: https://github.com/3115a083/drive-time-notifier
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 1
+    commit: v1.0.0
+    subdir: app
+    gradle:
+      - release
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9].*
+CurrentVersion: 1.0.0
+CurrentVersionCode: 1
+
+MaintainerNotes: |-
+  No proprietary routing SDKs are embedded. Commercial providers are optional HTTPS APIs configured by the user; Valhalla and OSRM are available without API keys on the preset public endpoints.
+  Before submitting this file to fdroiddata, replace Builds.commit with the exact full commit SHA for the v1.0.0 release if required by current fdroid tooling or review.

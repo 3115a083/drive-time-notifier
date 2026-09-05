@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.data.LimitPeriod
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
@@ -17,6 +18,7 @@ class HereProviderService(
     private val apiKey: String,
     private val budget: RequestBudgetStore,
     private val dailyCap: Int,
+    private val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
@@ -25,7 +27,7 @@ class HereProviderService(
 ) : RoutingService, AddressSearchService {
     override suspend fun route(request: RouteRequest): RouteEstimate = withContext(Dispatchers.IO) {
         require(apiKey.isNotBlank()) { "HERE API key is missing." }
-        budget.consume(RoutingProvider.HERE, dailyCap, 3)
+        budget.consume(RoutingProvider.HERE, dailyCap, limitPeriod, 3)
         val origin = geocode(request.origin)
         val destination = geocode(request.destination)
         val url = okhttp3.HttpUrl.Builder()
@@ -75,7 +77,7 @@ class HereProviderService(
 
     override suspend fun suggest(query: String, language: String): List<AddressSuggestion> = withContext(Dispatchers.IO) {
         if (query.trim().length < 3 || apiKey.isBlank()) return@withContext emptyList()
-        budget.consume(RoutingProvider.HERE, dailyCap)
+        budget.consume(RoutingProvider.HERE, dailyCap, limitPeriod)
         val url = okhttp3.HttpUrl.Builder()
             .scheme("https").host("autocomplete.search.hereapi.com")
             .addPathSegments("v1/autocomplete")

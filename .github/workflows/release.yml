@@ -1,0 +1,189 @@
+name: Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without v prefix. Must match app versionName."
+        required: true
+        default: "1.0.0"
+        type: string
+      publish_release:
+        description: "Create vX.Y.Z tag and publish a public GitHub Release"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Resolve and validate release version
+        id: release_meta
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+          MANUAL_PUBLISH: ${{ inputs.publish_release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$MANUAL_VERSION"
+          PUBLISH="${MANUAL_PUBLISH:-false}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $VERSION" >&2
+            exit 1
+          fi
+
+          APP_VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)"
+          APP_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
+
+          test -n "$APP_VERSION"
+          test -n "$APP_CODE"
+
+          if [[ "$APP_VERSION" != "$VERSION" ]]; then
+            echo "Requested version $VERSION does not match app versionName $APP_VERSION" >&2
+            exit 1
+          fi
+
+          if [[ "$PUBLISH" == "true" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Public releases may only be created from main." >&2
+            exit 1
+          fi
+
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$APP_CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+      - name: Restore release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/drive-time-release.jks"
+          chmod 600 "$RUNNER_TEMP/drive-time-release.jks"
+
+      - name: Clean, test and lint
+        run: gradle clean test lint --stacktrace
+
+      - name: Build signed release APK
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/drive-time-release.jks
+          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --stacktrace
+
+      - name: Verify and package release APK
+        id: package
+        env:
+          VERSION: ${{ steps.release_meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_APK="app/build/outputs/apk/release/app-release.apk"
+          RELEASE_APK="$RUNNER_TEMP/drive-time-notifier-$VERSION.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+
+          test -f "$SOURCE_APK"
+          test -x "$APKSIGNER"
+          cp "$SOURCE_APK" "$RELEASE_APK"
+
+          "$APKSIGNER" verify --verbose --print-certs "$RELEASE_APK" | tee "$RUNNER_TEMP/apksigner.txt"
+          (cd "$RUNNER_TEMP" && sha256sum "drive-time-notifier-$VERSION.apk" > SHA256SUMS.txt)
+
+          echo "apk=$RELEASE_APK" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drive-time-notifier-${{ steps.release_meta.outputs.tag }}
+          path: |
+            ${{ steps.package.outputs.apk }}
+            ${{ runner.temp }}/SHA256SUMS.txt
+            ${{ runner.temp }}/apksigner.txt
+          if-no-files-found: error
+
+      - name: Create release tag
+        if: steps.release_meta.outputs.publish == 'true'
+        env:
+          TAG: ${{ steps.release_meta.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Drive Time Notifier $TAG"
+          git push origin "$TAG"
+
+      - name: Publish GitHub Release
+        if: steps.release_meta.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release_meta.outputs.tag }}
+          APK: ${{ steps.package.outputs.apk }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            "$APK" \
+            "$RUNNER_TEMP/SHA256SUMS.txt" \
+            "$RUNNER_TEMP/apksigner.txt" \
+            --verify-tag \
+            --generate-notes \
+            --title "$TAG"
+
+      - name: Release summary
+        shell: bash
+        run: |
+          {
+            echo "### Drive Time Notifier release build"
+            echo "- Version: ${{ steps.release_meta.outputs.version }}"
+            echo "- Version code: ${{ steps.release_meta.outputs.version_code }}"
+            echo "- Tag: ${{ steps.release_meta.outputs.tag }}"
+            echo "- Public release requested: ${{ steps.release_meta.outputs.publish }}"
+          } >> "$GITHUB_STEP_SUMMARY"
