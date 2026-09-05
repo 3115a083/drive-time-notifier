@@ -8,6 +8,18 @@
 
 Drive Time Notifier ist eine native Android-App zur manuellen und automatischen Planung von Autofahrten zu Kalenderterminen. Die App berechnet eine passende Abfahrtszeit, berücksichtigt Puffer und vorherige Termine und kann die Fahrt direkt in einen Android-Kalender eintragen oder als ICS-Datei exportieren.
 
+## Screenshots
+
+<p align="center">
+  <img src="fastlane/metadata/android/de-DE/images/phoneScreenshots/1.png" alt="Hauptansicht" width="30%">
+  <img src="fastlane/metadata/android/de-DE/images/phoneScreenshots/2.png" alt="Adressplanung" width="30%">
+  <img src="fastlane/metadata/android/de-DE/images/phoneScreenshots/3.png" alt="Fahrtergebnis" width="30%">
+</p>
+<p align="center">
+  <img src="fastlane/metadata/android/de-DE/images/phoneScreenshots/4.png" alt="Standorteinstellungen" width="30%">
+  <img src="fastlane/metadata/android/de-DE/images/phoneScreenshots/5.png" alt="Routing-Einstellungen" width="30%">
+</p>
+
 ## Funktionsumfang
 
 - manuelle Fahrtplanung
