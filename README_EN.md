@@ -8,6 +8,17 @@
 
 Drive Time Notifier is a native Android app for manually and automatically planning drives to calendar appointments. It calculates a suitable departure time, considers buffers and previous appointments, and can save the drive directly to an Android calendar or export it as an ICS file.
 
+## Screenshots
+
+<p align="center">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" alt="Main screen" width="30%">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" alt="Drive result" width="30%">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" alt="Calendar settings" width="30%">
+</p>
+<p align="center">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4.png" alt="Settings" width="30%">
+</p>
+
 ## Features
 
 - manual drive planning
