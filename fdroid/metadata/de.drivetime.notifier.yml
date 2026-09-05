@@ -10,7 +10,6 @@ Categories:
   - Navigation
 License: MIT
 AuthorName: 3115a083
-WebSite: https://github.com/3115a083/drive-time-notifier
 SourceCode: https://github.com/3115a083/drive-time-notifier
 IssueTracker: https://github.com/3115a083/drive-time-notifier/issues
 Changelog: https://github.com/3115a083/drive-time-notifier/blob/main/CHANGELOG.md
@@ -23,7 +22,7 @@ Repo: https://github.com/3115a083/drive-time-notifier
 Builds:
   - versionName: 1.0.0
     versionCode: 1
-    commit: v1.0.0
+    commit: c05f631f64c3fb4bbecd10c553172e4aa581ebcb
     subdir: app
     gradle:
       - release
@@ -34,5 +33,5 @@ CurrentVersion: 1.0.0
 CurrentVersionCode: 1
 
 MaintainerNotes: |-
-  No proprietary routing SDKs are embedded. Commercial providers are optional HTTPS APIs configured by the user; Valhalla and OSRM are available without API keys on the preset public endpoints.
-  Before submitting this file to fdroiddata, replace Builds.commit with the exact full commit SHA for the v1.0.0 release if required by current fdroid tooling or review.
+  No proprietary routing SDKs are embedded. Commercial providers are optional HTTPS APIs configured by the user; free/open routing alternatives are available.
+  Provider marks and third-party asset/service notices are documented in THIRD_PARTY_NOTICES.md upstream.
