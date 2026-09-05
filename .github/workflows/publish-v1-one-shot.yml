@@ -1,0 +1,148 @@
+name: Publish v1.0.0
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/publish-v1-one-shot.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Validate version and tag state
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)"
+          APP_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
+          test "$APP_VERSION" = "1.0.0"
+          test "$APP_CODE" = "1"
+          if git rev-parse "v1.0.0" >/dev/null 2>&1; then
+            echo "Tag v1.0.0 already exists." >&2
+            exit 1
+          fi
+
+      - name: Validate release secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+      - name: Restore release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/drive-time-release.jks"
+          chmod 600 "$RUNNER_TEMP/drive-time-release.jks"
+
+      - name: Test and lint
+        run: gradle clean test lint --stacktrace
+
+      - name: Build signed release APK
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/drive-time-release.jks
+          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --stacktrace
+
+      - name: Verify and package APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$APKSIGNER"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/drive-time-notifier-1.0.0.apk"
+          "$APKSIGNER" verify --verbose --print-certs "$RUNNER_TEMP/drive-time-notifier-1.0.0.apk" | tee "$RUNNER_TEMP/apksigner.txt"
+          (cd "$RUNNER_TEMP" && sha256sum drive-time-notifier-1.0.0.apk > SHA256SUMS.txt)
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/RELEASE_NOTES.md" <<'EOF'
+          # Drive Time Notifier 1.0.0
+
+          First public release of Drive Time Notifier for Android.
+
+          ## Highlights
+          - Manual and calendar-based drive planning with calculated departure times.
+          - Multiple routing providers: TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes and HERE Routing v8.
+          - Ordered fallback routing with local daily, weekly or monthly request caps.
+          - Individual API and endpoint self-tests with visual status indicators.
+          - Traffic-aware routing where supported by the selected provider.
+          - Saved start locations and per-calendar start-location assignments for automatic processing.
+          - Exclusion rules including exact text, case-insensitive matching, web links, phone numbers and regular expressions.
+          - Optional parking and speed-camera POIs from OpenStreetMap/Overpass.
+          - Direct calendar output and ICS save/share support.
+          - Automatic next-day processing, retry handling and notifications.
+          - Tasker/MacroDroid-compatible authenticated broadcast automation.
+          - Password-protected encrypted settings and API-key backup for device migration.
+          - German and English UI, Material You, light/dark/system themes and multiple color palettes.
+
+          ## Privacy
+          Drive Time Notifier has no own backend server. Calendar names, accounts, appointment titles and descriptions are not sent to routing providers. External services receive only the location, timing and routing information required for the selected function.
+
+          ## API keys and external services
+          Some routing providers require user-supplied API keys and may impose quotas or charges. Local request caps are a safety mechanism and do not replace provider-side billing or quota controls.
+
+          ## Installation
+          Download `drive-time-notifier-1.0.0.apk` from the Assets section below and install it on Android 8.0 or newer.
+
+          The release also includes `SHA256SUMS.txt` and `apksigner.txt` for integrity and signing-certificate verification.
+
+          ## License
+          MIT. Third-party asset and service notices are documented in `THIRD_PARTY_NOTICES.md` in the source repository.
+          EOF
+
+      - name: Create v1.0.0 tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v1.0.0 -m "Drive Time Notifier 1.0.0"
+          git push origin v1.0.0
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create v1.0.0 \
+            "$RUNNER_TEMP/drive-time-notifier-1.0.0.apk" \
+            "$RUNNER_TEMP/SHA256SUMS.txt" \
+            "$RUNNER_TEMP/apksigner.txt" \
+            --verify-tag \
+            --title "Drive Time Notifier 1.0.0" \
+            --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"
