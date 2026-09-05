@@ -13,9 +13,38 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+    }
+
+    signingConfigs {
+        create("release") {
+            val storePath = System.getenv("RELEASE_STORE_FILE")
+            val storePass = System.getenv("RELEASE_STORE_PASSWORD")
+            val alias = System.getenv("RELEASE_KEY_ALIAS")
+            val keyPass = System.getenv("RELEASE_KEY_PASSWORD")
+
+            if (!storePath.isNullOrBlank() &&
+                !storePass.isNullOrBlank() &&
+                !alias.isNullOrBlank() &&
+                !keyPass.isNullOrBlank()
+            ) {
+                storeFile = file(storePath)
+                storePassword = storePass
+                keyAlias = alias
+                keyPassword = keyPass
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isDebuggable = false
+            isMinifyEnabled = false
+            val cfg = signingConfigs.getByName("release")
+            if (cfg.storeFile != null) signingConfig = cfg
+        }
     }
 
     buildFeatures {

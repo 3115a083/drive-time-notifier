@@ -1,428 +1,231 @@
+<p align="center">
+  <img src="branding/Applogo.png" alt="Drive Time Notifier" width="180">
+</p>
+
 # Drive Time Notifier
 
-Android-App, die Fahrzeiten zu Kalendereinträgen mit Verkehrslage berechnet und die Fahrt als eigenen Kalendereintrag oder als ICS-Datei anlegt.
+[English documentation](README_EN.md)
 
-## Status
+Drive Time Notifier ist eine native Android-App zur manuellen und automatischen Planung von Autofahrten zu Kalenderterminen. Die App berechnet eine passende Abfahrtszeit, berücksichtigt Puffer und vorherige Termine und kann die Fahrt direkt in einen Android-Kalender eintragen oder als ICS-Datei exportieren.
 
-Aktueller Stand: funktionsfähiger Android-MVP in Kotlin und Jetpack Compose.
+## Funktionsumfang
 
-Enthalten sind:
-
-- manueller Start, Ziel und Terminzeit
-- gespeicherter Standard-Startort
-- Zieltermin aus dem Android-Kalender wählen
-- vorherigen Kalendereintrag als temporären Start verwenden
-- auswählbare Routingdienste: Google Routes oder Open-Source-Routing mit OSRM + Photon
-- Karte mit Route auf OpenStreetMap/osmdroid
-- Stauindikator aus Verkehrsdauer gegenüber statischer Fahrzeit
-- optional OSM-Blitzerhinweise und Parkmöglichkeiten
-- anpassbarer Ankunftspuffer
-- automatische Kürzung des Puffers bei eng aufeinanderfolgenden Terminen
-- Warnung bei voraussichtlich nicht erreichbaren Folgeterminen
-- Fahrt als Eintrag in einen frei wählbaren Android-Kalender speichern
-- frei wählbare Erinnerung vor Abfahrt
-- alternativ ICS-Datei erzeugen
-- automatische Verarbeitung der Termine des nächsten Tages, Standard 21:00 Uhr
-- frei wählbare Quellkalender für die Automatik
-- Tasker/Broadcast-Integration mit 256-Bit-Token
-- App-Shortcut zum Auslösen der Verarbeitung des nächsten Tages
-- moderner Proton-inspirierter Material-3-Look mit Light/Dark/System-Modus und sechs Farbpaletten
-- App-Sprache Englisch oder Deutsch; Standard Englisch, außer bei deutscher Systemsprache
-- Android-Keystore für API-Key und Automation-Token
-
-## Architektur
-
-Die App verwendet bewusst Android-Standard-APIs, um OEM-Kalender-Apps möglichst wenig Einfluss auf die Funktion zu geben.
-
-- UI: Jetpack Compose, Material 3
-- Kalender: Android `CalendarContract`
-- Hintergrundjobs: WorkManager
-- Einstellungen: DataStore
-- Geheimnisse: Android Keystore, AES/GCM
-- Routing: Google Routes, HERE Routing, GraphHopper oder Open-Source OSRM + Photon
-- Adressvorschläge: anbieterspezifisch, bei OSRM über Photon statt öffentlichem Photon
-- Karte: osmdroid/OpenStreetMap
-- optionale POIs: OpenStreetMap Overpass API
-- HTTP: OkHttp
-- Export: Android MediaStore und FileProvider
-
-Die App legt Kalendereinträge direkt über den Android Calendar Provider an. Sie verwendet keine Hersteller-Intents von Samsung Calendar, Huawei Calendar oder anderen OEM-Apps. Das reduziert Unterschiede zwischen Kalender-Oberflächen. Die tatsächliche Synchronisation übernimmt weiterhin der auf dem Gerät konfigurierte Calendar Provider.
-
-## Einrichtung
-
-### Voraussetzungen
-
-- Android Studio mit JDK 17
-- Android SDK 35
-- minSdk 26
-- für Google Routing: Google Cloud Projekt mit aktivierter Routes API und Geocoding API
-- für Open-Source-Routing ist kein API-Key erforderlich
-
-Die App enthält keinen fest einkompilierten API-Key. Bei Google trägt der Nutzer den Key in den Einstellungen ein. Er wird lokal mit einem Schlüssel aus dem Android Keystore verschlüsselt. Alternativ kann OSRM mit Photon gewählt werden. Standardmäßig sind öffentliche HTTPS-Endpunkte vorbelegt, eigene selbst gehostete Instanzen können eingetragen werden.
-
-Für Produktionsbetrieb sollte der Google-Key zusätzlich serverseitig auf die wirklich benötigten APIs und ein enges Kontingent beschränkt werden. Ein REST-API-Key in einer Client-App kann trotz Keystore nicht absolut gegen Extraktion auf einem kompromittierten Gerät geschützt werden.
-
-### Build
-
-```bash
-gradle testDebugUnitTest assembleDebug
-```
-
-Alternativ das Projekt in Android Studio öffnen und das `app`-Modul starten.
-
-GitHub Actions baut bei Push und Pull Request automatisch Unit-Tests und eine Debug-APK.
-
-## Bedienung
-
-### Manuelle Fahrt
-
-1. Startadresse eingeben oder den gespeicherten Standard-Start verwenden.
-2. Optional „Start aus Kalenderevent“ wählen. Das Ende dieses Termins wird dann als frühestmöglicher Fahrtbeginn berücksichtigt.
-3. Ziel und Terminzeit manuell eintragen oder „Zieltermin“ wählen.
-4. „Berechnen“ drücken.
-5. Route, Entfernung, Verkehrsdauer, statische Dauer und Stauindikator prüfen.
-6. Fahrt in den gewählten Kalender schreiben oder als ICS exportieren.
-
-Der Titel eines Termins wird bei der manuellen Kalenderauswahl lokal angezeigt. Er wird nicht an Google oder Overpass übertragen.
-
-### Pufferlogik
-
-Der Puffer beschreibt, wie viele Minuten vor Beginn des Zieltermins die Ankunft geplant werden soll.
-
-Wenn zwei Termine mit vollem Puffer nicht erreichbar sind, die direkte Fahrt aber noch möglich ist, verkürzt die App den Puffer automatisch und zeigt einen Hinweis.
-
-Wenn die direkte Fahrt selbst nicht rechtzeitig möglich ist, zeigt die App eine deutliche Warnung. Die erzeugte Fahrt endet trotzdem zum Beginn des zweiten Termins. Dadurch kann sich der Fahrtbeginn mit dem vorherigen Termin überschneiden.
-
-## Routingdienste
-
-In den Einstellungen kann der Routingdienst gewählt werden.
-
-### Google Routes
-
-Google Routes liefert eine zukünftige Verkehrsschätzung. Dafür wird zusätzlich die Google Geocoding API verwendet. Ein API-Key ist erforderlich und wird lokal mit Android Keystore geschützt.
-
-### OSRM + Photon
-
-OSRM und Photon sind Open-Source-Komponenten. Die App kann die vorbelegten öffentlichen HTTPS-Dienste verwenden oder auf eigene Instanzen zeigen. Dabei ist kein Google-Key nötig.
-
-Der öffentliche OSRM-Dienst liefert keine prognostizierten Staus. Deshalb zeigt die App bei OSRM keinen künstlich berechneten Live-Verkehr an und weist ausdrücklich darauf hin. Für produktive oder häufige Nutzung empfiehlt sich eine eigene OSRM-/Photon-Instanz, damit öffentliche Community-Dienste nicht unnötig belastet werden.
-
-## Automatik
-
-In den Einstellungen können Quellkalender, Zielkalender, Uhrzeit und automatischer Modus gewählt werden.
-
-Standardzeit ist 21:00 Uhr.
-
-Für den nächsten Tag:
-
-1. Es werden nur Termine aus den gewählten Quellkalendern betrachtet.
-2. Termine ohne Ort werden ignoriert.
-3. Die erste Fahrt startet am gespeicherten Standard-Startort.
-4. Jede weitere Fahrt startet am Ort des vorherigen Termins.
-5. Ende des vorherigen Termins, Fahrtzeit und Puffer werden gegeneinander geprüft.
-6. Fahrten werden in den Zielkalender geschrieben oder als ICS in `Download/DriveTimeNotifier` gespeichert.
-
-WorkManager wird absichtlich verwendet, weil er Doze, App-Standby, Neustarts und viele OEM-Energiesparmechanismen besser behandelt als ein dauerhaft laufender Dienst. Android garantiert bei periodischer Hintergrundarbeit keine sekundengenaue Ausführung. Die konfigurierte Uhrzeit ist daher ein Zielzeitpunkt, kein Echtzeit-Alarm.
-
-Wenn die Automatik ausgeschaltet ist, existiert kein periodischer WorkManager-Job. Zusätzlich ist der Receiver für Boot-, Zeit- und Zeitzonenänderungen deaktiviert. Die App wacht dann nicht selbstständig für Kalenderprüfungen auf. Sie läuft nur nach manuellem Öffnen oder über einen externen Trigger.
-
-## Kalender und OEM-Kompatibilität
-
-Die Kalenderimplementierung verwendet ausschließlich `CalendarContract.Calendars`, `CalendarContract.Instances`, `CalendarContract.Events` und `CalendarContract.Reminders`.
-
-Das vermeidet Abhängigkeiten von der installierten Kalender-App.
-
-Berücksichtigte Eigenheiten:
-
-- Kalender werden über ihre stabile interne Calendar-ID ausgewählt.
-- nur sichtbare Kalender werden angeboten
-- wiederkehrende Termine werden über `Instances` gelesen
-- Event-IDs werden zusammen mit Instanzzeiten dedupliziert
-- Erinnerungen werden separat über `CalendarContract.Reminders` angelegt
-- fehlgeschlagene Reminder-Erstellung verhindert nicht das Speichern des Events
-- Zeitzone des Events wird explizit gesetzt
-- Termine ohne Ort werden bei automatischer Verarbeitung übersprungen
-
-Auf Geräten mit aggressiven Hersteller-Energiesparregeln kann der Nutzer die App gegebenenfalls von Akkuoptimierungen ausnehmen, falls die nächtliche WorkManager-Ausführung stark verzögert wird.
+- manuelle Fahrtplanung
+- Android-Kalender als Quelle und Ziel
+- Kalendertermin als Start- oder Zielpunkt
+- benannter Standard-Startort
+- zusätzliche gespeicherte Startorte
+- kalenderabhängige Startorte für automatische Verarbeitung
+- frei konfigurierbarer Ankunftspuffer und Erinnerung
+- TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes und HERE Routing v8
+- geordnete Fallback-Routinganbieter
+- lokale tägliche, wöchentliche und monatliche Request-Caps
+- einzelne API-/Endpoint-Selbsttests mit Statusanzeige
+- Verkehrsdaten, soweit vom Provider unterstützt
+- Photon für Adresssuche und Geocoding
+- optionale Parkplätze und Blitzer aus OpenStreetMap/Overpass
+- direkte Kalenderausgabe oder ICS speichern/teilen
+- automatische Verarbeitung des nächsten Tages
+- Retry- und Fehlerbenachrichtigungen
+- Ausschlussregeln inklusive regulärer Ausdrücke
+- Tasker-, MacroDroid- und externe Broadcast-Trigger
+- App-Shortcuts
+- verschlüsselter, passwortgeschützter Gerätewechsel-Export/-Import
+- Deutsch und Englisch
+- Light, Dark und System
+- Material You und mehrere Farbpaletten
 
 ## Datenschutz
 
-Die App hat keinen eigenen Server.
+Die App betreibt keinen eigenen Backend-Server.
 
-Lokal verarbeitet werden:
+Kalendername, Kalenderkonto, Termintitel und Terminbeschreibung werden nicht an Routingserver übertragen. Für externe Berechnungen werden nur die für die jeweilige Funktion benötigten Orts-, Zeit- und Routendaten verwendet.
 
-- Kalender-ID
-- Datum und Uhrzeit
-- Ort
-- Ende des vorherigen Termins
-- Titel ausschließlich zur manuellen Auswahl in der UI
+Je nach aktivierter Funktion können übertragen werden:
 
-Nicht an Routing- oder POI-Dienste gesendet werden:
+- Start- und Zieladresse an Photon zur Geocodierung
+- Koordinaten und benötigte Zeitinformationen an den gewählten Routinganbieter
+- ein geografischer Routenausschnitt an Overpass für optionale POI-Abfragen
 
-- Termintitel
-- Terminbeschreibung
-- Kalendername
-- Konto-/E-Mail-Adresse des Kalenders
+API-Selbsttests verwenden ausschließlich feste Testkoordinaten und keine Kalender- oder gespeicherten Adressdaten.
 
-Bei Google-Routing werden für eine Berechnung gesendet:
+API-Keys werden lokal mit Android-Keystore-gestützter Verschlüsselung gespeichert. Das Repository enthält keine eingebetteten Provider-Schlüssel oder persönliche Konfigurationsdaten.
 
-- Startadresse
-- Zieladresse
-- gewünschte Ankunftszeit
-- daraus geocodierte Start- und Zielkoordinaten
+## Standorte und Kalender
 
-Bei OSRM/Photon werden Start- und Zieladresse an Photon und die daraus gewonnenen Koordinaten an OSRM gesendet. Bei eigenen Instanzen gehen diese Daten ausschließlich an die vom Nutzer eingetragenen Server.
+Der Standard-Startort besteht aus einem Friendly Name und einer Adresse und erscheint als Schnellwahl in der Planung. Bei automatischer Verarbeitung starten alle ausgewählten Quellkalender, die keinem anderen Startort zugeordnet wurden, an diesem Standard-Startort.
 
-Wenn Blitzer oder Parkplätze aktiviert sind, wird ein geografischer Routenausschnitt an die Overpass API gesendet. Diese Abfrage ist standardmäßig deaktiviert.
+Zusätzliche gespeicherte Startorte können einzelnen Quellkalendern zugeordnet werden. Ziel- und Quellkalender werden über Android `CalendarContract` ausgewählt. Die Zielkalender-Auswahl ist für lange Kalenderlisten scrollbar.
 
-## Blitzer und Parkplätze
+Standardtitel für erzeugte Fahrt-Termine:
 
-Die Optionen sind standardmäßig aus.
+- Deutsch: `Deine Fahrt beginnt`
+- Englisch: `Your drive starts`
 
-Blitzer stammen aus OpenStreetMap-Einträgen mit `highway=speed_camera`. Diese Daten können unvollständig, veraltet oder regional rechtlich eingeschränkt sein. Die App behandelt sie deshalb nur als Hinweis und niemals als verlässliche Warnquelle.
+Ein eigener Titel kann in den Einstellungen gesetzt werden.
 
-Parkplätze stammen aus OpenStreetMap-Einträgen mit `amenity=parking` im Routenausschnitt. Eine Belegungs- oder Verfügbarkeitsgarantie gibt es nicht.
+## Ausschlussregeln
 
-## Tasker-Integration
+Die automatische Verarbeitung kann Termine vor jeder Routinganfrage anhand des Terminorts überspringen.
 
-Externe Broadcasts werden nur verarbeitet, wenn das in den Einstellungen angezeigte 256-Bit-Token als Extra `token` mitgesendet wird. Das Token wird verschlüsselt mit Android Keystore gespeichert.
+Unterstützt werden:
 
-### Nächsten Tag verarbeiten
+- exakter Text
+- Text ohne Beachtung der Groß-/Kleinschreibung
+- beliebiger Web-Link
+- beliebige Telefonnummer
+- regulärer Ausdruck
 
-Action:
+Regex-Regeln werden vor dem Speichern validiert.
+
+## Automatische Verarbeitung
+
+Die Automatik ist standardmäßig deaktiviert. Nur wenn sie aktiviert wurde, plant die App periodische Hintergrundarbeit.
+
+Wenn sie deaktiviert ist, läuft die Verarbeitung nur:
+
+- manuell in der App
+- über App-Shortcuts
+- über autorisierte externe Trigger
+
+Automatische Routinganfragen verwenden längere Timeouts. Nach einem Fehler erfolgt ein zweiter Versuch. Schlägt auch dieser fehl, bietet eine Benachrichtigung **Fahrt öffnen** und **Wiederholen** an.
+
+## Routinganbieter und Zugangsdaten
+
+| Anbieter | Verkehr | Zugangsdaten |
+| --- | --- | --- |
+| TomTom | Live- und historische Verkehrsdaten | API-Key |
+| Valhalla | OSM-Routing | kein Key am voreingestellten öffentlichen Endpoint |
+| openrouteservice | OSM-Routing | API-Key |
+| OSRM | OSM-Routing | kein Key am voreingestellten öffentlichen Endpoint |
+| GraphHopper | OSM-Routing | API-Key |
+| Google Routes | verkehrsbewusst | API-Key mit aktivierter Routes API |
+| HERE Routing v8 | verkehrsbewusst | API-Key, keine App ID erforderlich |
+
+HERE Routing v8 verwendet ausschließlich `apiKey`. Eine HERE App ID wird von dieser App weder benötigt noch übertragen.
+
+## API- und Endpoint-Selbsttests
+
+Jeder Provider kann einzeln direkt beim API-Key- oder Endpoint-Feld geprüft werden. Eine manuelle Fahrt ist dafür nicht erforderlich.
+
+Status:
+
+- graues Fragezeichen: ungeprüft
+- rotes Ausrufezeichen: Prüfung fehlgeschlagen
+- grüner Haken: Endpoint erreichbar und Zugangsdaten akzeptiert
+
+Bei einem bereits grünen Status fragt die App vor einer erneuten Prüfung nach Bestätigung.
+
+Jeder Test, der tatsächlich eine Provider-Anfrage sendet, erhöht den lokalen Request-Counter um eine Anfrage und kann zusätzlich beim Online-Kontingent des Providers zählen. Fehlender API-Key oder bereits erreichtes lokales Cap erzeugen keine externe Anfrage.
+
+Photon wird separat geprüft und zählt nicht gegen die Routing-Caps.
+
+## Request-Caps
+
+Voreinstellungen:
+
+- Valhalla: konservatives lokales Fair-Use-Limit
+- openrouteservice: 2.000/Tag
+- OSRM: konservatives lokales Fair-Use-Limit
+- GraphHopper: 500/Tag
+- Google Routes: 5.000/Monat
+- HERE: 1.000/Tag
+- TomTom: 2.500/Tag
+
+Alle Werte und Zeiträume bleiben editierbar. Lokale Caps sind ein Schutzmechanismus, kein Provider-Abrechnungszähler und keine Garantie gegen Kosten.
+
+## Fallback-Routing
+
+Unter dem primären Provider kann eine geordnete Fallback-Liste konfiguriert werden. Provider ohne erforderlichen API-Key werden übersprungen. Der primäre Provider wird nicht zusätzlich in der Fallback-Liste geführt.
+
+Die Übersicht verwendet kompakte monochrome Provider-Marken, soweit ein passendes Asset vorliegt. Sonst wird das allgemeine Routing-Symbol verwendet.
+
+## Gerätewechsel und Backup
+
+Die App kann Einstellungen und gespeicherte Provider-API-Keys in eine passwortgeschützte Datei exportieren und auf einem anderen Gerät wieder importieren.
+
+Technisch verwendet das Backup AES-GCM mit PBKDF2-HMAC-SHA256. Das Passwort muss mindestens 8 Zeichen lang sein.
+
+Bewusst nicht übertragen werden:
+
+- Automatisierungs-Token
+- lokale Request-Zähler
+- API-/Endpoint-Teststatus
+
+Kalender-IDs können zwischen Geräten abweichen. Nach einem Import sollten Quell- und Zielkalender deshalb geprüft werden.
+
+## Automatisierungs-Schnittstellen
+
+Externe Broadcasts benötigen ein pro Installation erzeugtes kryptografisch zufälliges 256-Bit-Token. Der Token kann kopiert und nach Bestätigung rotiert werden. Beim Rotieren wird der alte Token sofort ungültig.
+
+### Morgige Fahrten verarbeiten
 
 ```text
-de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY
+Action: de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY
+Package: de.drivetime.notifier
+token=<TOKEN>
 ```
 
-Package:
+### Einzelne Fahrt verarbeiten
 
 ```text
-de.drivetime.notifier
-```
+Action: de.drivetime.notifier.ACTION_PROCESS_EVENT
+Package: de.drivetime.notifier
 
-Extra:
-
-```text
-token=<TOKEN_AUS_DEN_EINSTELLUNGEN>
-```
-
-### Einzelnen Termin direkt verarbeiten
-
-Action:
-
-```text
-de.drivetime.notifier.ACTION_PROCESS_EVENT
-```
-
-Extras:
-
-```text
 token=<TOKEN>
 mode=process
-origin=Startadresse
-destination=Zieladresse
-arrival_millis=Unixzeit_in_Millisekunden
-previous_end_millis=optional
+origin=<STARTADRESSE>
+destination=<ZIELADRESSE>
+arrival_millis=<UNIXZEIT_MILLISEKUNDEN>
+previous_end_millis=<OPTIONAL>
 ```
 
-Wenn `origin` leer ist, verwendet die App den Standard-Startort.
+## Build
 
-### App vorausgefüllt öffnen
+Voraussetzungen:
 
-Gleiche Action, aber:
+- JDK 17
+- Android SDK 35
+- Gradle 8.9
+
+Vollständige Prüfung:
 
 ```text
-mode=open
-origin=Startadresse
-destination=Zieladresse
-datetime=2026-09-01 14:30
-previous_end_millis=optional
+gradle clean test lint assembleDebug assembleRelease
 ```
 
-Android kann das Starten einer Activity aus dem Hintergrund je nach Version und OEM einschränken. Für vollständig unbeaufsichtigte Abläufe sollte deshalb `mode=process` verwendet werden.
+GitHub Actions führt diesen Prüfpfad automatisch aus.
 
-## Samsung Routines und App-Aktion
+## Veröffentlichung über GitHub
 
-Die App stellt einen statischen Launcher-Shortcut „Fahrten morgen“ bereit. Launcher oder Automatisierungs-Apps, die Android-App-Shortcuts ausführen können, können damit die Verarbeitung des nächsten Tages starten.
+Der Release-Prozess ist über GitHub Actions automatisiert. Nach dem Merge nach `main` kann unter **Actions → Release APK → Run workflow** entweder nur ein signierter Testbuild oder direkt ein öffentliches Release erstellt werden.
 
-Für Automatisierungsprogramme mit Broadcast-Unterstützung ist die token-geschützte Tasker-Schnittstelle robuster.
+Für ein öffentliches Release muss:
 
-## Sicherheit
+1. die eingegebene Version zur `versionName` in `app/build.gradle.kts` passen,
+2. der Workflow auf `main` laufen,
+3. das GitHub-Environment `release` die vier Signing-Secrets enthalten.
 
-Umgesetzte Maßnahmen:
+Der Workflow führt Tests und Lint aus, baut die signierte APK, prüft die Signatur mit `apksigner`, erzeugt SHA-256-Prüfsummen und erstellt bei Freigabe automatisch den Tag und das GitHub Release.
 
-- kein API-Key im Quellcode oder Manifest
-- API-Key verschlüsselt mit AES/GCM und Android Keystore
-- Automation-Token mit 256 Bit Zufall, ebenfalls Keystore-verschlüsselt
-- konstanter Zeitvergleich des Tokens
-- keine Klartext-Netzwerkverbindungen, `usesCleartextTraffic=false`
-- kein Android-Backup der App-Daten, `allowBackup=false`
-- FileProvider nicht exportiert
-- Kalenderzugriff nur über Runtime-Permissions
-- keine Termintitel oder Beschreibungen in Netzwerkrequests
-- HTTP-Timeouts für Routing- und Overpass-Anfragen
-- keine dauerhaft laufenden Hintergrunddienste
-- GitHub Actions mit minimalen `contents: read`-Rechten
-- keine Geheimnisse im Repository
+Details: [docs/RELEASE.md](docs/RELEASE.md)
 
-Ein Android-Gerät mit Root, kompromittiertem Betriebssystem oder aktivem Debugging gegen eine manipulierte App kann Client-Geheimnisse grundsätzlich kompromittieren. Das lässt sich bei einer reinen Client-App nicht vollständig verhindern.
+## F-Droid
 
-## Ressourcenverbrauch
+Das Projekt enthält keine proprietären Routing-SDKs. Kommerzielle Routingdienste werden optional über HTTPS-APIs genutzt. Freie Routingalternativen sind vorhanden.
 
-Die App vermeidet Polling und dauerhafte Services.
+Die vorbereiteten F-Droid-Metadaten deklarieren deshalb `NonFreeNet`. Drittanbieter-Grafiken und deren Herkunft/Lizenzen sind in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) dokumentiert.
 
-- automatische Verarbeitung: einmal täglich über WorkManager
-- Netzwerk nur bei Routenberechnung oder aktivierten POI-Optionen
-- POI-Abfragen standardmäßig aus
-- Kalenderabfragen auf konkrete Zeitfenster begrenzt
-- Karte nur sichtbar, wenn bereits eine Route berechnet wurde
+Fastlane-Metadaten für Deutsch und Englisch sind vorbereitet. Vor der Einreichung müssen noch reale, anonymisierte Screenshots ergänzt werden.
 
-## Tests
-
-`DrivePlannerTest` prüft:
-
-- vollen Puffer
-- automatisch verkürzten Puffer
-- nicht rechtzeitig erreichbare Folgetermine
-
-Die CI führt Unit-Tests und `assembleDebug` aus.
-
-## Bekannte Grenzen
-
-- Verkehrsqualität hängt vom gewählten Routingdienst ab.
-- Google Routes und Geocoding benötigen einen vom Nutzer bereitgestellten API-Key.
-- Der öffentliche OSRM-Dienst liefert keine zukünftige Verkehrslage.
-- OSM-Blitzer und Parkplätze sind Community-Daten und nicht garantiert vollständig.
-- Die automatische Uhrzeit über WorkManager ist nicht sekundengenau.
-- Ein Zielkalender muss Schreibzugriff erlauben. Schreibt ein Konto nur lesbar, schlägt der Insert sauber fehl.
-- Die App nimmt keine Änderungen am Originaltermin vor.
-- Ein einzelner REST-API-Key kann auf einem kompromittierten Client nie vollständig geheim gehalten werden.
+Details: [docs/F-DROID.md](docs/F-DROID.md)
 
 ## Lizenz
 
-Noch keine Lizenzdatei hinterlegt. Vor Veröffentlichung sollte eine passende Open-Source-Lizenz gewählt werden.
+MIT, siehe [LICENSE](LICENSE).
 
+Drittanbieter-Hinweise: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
-## Routinganbieter und Anfrage-Limits
+## Haftungsausschluss
 
-Die App bietet vier Routinganbieter. Die angezeigte Zuverlässigkeit ist eine qualitative Einschätzung für die erwartete Fahrzeit, keine statistisch kalibrierte Wahrscheinlichkeit.
-
-| Anbieter | Bewertung | Verkehr | Schlüssel |
-| --- | --- | --- | --- |
-| Google Routes | 5/5 | prognostisch, verkehrsabhängig | Google Maps Platform API-Key |
-| HERE Routing | 5/5 | live/historisch, zeitabhängig | HERE API-Key |
-| GraphHopper | 4/5 | statisches Routingmodell in dieser Integration | GraphHopper API-Key |
-| OSRM + Photon | 3/5 | statische OSM-basierte Fahrzeit | kein Key erforderlich |
-
-Für jeden Anbieter gibt es ein lokales tägliches Anfrage-Limit. Sobald dieses Limit erreicht ist, stoppt die App weitere API-Aufrufe dieses Anbieters. Das schützt vor versehentlicher hoher Nutzung. Der lokale Zähler ist kein Abrechnungszähler des jeweiligen Dienstes, weil Anbieter unterschiedliche Billing- und Credit-Modelle verwenden.
-
-GraphHopper bietet aktuell im Free-Tarif 500 Credits pro Tag. HERE-Kontingente hängen vom gebuchten Plan ab. Google Maps Platform wird nach aktivierten APIs und deren Preisen abgerechnet. Bei OSRM/Photon handelt es sich bei den vorbelegten öffentlichen Servern um Fair-Use-/Demo-Infrastruktur ohne SLA; für regelmäßige oder größere Nutzung sollte eine eigene Instanz verwendet werden.
-
-Die API-Key-Felder in den Einstellungen enthalten direkte Links zu den jeweiligen Dashboards.
-
-## Adressvorschläge
-
-Adressfelder suchen während der Eingabe nach passenden Orten. Die Suche startet erst ab drei Zeichen, wird verzögert ausgelöst und hat ein festes Timeout.
-
-- Google: Places Autocomplete
-- HERE: Geocoding & Search Autocomplete
-- GraphHopper: Geocoding API
-- OSRM: Photon Search-as-you-type
-
-Der öffentliche OSMF-Nominatim-Dienst wird bewusst nicht für Autocomplete verwendet, da dessen öffentliche Nutzungsrichtlinie Client-Autocomplete ausdrücklich untersagt.
-
-## Kalenderbeschreibung der Fahrt
-
-Bei einem normalen Kalendereintrag enthält die Beschreibung zusätzlich:
-
-- direkten Google-Maps-Navigationslink zum Ziel
-- einen `geo:`-Link für installierte Android-Navigations-Apps
-- gewählten Routinganbieter, Fahrzeit und Distanz
-- bei aktivierter Parkplatzsuche bis zu fünf Parkplätze nahe dem Ziel, sortiert nach ungefährer Laufentfernung, jeweils mit Navigationslink
-- bei aktivierter Blitzeranzeige Anzahl und Koordinaten der Blitzer auf der berechneten Strecke
-
-Blitzer stammen aus OpenStreetMap-Einträgen mit `highway=speed_camera`, abgefragt über Overpass. Die App verwirft Treffer, die nicht in einem etwa 120-Meter-Korridor um die tatsächlich gewählte Route liegen. Die Daten sind Community-Daten und können unvollständig oder veraltet sein.
-
-## Kalenderauswahl
-
-Ziel- und Quellkalender werden in getrennten Popups gewählt. Der Zielkalender ist ein einzelner Kalender. Quellkalender können mehrfach ausgewählt werden.
-
-Der Termin-Picker und die automatische Verarbeitung lesen ausschließlich Termine aus den ausgewählten Quellkalendern. Andere Kalender werden ignoriert.
-
-## Einstellungen und Eingaben
-
-Einstellungen werden automatisch gespeichert. Text- und Zahlenfelder verwenden einen lokalen Entwurfszustand, damit Inhalte vollständig gelöscht und neu eingegeben werden können, ohne dass ein älterer gespeicherter Wert während der Eingabe wieder erscheint.
-
-Terminzeit und automatische Verarbeitungszeit werden über native Date-/Time-Picker gewählt.
-
-
-
-## Routinganbieter ab v3
-
-Neue Installationen verwenden standardmäßig **Valhalla**, da kein API-Key erforderlich ist und der öffentliche FOSSGIS-Demo-Endpunkt kostenlos nutzbar ist. Der öffentliche Dienst unterliegt Fair Use und Rate Limits und ist nicht für große kommerzielle Lasten gedacht.
-
-Weitere Anbieter:
-
-- **openrouteservice**: kostenloser API-Zugang mit Key und Quoten, OSM-basiert
-- **OSRM**: kostenloser öffentlicher Fair-Use-Dienst, statische Fahrzeiten
-- **GraphHopper**: Free-Tarif mit derzeit 500 Credits pro Tag
-- **Google Routes**: sehr gute prognostische Verkehrsdaten, potenziell kostenpflichtig
-- **HERE Routing**: zeitabhängige Live-/historische Verkehrsdaten, potenziell kostenpflichtig
-- **TomTom Routing**: Live- und historische Verkehrsdaten, kostenlose Evaluation und potenziell kostenpflichtige Nutzung
-
-Anbieter, bei denen je nach Tarif Kosten entstehen können, werden in der App mit **$** markiert.
-
-Die App besitzt weiterhin ein lokales tägliches Anfrage-Limit pro Routinganbieter. Dieses Limit ist ein lokaler Schutzmechanismus und kein Abrechnungszähler des Anbieters.
-
-## Adresssuche
-
-Autocomplete und die Umwandlung von Adressen in Koordinaten sind vom Routingdienst getrennt. Dafür verwendet die App **Photon**.
-
-Die Suche startet nur, wenn ein Adressfeld fokussiert ist und der Nutzer den Inhalt tatsächlich bearbeitet. Bereits gespeicherte oder automatisch eingesetzte Adressen lösen keine Suche aus.
-
-Treffer aus dem Land der aktuellen Geräte-Locale werden zuerst abgefragt. Danach werden bei Bedarf globale Treffer ergänzt.
-
-Die Photon-Suche wird nicht auf die Routing-Anfrage-Caps angerechnet.
-
-## Material You und Farbpaletten
-
-Die Farbpaletten heißen neutral:
-
-- Material You
-- Violet
-- Ocean
-- Forest
-- Sunset
-- Rose
-- Graphite
-
-Unter Android 12 und neuer verwendet **Material You** die dynamischen Systemfarben des Geräts. Die anderen Paletten färben Primär-, Sekundär-, Tertiär- und Hero-Flächen jeweils konsistent mit ihrer eigenen Farbfamilie.
-
-## Stabilität der Routenanzeige
-
-Die Routenberechnung hat feste Netzwerk-Timeouts. Die Kartenansicht validiert die Route vor dem Rendern und fängt Fehler des nativen MapView ab. Das Zoomen auf die Route erfolgt erst nach dem Layout der Karte.
-
-## Zurück-Navigation
-
-- In den Einstellungen führt Zurück zur Hauptansicht.
-- Auf der Hauptansicht zeigt der erste Druck einen Hinweis.
-- Ein zweiter Druck innerhalb kurzer Zeit beendet die App.
-
-## Blitzer.de
-
-Blitzer.de wird nicht als Datenquelle eingebunden, solange keine offiziell dokumentierte und lizenzierte Entwickler-API verfügbar ist. Die öffentlich einsehbaren Nutzungsbedingungen räumen nur eine eingeschränkte Nutzungslizenz für die eigenen Dienste ein und schützen die Datenbankinhalte.
-
-Die App nutzt daher weiterhin OpenStreetMap/Overpass für `highway=speed_camera` und filtert Treffer auf die tatsächlich gewählte Route.
-
-
-## Launcher-Shortcuts
-
-Beim Gedrückthalten des App-Symbols stehen zwei Aktionen bereit:
-
-- **Fahrten abrufen**: stößt die Verarbeitung der Fahrten für den nächsten Tag an.
-- **Nächste Fahrt berechnen**: öffnet die App, übernimmt den nächsten Termin mit Ort aus den ausgewählten Quellkalendern und berechnet die Fahrt dorthin.
-
-Der gespeicherte Standard-Standort erscheint auf der Hauptseite zusätzlich als Schnellwahl direkt unter dem Zielfeld, genauso wie weitere gespeicherte Adressen.
-
-Icon-Hintergründe innerhalb der App verwenden neutrale Surface-Farben. Die eigentliche Akzentfarbe kommt ausschließlich aus der gewählten Farbpalette oder aus Material You.
+Die App wird **AS IS** bereitgestellt. Es gibt keine Garantie für Routen, Fahrzeiten, Verkehrsdaten, Blitzerinformationen, Parkplätze, Kalenderdaten oder die dauerhafte Verfügbarkeit externer APIs. Nutzer bleiben für Provider-Verträge, API-Nutzung und entstehende Kosten verantwortlich.

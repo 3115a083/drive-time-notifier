@@ -26,11 +26,12 @@ class UnifiedRoutingService(
     private val settings: AppSettings,
     private val keyStore: SecureApiKeyStore,
     private val budget: RequestBudgetStore,
+    private val automated: Boolean = false,
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(7, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .callTimeout(16, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(false)
+        .connectTimeout(if (automated) 12 else 7, TimeUnit.SECONDS)
+        .readTimeout(if (automated) 28 else 12, TimeUnit.SECONDS)
+        .callTimeout(if (automated) 40 else 16, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(automated)
         .build()
 ) : RoutingService {
 
@@ -55,7 +56,7 @@ class UnifiedRoutingService(
     }
 
     private fun valhalla(oLat: Double, oLon: Double, dLat: Double, dLon: Double, arrival: Long): RouteEstimate {
-        budget.consume(RoutingProvider.VALHALLA, settings.providerCaps.valhalla)
+        budget.consume(RoutingProvider.VALHALLA, settings.providerCaps.valhalla, settings.providerLimitPeriods.valhalla)
         val base = settings.valhallaBaseUrl.toHttpUrl()
         val body = JSONObject().apply {
             put("locations", JSONArray().apply {
@@ -102,7 +103,7 @@ class UnifiedRoutingService(
     private fun openRouteService(oLat: Double, oLon: Double, dLat: Double, dLon: Double): RouteEstimate {
         val key = keyStore.read(RoutingProvider.OPENROUTESERVICE).orEmpty()
         require(key.isNotBlank()) { "openrouteservice API key is missing." }
-        budget.consume(RoutingProvider.OPENROUTESERVICE, settings.providerCaps.openRouteService)
+        budget.consume(RoutingProvider.OPENROUTESERVICE, settings.providerCaps.openRouteService, settings.providerLimitPeriods.openRouteService)
         val body = JSONObject().put("coordinates", JSONArray().apply {
             put(JSONArray().put(oLon).put(oLat))
             put(JSONArray().put(dLon).put(dLat))
@@ -132,7 +133,7 @@ class UnifiedRoutingService(
     }
 
     private fun osrm(oLat: Double, oLon: Double, dLat: Double, dLon: Double): RouteEstimate {
-        budget.consume(RoutingProvider.OSRM, settings.providerCaps.osrm)
+        budget.consume(RoutingProvider.OSRM, settings.providerCaps.osrm, settings.providerLimitPeriods.osrm)
         val base = settings.osrmBaseUrl.trimEnd('/')
         val url = "$base/route/v1/driving/$oLon,$oLat;$dLon,$dLat".toHttpUrl().newBuilder()
             .addQueryParameter("overview", "full")
@@ -154,7 +155,7 @@ class UnifiedRoutingService(
     private fun graphHopper(oLat: Double, oLon: Double, dLat: Double, dLon: Double): RouteEstimate {
         val key = keyStore.read(RoutingProvider.GRAPHHOPPER).orEmpty()
         require(key.isNotBlank()) { "GraphHopper API key is missing." }
-        budget.consume(RoutingProvider.GRAPHHOPPER, settings.providerCaps.graphHopper)
+        budget.consume(RoutingProvider.GRAPHHOPPER, settings.providerCaps.graphHopper, settings.providerLimitPeriods.graphHopper)
         val url = okhttp3.HttpUrl.Builder().scheme("https").host("graphhopper.com").addPathSegments("api/1/route")
             .addQueryParameter("point", "$oLat,$oLon")
             .addQueryParameter("point", "$dLat,$dLon")
@@ -176,7 +177,7 @@ class UnifiedRoutingService(
     private fun google(oLat: Double, oLon: Double, dLat: Double, dLon: Double, arrival: Long): RouteEstimate {
         val key = keyStore.read(RoutingProvider.GOOGLE).orEmpty()
         require(key.isNotBlank()) { "Google Routes API key is missing." }
-        budget.consume(RoutingProvider.GOOGLE, settings.providerCaps.google, 2)
+        budget.consume(RoutingProvider.GOOGLE, settings.providerCaps.google, settings.providerLimitPeriods.google, 2)
         fun compute(departureMillis: Long): RouteEstimate {
             val body = JSONObject().apply {
                 put("origin", waypoint(oLat, oLon))
@@ -210,7 +211,7 @@ class UnifiedRoutingService(
     private fun here(oLat: Double, oLon: Double, dLat: Double, dLon: Double, arrival: Long): RouteEstimate {
         val key = keyStore.read(RoutingProvider.HERE).orEmpty()
         require(key.isNotBlank()) { "HERE API key is missing." }
-        budget.consume(RoutingProvider.HERE, settings.providerCaps.here)
+        budget.consume(RoutingProvider.HERE, settings.providerCaps.here, settings.providerLimitPeriods.here)
         val url = okhttp3.HttpUrl.Builder().scheme("https").host("router.hereapi.com").addPathSegments("v8/routes")
             .addQueryParameter("transportMode", "car")
             .addQueryParameter("origin", "$oLat,$oLon")
@@ -242,7 +243,7 @@ class UnifiedRoutingService(
     private fun tomTom(oLat: Double, oLon: Double, dLat: Double, dLon: Double, arrival: Long): RouteEstimate {
         val key = keyStore.read(RoutingProvider.TOMTOM).orEmpty()
         require(key.isNotBlank()) { "TomTom API key is missing." }
-        budget.consume(RoutingProvider.TOMTOM, settings.providerCaps.tomTom)
+        budget.consume(RoutingProvider.TOMTOM, settings.providerCaps.tomTom, settings.providerLimitPeriods.tomTom)
         val locations = "$oLat,$oLon:$dLat,$dLon"
         val url = okhttp3.HttpUrl.Builder().scheme("https").host("api.tomtom.com")
             .addPathSegments("routing/1/calculateRoute/$locations/json")

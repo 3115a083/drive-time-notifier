@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.data.LimitPeriod
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
@@ -17,6 +18,7 @@ class GoogleProviderService(
     private val apiKey: String,
     private val budget: RequestBudgetStore,
     private val dailyCap: Int,
+    private val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
@@ -25,13 +27,13 @@ class GoogleProviderService(
 ) : RoutingService, AddressSearchService {
     override suspend fun route(request: RouteRequest): RouteEstimate {
         require(apiKey.isNotBlank()) { "Google API key is missing." }
-        budget.consume(RoutingProvider.GOOGLE, dailyCap, 4)
+        budget.consume(RoutingProvider.GOOGLE, dailyCap, limitPeriod, 4)
         return GoogleRoutesClient(client).route(request, apiKey)
     }
 
     override suspend fun suggest(query: String, language: String): List<AddressSuggestion> = withContext(Dispatchers.IO) {
         if (query.trim().length < 3 || apiKey.isBlank()) return@withContext emptyList()
-        budget.consume(RoutingProvider.GOOGLE, dailyCap)
+        budget.consume(RoutingProvider.GOOGLE, dailyCap, limitPeriod)
         val body = JSONObject().apply {
             put("input", query.trim())
             put("languageCode", language)

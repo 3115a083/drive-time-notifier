@@ -1,0 +1,1 @@
+Erste öffentliche Version mit Kalender-Fahrtplanung, mehreren Routingdiensten und Fallbacks, API-Selbsttests, lokalen Limits, automatischer Verarbeitung, Regex-Ausschlüssen, ICS/Kalenderexport, Automatisierungs-Triggern, Material You sowie verschlüsseltem Backup für Gerätewechsel.
