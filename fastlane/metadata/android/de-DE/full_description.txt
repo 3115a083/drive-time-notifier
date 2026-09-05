@@ -1,0 +1,23 @@
+Drive Time Notifier plant Fahrten zu Kalenderterminen und kann die berechnete Fahrt direkt in einen Android-Kalender eintragen oder als ICS-Datei speichern.
+
+Funktionen:
+• Manuelle Planung oder Auswahl von Start-/Zielterminen aus Android-Kalendern
+• Standard-Startort und zusätzliche gespeicherte Startorte
+• Kalenderabhängige Startorte für automatische Verarbeitung
+• Automatische Verarbeitung des nächsten Tages mit Retry und Benachrichtigungen
+• TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes und HERE Routing v8
+• Geordnete Fallback-Routinganbieter
+• Einzelne API-/Endpoint-Selbsttests mit Statusanzeige
+• Lokale Anfrage-Limits pro Tag, Woche oder Monat
+• Adresssuche über Photon
+• Optional Parkplätze und Blitzer aus OpenStreetMap/Overpass
+• Ausschlussregeln inklusive regulärer Ausdrücke
+• ICS speichern/teilen oder direkt in den Kalender schreiben
+• Tasker-, MacroDroid- und externe Broadcast-Trigger
+• App-Shortcuts
+• Passwortgeschütztes, verschlüsseltes Backup von Einstellungen und API-Keys für Gerätewechsel
+• Material You, mehrere Farbpaletten, Light/Dark/System
+• Deutsch und Englisch
+• Kein eigener Backend-Server
+
+Datenschutz: Kalendername, Kalenderkonto, Termintitel und Terminbeschreibung werden nicht an Routingserver übertragen. API-Selbsttests verwenden feste Testkoordinaten. Kommerzielle Routingdienste sind optional; freie Alternativen sind verfügbar.

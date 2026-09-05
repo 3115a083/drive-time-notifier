@@ -1,0 +1,23 @@
+Drive Time Notifier plans drives to calendar appointments and can save the calculated drive directly to an Android calendar or as an ICS file.
+
+Features:
+• Manual planning or start/destination appointment selection from Android calendars
+• Default and additional saved start locations
+• Per-calendar start locations for automatic processing
+• Automatic next-day processing with retry and notifications
+• TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes and HERE Routing v8
+• Ordered fallback routing providers
+• Individual API/endpoint self-tests with status indicators
+• Local daily, weekly or monthly request caps
+• Photon address search
+• Optional OpenStreetMap/Overpass parking and speed-camera data
+• Exclusion rules including regular expressions
+• ICS save/share or direct calendar output
+• Tasker, MacroDroid and external broadcast triggers
+• Launcher shortcuts
+• Password-protected encrypted settings/API-key backup for device migration
+• Material You, multiple color palettes and light/dark/system appearance
+• English and German
+• No backend server of its own
+
+Privacy: calendar name, calendar account, appointment title and appointment description are not sent to routing servers. API self-tests use fixed test coordinates. Commercial routing services are optional and free routing alternatives are available.

@@ -77,12 +77,13 @@ class CalendarRepository(private val context: Context) {
         departureMillis: Long,
         arrivalMillis: Long,
         reminderLeadMinutes: Int,
+        title: String,
         description: String
     ): Long = withContext(Dispatchers.IO) {
         require(calendarId >= 0) { "No target calendar selected." }
         val values = ContentValues().apply {
             put(CalendarContract.Events.CALENDAR_ID, calendarId)
-            put(CalendarContract.Events.TITLE, "Drive to appointment")
+            put(CalendarContract.Events.TITLE, title.take(120))
             put(CalendarContract.Events.EVENT_LOCATION, destination)
             put(CalendarContract.Events.DESCRIPTION, description)
             put(CalendarContract.Events.DTSTART, departureMillis)

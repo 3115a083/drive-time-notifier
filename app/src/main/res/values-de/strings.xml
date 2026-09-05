@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Drive Time Notifier</string>
+    <string name="shortcut_process_next_day_short">Morgige Fahrten verarbeiten</string>
+    <string name="shortcut_process_next_day_long">Morgige Fahrten verarbeiten</string>
+    <string name="shortcut_next_drive_short">Nächste Fahrt berechnen</string>
+    <string name="shortcut_next_drive_long">Nächste Fahrt berechnen</string>
+</resources>

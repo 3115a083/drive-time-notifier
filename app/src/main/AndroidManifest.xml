@@ -23,10 +23,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="de.drivetime.notifier.ACTION_OPEN_PREFILLED" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
         </activity>
 
         <receiver android:name=".automation.AutomationReceiver" android:exported="true">
@@ -35,6 +31,8 @@
                 <action android:name="de.drivetime.notifier.ACTION_PROCESS_EVENT" />
             </intent-filter>
         </receiver>
+
+        <receiver android:name=".automation.AutomationRetryReceiver" android:exported="false" />
 
         <receiver android:name=".automation.RescheduleReceiver" android:exported="false" android:enabled="false">
             <intent-filter>

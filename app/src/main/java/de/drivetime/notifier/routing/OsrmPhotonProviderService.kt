@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.data.LimitPeriod
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
@@ -18,6 +19,7 @@ class OsrmPhotonProviderService(
     private val userAgent: String,
     private val budget: RequestBudgetStore,
     private val dailyCap: Int,
+    private val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(9, TimeUnit.SECONDS)
@@ -26,7 +28,7 @@ class OsrmPhotonProviderService(
         .build()
 ) : RoutingService, AddressSearchService {
     override suspend fun route(request: RouteRequest): RouteEstimate = withContext(Dispatchers.IO) {
-        budget.consume(RoutingProvider.OSRM, dailyCap, 3)
+        budget.consume(RoutingProvider.OSRM, dailyCap, limitPeriod, 3)
         val origin = geocode(request.origin)
         val destination = geocode(request.destination)
         val base = osrmBaseUrl.toHttpUrl()
@@ -61,7 +63,7 @@ class OsrmPhotonProviderService(
 
     override suspend fun suggest(query: String, language: String): List<AddressSuggestion> = withContext(Dispatchers.IO) {
         if (query.trim().length < 3) return@withContext emptyList()
-        budget.consume(RoutingProvider.OSRM, dailyCap)
+        budget.consume(RoutingProvider.OSRM, dailyCap, limitPeriod)
         photon(query.trim(), 6, language)
     }
 

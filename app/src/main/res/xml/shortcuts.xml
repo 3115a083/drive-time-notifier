@@ -2,7 +2,7 @@
     <shortcut
         android:shortcutId="process_next_day"
         android:enabled="true"
-        android:icon="@drawable/ic_launcher_foreground"
+        android:icon="@drawable/ic_launcher_foreground_image"
         android:shortcutShortLabel="@string/shortcut_process_next_day_short"
         android:shortcutLongLabel="@string/shortcut_process_next_day_long">
         <intent
@@ -14,7 +14,7 @@
     <shortcut
         android:shortcutId="next_drive"
         android:enabled="true"
-        android:icon="@drawable/ic_launcher_foreground"
+        android:icon="@drawable/ic_launcher_foreground_image"
         android:shortcutShortLabel="@string/shortcut_next_drive_short"
         android:shortcutLongLabel="@string/shortcut_next_drive_long">
         <intent

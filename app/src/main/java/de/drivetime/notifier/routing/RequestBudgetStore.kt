@@ -1,29 +1,43 @@
 package de.drivetime.notifier.routing
 
 import android.content.Context
+import de.drivetime.notifier.data.LimitPeriod
 import de.drivetime.notifier.data.RoutingProvider
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.temporal.TemporalAdjusters
 
 class RequestBudgetStore(context: Context) {
     private val prefs = context.getSharedPreferences("provider_request_budget", Context.MODE_PRIVATE)
 
     @Synchronized
-    fun consume(provider: RoutingProvider, dailyCap: Int, count: Int = 1) {
-        val date = LocalDate.now().toString()
-        val dateKey = "${provider.id}_date"
-        val countKey = "${provider.id}_count"
-        val storedDate = prefs.getString(dateKey, null)
-        val used = if (storedDate == date) prefs.getInt(countKey, 0) else 0
-        if (used + count > dailyCap) {
-            error("Daily request cap reached for ${provider.displayName} ($dailyCap). Increase the cap in Settings if intended.")
+    fun consume(provider: RoutingProvider, cap: Int, period: LimitPeriod, count: Int = 1) {
+        val bucket = bucket(period)
+        val prefix = "${provider.id}_${period.id}"
+        val bucketKey = "${prefix}_bucket"
+        val countKey = "${prefix}_count"
+        val storedBucket = prefs.getString(bucketKey, null)
+        val used = if (storedBucket == bucket) prefs.getInt(countKey, 0) else 0
+        if (used + count > cap) {
+            error("Request cap reached for ${provider.displayName}: $cap ${period.id}.")
         }
-        prefs.edit().putString(dateKey, date).putInt(countKey, used + count).apply()
+        prefs.edit().putString(bucketKey, bucket).putInt(countKey, used + count).apply()
     }
 
-    fun usedToday(provider: RoutingProvider): Int {
-        val date = LocalDate.now().toString()
-        return if (prefs.getString("${provider.id}_date", null) == date) {
-            prefs.getInt("${provider.id}_count", 0)
+    fun used(provider: RoutingProvider, period: LimitPeriod): Int {
+        val bucket = bucket(period)
+        val prefix = "${provider.id}_${period.id}"
+        return if (prefs.getString("${prefix}_bucket", null) == bucket) {
+            prefs.getInt("${prefix}_count", 0)
         } else 0
+    }
+
+    private fun bucket(period: LimitPeriod): String = when (period) {
+        LimitPeriod.DAILY -> LocalDate.now().toString()
+        LimitPeriod.WEEKLY -> LocalDate.now()
+            .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            .toString()
+        LimitPeriod.MONTHLY -> YearMonth.now().toString()
     }
 }

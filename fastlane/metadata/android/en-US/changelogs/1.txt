@@ -1,0 +1,1 @@
+First public release with calendar drive planning, multiple routing providers and fallbacks, API self-tests, local caps, automatic processing, regex exclusions, ICS/calendar export, automation triggers, Material You and encrypted device-migration backup.

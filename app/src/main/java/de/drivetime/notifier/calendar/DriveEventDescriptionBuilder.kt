@@ -4,6 +4,7 @@ import de.drivetime.notifier.data.AppLanguage
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.routing.RoutePoi
+import de.drivetime.notifier.ui.formatDuration
 import de.drivetime.notifier.ui.tr
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -39,7 +40,7 @@ object DriveEventDescriptionBuilder {
             appendLine("${tr(language, "From", "Von")}: $origin")
             appendLine("${tr(language, "To", "Nach")}: $destination")
             appendLine("${tr(language, "Routing provider", "Routingdienst")}: ${provider.displayName}")
-            appendLine("${tr(language, "Estimated drive time", "Geschätzte Fahrzeit")}: ${route.durationSeconds / 60} min")
+            appendLine("${tr(language, "Estimated drive time", "Geschätzte Fahrzeit")}: ${formatDuration(route.durationSeconds, language)}")
             appendLine("${tr(language, "Distance", "Distanz")}: ${"%.1f".format(route.distanceMeters / 1000.0)} km")
             appendLine()
             appendLine("${tr(language, "Start navigation", "Navigation starten")}:")
@@ -55,7 +56,7 @@ object DriveEventDescriptionBuilder {
                     val pLat = poi.point.latitude
                     val pLon = poi.point.longitude
                     val link = "https://www.google.com/maps/dir/?api=1&destination=$pLat,$pLon&travelmode=driving"
-                    appendLine("${index + 1}. ${poi.name ?: "Parking"} (~$walk m ${tr(language, "walk", "Fußweg")}): $link")
+                    appendLine("${index + 1}. ${poi.name ?: tr(language, "Parking", "Parkplatz")} (~$walk m ${tr(language, "walk", "Fußweg")}): $link")
                 }
             }
 
