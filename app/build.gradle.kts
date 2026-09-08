@@ -16,6 +16,7 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        manifestPlaceholders["appLabel"] = "Drive Time Notifier"
     }
 
     signingConfigs {
@@ -39,6 +40,11 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            manifestPlaceholders["appLabel"] = "Drive Time Notifier Debug"
+        }
         getByName("release") {
             isDebuggable = false
             isMinifyEnabled = false

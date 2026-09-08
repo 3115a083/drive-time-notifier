@@ -8,10 +8,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.work.ForegroundInfo
 import de.drivetime.notifier.MainActivity
 import de.drivetime.notifier.R
 import de.drivetime.notifier.data.AppLanguage
@@ -19,11 +21,130 @@ import de.drivetime.notifier.ui.tr
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import kotlin.math.absoluteValue
 
 object AutomationNotifier {
     private const val CHANNEL_ID = "drive_conflicts"
     private const val FAILURE_CHANNEL_ID = "drive_failures"
+    private const val PROCESSING_CHANNEL_ID = "drive_processing"
+    private const val DUPLICATE_CHANNEL_ID = "drive_duplicates"
+
+    fun processingForegroundInfo(context: Context, language: AppLanguage, workId: UUID): ForegroundInfo {
+        createChannel(
+            context,
+            PROCESSING_CHANNEL_ID,
+            tr(language, "Route processing", "Streckenverarbeitung"),
+            tr(
+                language,
+                "Silent status while automatic routes are processed in the background.",
+                "Stummer Status, während automatische Strecken im Hintergrund verarbeitet werden."
+            ),
+            NotificationManager.IMPORTANCE_LOW,
+            silent = true
+        )
+        val notificationId = processingNotificationId(workId)
+        val cancelIntent = Intent(context, AutomationCancelReceiver::class.java).apply {
+            action = AutomationCancelReceiver.ACTION_CANCEL_WORK
+            putExtra(AutomationCancelReceiver.EXTRA_WORK_ID, workId.toString())
+            putExtra(AutomationCancelReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+        }
+        val cancelPending = PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            cancelIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, PROCESSING_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(tr(language, "Routes are being processed", "Strecken werden verarbeitet"))
+            .setContentText(tr(language, "Drive Time Notifier is working in the background.", "Drive Time Notifier arbeitet im Hintergrund."))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setProgress(0, 0, true)
+            .setOngoing(false)
+            .setDeleteIntent(cancelPending)
+            .addAction(0, tr(language, "Cancel", "Abbrechen"), cancelPending)
+            .build()
+
+        return ForegroundInfo(
+            notificationId,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    fun notifyDuplicateDecision(
+        context: Context,
+        language: AppLanguage,
+        origin: String,
+        destination: String,
+        arrivalMillis: Long,
+        previousEndMillis: Long?,
+        identityKey: String
+    ) {
+        if (!canNotify(context)) return
+        createChannel(
+            context,
+            DUPLICATE_CHANNEL_ID,
+            tr(language, "Duplicate drives", "Doppelte Fahrten"),
+            tr(
+                language,
+                "Asks what to do when an automatically planned drive already exists.",
+                "Fragt nach, wenn eine automatisch geplante Fahrt bereits vorhanden ist."
+            ),
+            NotificationManager.IMPORTANCE_DEFAULT,
+            silent = true
+        )
+
+        val notificationId = duplicateNotificationId(identityKey)
+        val saveIntent = Intent(context, AutomationDuplicateReceiver::class.java).apply {
+            action = AutomationDuplicateReceiver.ACTION_SAVE_ANYWAY
+            putExtra("origin", origin)
+            putExtra("destination", destination)
+            putExtra("arrival_millis", arrivalMillis)
+            putExtra("previous_end_millis", previousEndMillis ?: -1L)
+            putExtra("identity_key", identityKey)
+            putExtra("notification_id", notificationId)
+        }
+        val cancelIntent = Intent(context, AutomationDuplicateReceiver::class.java).apply {
+            action = AutomationDuplicateReceiver.ACTION_CANCEL
+            putExtra("notification_id", notificationId)
+        }
+        val savePending = PendingIntent.getBroadcast(
+            context,
+            notificationId + 1,
+            saveIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val cancelPending = PendingIntent.getBroadcast(
+            context,
+            notificationId + 2,
+            cancelIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val text = tr(
+            language,
+            "A Drive Time Notifier entry for $destination already exists. No new routing request was sent.",
+            "Für $destination existiert bereits ein Drive-Time-Notifier-Eintrag. Es wurde keine neue Routinganfrage gesendet."
+        )
+        val notification = NotificationCompat.Builder(context, DUPLICATE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(tr(language, "Drive already exists", "Fahrt existiert bereits"))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setSilent(true)
+            .setAutoCancel(false)
+            .setDeleteIntent(cancelPending)
+            .addAction(0, tr(language, "Save anyway", "Trotzdem speichern"), savePending)
+            .addAction(0, tr(language, "Cancel", "Abbrechen"), cancelPending)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(notificationId, notification)
+    }
 
     @SuppressLint("MissingPermission")
     fun notifyConflict(context: Context, language: AppLanguage, destination: String, departureMillis: Long) {
@@ -138,10 +259,29 @@ object AutomationNotifier {
             .notify((arrivalMillis xor destination.hashCode().toLong()).toInt().absoluteValue, notification)
     }
 
-    private fun createChannel(context: Context, id: String, name: String, description: String) {
+    fun cancelNotification(context: Context, notificationId: Int) {
+        NotificationManagerCompat.from(context).cancel(notificationId)
+    }
+
+    private fun processingNotificationId(workId: UUID): Int = 40_000 + workId.hashCode().absoluteValue % 10_000
+
+    private fun duplicateNotificationId(identityKey: String): Int = 60_000 + identityKey.hashCode().absoluteValue % 10_000
+
+    private fun createChannel(
+        context: Context,
+        id: String,
+        name: String,
+        description: String,
+        importance: Int = NotificationManager.IMPORTANCE_HIGH,
+        silent: Boolean = false
+    ) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(id, name, importance).apply {
                 this.description = description
+                if (silent) {
+                    setSound(null, null)
+                    enableVibration(false)
+                }
             }
         )
     }
