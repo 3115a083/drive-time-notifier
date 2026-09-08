@@ -13,7 +13,6 @@ import de.drivetime.notifier.data.startLocationForCalendar
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
-import de.drivetime.notifier.routing.CancelableRoutingService
 import de.drivetime.notifier.routing.OsmEnrichmentClient
 import de.drivetime.notifier.routing.PolylineDecoder
 import de.drivetime.notifier.routing.RoutingService
@@ -29,9 +28,6 @@ class NextDayWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
-    @Volatile
-    private var activeRoutes: RoutingService? = null
-
     override suspend fun doWork(): Result {
         val settings = SettingsStore(applicationContext).flow.first()
         if (!settings.automaticEnabled && inputData.getBoolean("force", false).not()) return Result.success()
@@ -48,140 +44,130 @@ class NextDayWorker(
         if (events.isEmpty()) return Result.success()
 
         val routes = RoutingServiceFactory.create(applicationContext, settings, automated = true)
-        activeRoutes = routes
         var previousEnd: Long? = null
 
-        try {
-            for (event in events) {
-                if (isStopped) return Result.failure()
-                if (settings.excludesLocation(event.location)) {
-                    previousEnd = event.endMillis
-                    continue
-                }
-
-                val origin = settings.startLocationForCalendar(event.calendarId)
-                if (origin.isBlank()) {
-                    previousEnd = event.endMillis
-                    continue
-                }
-
-                val identityKey = DriveEntryIdentity.key(event.location, event.startMillis)
-                if (!settings.outputIcs) {
-                    val duplicate = runCatching {
-                        calendar.findExistingDrive(
-                            settings.targetCalendarId,
-                            event.location,
-                            event.startMillis,
-                            identityKey
-                        )
-                    }.getOrNull()
-                    if (duplicate != null) {
-                        AutomationNotifier.notifyDuplicateDecision(
-                            applicationContext,
-                            settings.language,
-                            origin,
-                            event.location,
-                            event.startMillis,
-                            previousEnd,
-                            identityKey
-                        )
-                        previousEnd = event.endMillis
-                        continue
-                    }
-                }
-
-                val estimate = routeWithRetry(routes, RouteRequest(origin, event.location, event.startMillis))
-                if (estimate == null) {
-                    AutomationNotifier.notifyRoutingFailure(
-                        applicationContext,
-                        settings.language,
-                        origin,
-                        event.location,
-                        event.startMillis,
-                        previousEnd
-                    )
-                    previousEnd = event.endMillis
-                    continue
-                }
-
-                val plan = DrivePlanner.plan(
-                    destinationStartMillis = event.startMillis,
-                    routeDurationSeconds = estimate.durationSeconds,
-                    requestedBufferMinutes = settings.bufferMinutes,
-                    previousEventEndMillis = previousEnd
-                )
-                val pois = if (settings.showSpeedCameras || settings.showParking) {
-                    val points = PolylineDecoder.decode(estimate.encodedPolyline)
-                    runCatching {
-                        OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
-                    }.getOrDefault(emptyList())
-                } else emptyList()
-                val description = DriveEntryIdentity.attach(
-                    DriveEventDescriptionBuilder.build(
-                        settings.language,
-                        settings.routingProvider,
-                        origin,
-                        event.location,
-                        estimate,
-                        pois
-                    ),
-                    identityKey
-                )
-
-                val title = resolvedDriveEventTitle(settings)
-                val overlapsPrevious = previousEnd != null && plan.departureMillis < previousEnd
-                runCatching {
-                    if (settings.outputIcs) {
-                        IcsExporter(applicationContext).saveToDownloads(
-                            origin,
-                            event.location,
-                            plan.departureMillis,
-                            plan.arrivalMillis,
-                            title,
-                            description
-                        )
-                    } else {
-                        calendar.insertDrive(
-                            settings.targetCalendarId,
-                            origin,
-                            event.location,
-                            plan.departureMillis,
-                            plan.arrivalMillis,
-                            settings.reminderLeadMinutes,
-                            title,
-                            description
-                        )
-                    }
-                }.onFailure {
-                    AutomationNotifier.notifyRoutingFailure(
-                        applicationContext,
-                        settings.language,
-                        origin,
-                        event.location,
-                        event.startMillis,
-                        previousEnd
-                    )
-                }
-
-                if (overlapsPrevious) {
-                    AutomationNotifier.notifyConflict(
-                        applicationContext,
-                        settings.language,
-                        event.location,
-                        plan.departureMillis
-                    )
-                }
+        for (event in events) {
+            if (isStopped) return Result.failure()
+            if (settings.excludesLocation(event.location)) {
                 previousEnd = event.endMillis
+                continue
             }
-            return Result.success()
-        } finally {
-            activeRoutes = null
-        }
-    }
 
-    override fun onStopped() {
-        (activeRoutes as? CancelableRoutingService)?.cancelActiveCalls()
-        super.onStopped()
+            val origin = settings.startLocationForCalendar(event.calendarId)
+            if (origin.isBlank()) {
+                previousEnd = event.endMillis
+                continue
+            }
+
+            val identityKey = DriveEntryIdentity.key(event.location, event.startMillis)
+            if (!settings.outputIcs) {
+                val duplicate = runCatching {
+                    calendar.findExistingDrive(
+                        settings.targetCalendarId,
+                        event.location,
+                        event.startMillis,
+                        identityKey
+                    )
+                }.getOrNull()
+                if (duplicate != null) {
+                    AutomationNotifier.notifyDuplicateDecision(
+                        applicationContext,
+                        settings.language,
+                        origin,
+                        event.location,
+                        event.startMillis,
+                        previousEnd,
+                        identityKey
+                    )
+                    previousEnd = event.endMillis
+                    continue
+                }
+            }
+
+            val estimate = routeWithRetry(routes, RouteRequest(origin, event.location, event.startMillis))
+            if (estimate == null) {
+                AutomationNotifier.notifyRoutingFailure(
+                    applicationContext,
+                    settings.language,
+                    origin,
+                    event.location,
+                    event.startMillis,
+                    previousEnd
+                )
+                previousEnd = event.endMillis
+                continue
+            }
+
+            val plan = DrivePlanner.plan(
+                destinationStartMillis = event.startMillis,
+                routeDurationSeconds = estimate.durationSeconds,
+                requestedBufferMinutes = settings.bufferMinutes,
+                previousEventEndMillis = previousEnd
+            )
+            val pois = if (settings.showSpeedCameras || settings.showParking) {
+                val points = PolylineDecoder.decode(estimate.encodedPolyline)
+                runCatching {
+                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                }.getOrDefault(emptyList())
+            } else emptyList()
+            val description = DriveEntryIdentity.attach(
+                DriveEventDescriptionBuilder.build(
+                    settings.language,
+                    settings.routingProvider,
+                    origin,
+                    event.location,
+                    estimate,
+                    pois
+                ),
+                identityKey
+            )
+
+            val title = resolvedDriveEventTitle(settings)
+            val overlapsPrevious = previousEnd != null && plan.departureMillis < previousEnd
+            runCatching {
+                if (settings.outputIcs) {
+                    IcsExporter(applicationContext).saveToDownloads(
+                        origin,
+                        event.location,
+                        plan.departureMillis,
+                        plan.arrivalMillis,
+                        title,
+                        description
+                    )
+                } else {
+                    calendar.insertDrive(
+                        settings.targetCalendarId,
+                        origin,
+                        event.location,
+                        plan.departureMillis,
+                        plan.arrivalMillis,
+                        settings.reminderLeadMinutes,
+                        title,
+                        description
+                    )
+                }
+            }.onFailure {
+                AutomationNotifier.notifyRoutingFailure(
+                    applicationContext,
+                    settings.language,
+                    origin,
+                    event.location,
+                    event.startMillis,
+                    previousEnd
+                )
+            }
+
+            if (overlapsPrevious) {
+                AutomationNotifier.notifyConflict(
+                    applicationContext,
+                    settings.language,
+                    event.location,
+                    plan.departureMillis
+                )
+            }
+            previousEnd = event.endMillis
+        }
+        return Result.success()
     }
 
     private suspend fun routeWithRetry(routes: RoutingService, request: RouteRequest): RouteEstimate? {
