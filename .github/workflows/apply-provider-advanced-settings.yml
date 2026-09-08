@@ -33,28 +33,27 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path, old, new):
-              p = Path(path)
-              text = p.read_text()
+          def require_replace(text, old, new, label):
               if old not in text:
-                  raise SystemExit(f"Pattern not found in {path}: {old[:120]!r}")
-              p.write_text(text.replace(old, new, 1))
+                  raise SystemExit(f"Pattern not found: {label}")
+              return text.replace(old, new, 1)
 
-          # Swiping away the ordinary processing notification must not cancel work.
-          replace_once(
-              "app/src/main/java/de/drivetime/notifier/automation/AutomationNotifier.kt",
+          p = Path("app/src/main/java/de/drivetime/notifier/automation/AutomationNotifier.kt")
+          text = p.read_text()
+          text = require_replace(
+              text,
               ".setOngoing(false)\n            .setDeleteIntent(cancelPending)\n            .addAction(0, tr(language, \"Cancel\", \"Abbrechen\"), cancelPending)",
-              ".setOngoing(false)\n            .addAction(0, tr(language, \"Cancel\", \"Abbrechen\"), cancelPending)"
+              ".setOngoing(false)\n            .addAction(0, tr(language, \"Cancel\", \"Abbrechen\"), cancelPending)",
+              "processing delete intent"
           )
+          p.write_text(text)
 
-          # Persistent per-provider timeout model. Request caps are treated as daily local limits.
-          settings_path = Path("app/src/main/java/de/drivetime/notifier/data/SettingsStore.kt")
-          s = settings_path.read_text()
+          p = Path("app/src/main/java/de/drivetime/notifier/data/SettingsStore.kt")
+          s = p.read_text()
           s = s.replace("val google: LimitPeriod = LimitPeriod.MONTHLY,", "val google: LimitPeriod = LimitPeriod.DAILY,", 1)
-
-          marker = "data class AppSettings("
-          idx = s.index(marker)
-          timeout_model = '''data class ProviderTimeouts(
+          if "data class ProviderTimeouts(" not in s:
+              idx = s.index("data class AppSettings(")
+              s = s[:idx] + '''data class ProviderTimeouts(
               val valhalla: Int = 18,
               val openRouteService: Int = 18,
               val osrm: Int = 14,
@@ -84,21 +83,19 @@ jobs:
               }
           }
 
-          '''
-          if "data class ProviderTimeouts(" not in s:
-              s = s[:idx] + timeout_model + s[idx:]
-
-          s = s.replace(
+          ''' + s[idx:]
+          s = require_replace(
+              s,
               "    val providerLimitPeriods: ProviderLimitPeriods = ProviderLimitPeriods(),\n    val fallbackProviderIds: List<String> = emptyList()",
               "    val providerLimitPeriods: ProviderLimitPeriods = ProviderLimitPeriods(),\n    val providerTimeoutSeconds: ProviderTimeouts = ProviderTimeouts(),\n    val fallbackProviderIds: List<String> = emptyList()",
-              1
+              "AppSettings timeout field"
           )
-          s = s.replace(
+          s = require_replace(
+              s,
               "        val PERIOD_TOMTOM = stringPreferencesKey(\"period_tomtom\")\n        val FALLBACK_PROVIDERS = stringPreferencesKey(\"fallback_providers\")",
               "        val PERIOD_TOMTOM = stringPreferencesKey(\"period_tomtom\")\n        val TIMEOUT_VALHALLA = intPreferencesKey(\"timeout_valhalla_seconds\")\n        val TIMEOUT_ORS = intPreferencesKey(\"timeout_openrouteservice_seconds\")\n        val TIMEOUT_GOOGLE = intPreferencesKey(\"timeout_google_seconds\")\n        val TIMEOUT_HERE = intPreferencesKey(\"timeout_here_seconds\")\n        val TIMEOUT_GRAPHHOPPER = intPreferencesKey(\"timeout_graphhopper_seconds\")\n        val TIMEOUT_OSRM = intPreferencesKey(\"timeout_osrm_seconds\")\n        val TIMEOUT_TOMTOM = intPreferencesKey(\"timeout_tomtom_seconds\")\n        val FALLBACK_PROVIDERS = stringPreferencesKey(\"fallback_providers\")",
-              1
+              "timeout preference keys"
           )
-
           start = s.index("            providerLimitPeriods = ProviderLimitPeriods(")
           end = s.index("            fallbackProviderIds =", start)
           s = s[:start] + '''            providerLimitPeriods = ProviderLimitPeriods(),
@@ -112,39 +109,44 @@ jobs:
                   tomTom = p[K.TIMEOUT_TOMTOM] ?: 16
               ),
           ''' + s[end:]
-
-          s = s.replace(
-              "        p[K.PERIOD_TOMTOM] = s.providerLimitPeriods.tomTom.id\n        p[K.CAP_DEFAULTS_VERSION] = 2",
-              "        p[K.PERIOD_TOMTOM] = LimitPeriod.DAILY.id\n        p[K.TIMEOUT_VALHALLA] = sanitizeTimeout(s.providerTimeoutSeconds.valhalla)\n        p[K.TIMEOUT_ORS] = sanitizeTimeout(s.providerTimeoutSeconds.openRouteService)\n        p[K.TIMEOUT_GOOGLE] = sanitizeTimeout(s.providerTimeoutSeconds.google)\n        p[K.TIMEOUT_HERE] = sanitizeTimeout(s.providerTimeoutSeconds.here)\n        p[K.TIMEOUT_GRAPHHOPPER] = sanitizeTimeout(s.providerTimeoutSeconds.graphHopper)\n        p[K.TIMEOUT_OSRM] = sanitizeTimeout(s.providerTimeoutSeconds.osrm)\n        p[K.TIMEOUT_TOMTOM] = sanitizeTimeout(s.providerTimeoutSeconds.tomTom)\n        p[K.CAP_DEFAULTS_VERSION] = 2",
-              1
+          period_lines = {
+              "p[K.PERIOD_VALHALLA] = s.providerLimitPeriods.valhalla.id": "p[K.PERIOD_VALHALLA] = LimitPeriod.DAILY.id",
+              "p[K.PERIOD_ORS] = s.providerLimitPeriods.openRouteService.id": "p[K.PERIOD_ORS] = LimitPeriod.DAILY.id",
+              "p[K.PERIOD_GOOGLE] = s.providerLimitPeriods.google.id": "p[K.PERIOD_GOOGLE] = LimitPeriod.DAILY.id",
+              "p[K.PERIOD_HERE] = s.providerLimitPeriods.here.id": "p[K.PERIOD_HERE] = LimitPeriod.DAILY.id",
+              "p[K.PERIOD_GRAPHHOPPER] = s.providerLimitPeriods.graphHopper.id": "p[K.PERIOD_GRAPHHOPPER] = LimitPeriod.DAILY.id",
+              "p[K.PERIOD_OSRM] = s.providerLimitPeriods.osrm.id": "p[K.PERIOD_OSRM] = LimitPeriod.DAILY.id",
+              "p[K.PERIOD_TOMTOM] = s.providerLimitPeriods.tomTom.id": "p[K.PERIOD_TOMTOM] = LimitPeriod.DAILY.id"
+          }
+          for old, new in period_lines.items():
+              s = require_replace(s, old, new, old)
+          marker = "        p[K.PERIOD_TOMTOM] = LimitPeriod.DAILY.id\n"
+          s = require_replace(
+              s,
+              marker,
+              marker +
+              "        p[K.TIMEOUT_VALHALLA] = sanitizeTimeout(s.providerTimeoutSeconds.valhalla)\n" +
+              "        p[K.TIMEOUT_ORS] = sanitizeTimeout(s.providerTimeoutSeconds.openRouteService)\n" +
+              "        p[K.TIMEOUT_GOOGLE] = sanitizeTimeout(s.providerTimeoutSeconds.google)\n" +
+              "        p[K.TIMEOUT_HERE] = sanitizeTimeout(s.providerTimeoutSeconds.here)\n" +
+              "        p[K.TIMEOUT_GRAPHHOPPER] = sanitizeTimeout(s.providerTimeoutSeconds.graphHopper)\n" +
+              "        p[K.TIMEOUT_OSRM] = sanitizeTimeout(s.providerTimeoutSeconds.osrm)\n" +
+              "        p[K.TIMEOUT_TOMTOM] = sanitizeTimeout(s.providerTimeoutSeconds.tomTom)\n",
+              "persist timeout values"
           )
-          for key in ["VALHALLA", "ORS", "GOOGLE", "HERE", "GRAPHHOPPER", "OSRM"]:
-              s = s.replace(f"p[K.PERIOD_{key}] = s.providerLimitPeriods.", f"p[K.PERIOD_{key}] = s.providerLimitPeriods.", 1)
-          # Store every period as daily. The model is retained for old backup compatibility.
-          s = s.replace("p[K.PERIOD_VALHALLA] = s.providerLimitPeriods.valhalla.id", "p[K.PERIOD_VALHALLA] = LimitPeriod.DAILY.id", 1)
-          s = s.replace("p[K.PERIOD_ORS] = s.providerLimitPeriods.openRouteService.id", "p[K.PERIOD_ORS] = LimitPeriod.DAILY.id", 1)
-          s = s.replace("p[K.PERIOD_GOOGLE] = s.providerLimitPeriods.google.id", "p[K.PERIOD_GOOGLE] = LimitPeriod.DAILY.id", 1)
-          s = s.replace("p[K.PERIOD_HERE] = s.providerLimitPeriods.here.id", "p[K.PERIOD_HERE] = LimitPeriod.DAILY.id", 1)
-          s = s.replace("p[K.PERIOD_GRAPHHOPPER] = s.providerLimitPeriods.graphHopper.id", "p[K.PERIOD_GRAPHHOPPER] = LimitPeriod.DAILY.id", 1)
-          s = s.replace("p[K.PERIOD_OSRM] = s.providerLimitPeriods.osrm.id", "p[K.PERIOD_OSRM] = LimitPeriod.DAILY.id", 1)
-          s = s.replace(
+          s = require_replace(
+              s,
               "    private fun sanitizeCap(value: Int) = value.coerceIn(1, 1_000_000)\n",
               "    private fun sanitizeCap(value: Int) = value.coerceIn(1, 1_000_000)\n    private fun sanitizeTimeout(value: Int) = value.coerceIn(1, 300)\n",
-              1
+              "sanitize timeout"
           )
-          settings_path.write_text(s)
+          p.write_text(s)
 
-          # Apply the configured timeout to each provider call. A failed provider no longer owns a global timeout budget.
-          unified = Path("app/src/main/java/de/drivetime/notifier/routing/UnifiedRoutingService.kt")
-          u = unified.read_text()
-          old_client = '''    private val client: OkHttpClient = OkHttpClient.Builder()
-                  .connectTimeout(if (automated) 8 else 6, TimeUnit.SECONDS)
-                  .readTimeout(readTimeoutSeconds(), TimeUnit.SECONDS)
-                  .callTimeout(callTimeoutSeconds(), TimeUnit.SECONDS)
-                  .retryOnConnectionFailure(true)
-                  .build()
-          '''
-          new_client = '''    private val timeoutSeconds = settings.providerTimeoutSeconds
+          p = Path("app/src/main/java/de/drivetime/notifier/routing/UnifiedRoutingService.kt")
+          u = p.read_text()
+          start = u.index("    private val client: OkHttpClient")
+          end = u.index("\n\n    override suspend fun route", start)
+          u = u[:start] + '''    private val timeoutSeconds = settings.providerTimeoutSeconds
                   .forProvider(settings.routingProvider)
                   .coerceIn(1, 300)
                   .toLong()
@@ -154,26 +156,17 @@ jobs:
                   .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
                   .retryOnConnectionFailure(true)
                   .build()
-          '''
-          if old_client not in u:
-              raise SystemExit("UnifiedRoutingService client block not found")
-          u = u.replace(old_client, new_client, 1)
+          ''' + u[end:]
           start = u.index("    private fun readTimeoutSeconds(): Long")
           end = u.index("    private fun valhalla", start)
           u = u[:start] + u[end:]
-          unified.write_text(u)
+          p.write_text(u)
 
-          # Connectivity tests use the same per-provider timeout and changing it invalidates the previous test state.
-          checker = Path("app/src/main/java/de/drivetime/notifier/routing/ProviderConnectivityChecker.kt")
-          c = checker.read_text()
-          c = c.replace(
-              '''    private val client = OkHttpClient.Builder()
-                  .connectTimeout(7, TimeUnit.SECONDS)
-                  .readTimeout(10, TimeUnit.SECONDS)
-                  .callTimeout(12, TimeUnit.SECONDS)
-                  .build()
-          ''',
-              '''    private fun client(timeoutSeconds: Int): OkHttpClient {
+          p = Path("app/src/main/java/de/drivetime/notifier/routing/ProviderConnectivityChecker.kt")
+          c = p.read_text()
+          start = c.index("    private val client = OkHttpClient.Builder()")
+          end = c.index("\n\n    suspend fun checkProvider", start)
+          c = c[:start] + '''    private fun client(timeoutSeconds: Int): OkHttpClient {
                   val timeout = timeoutSeconds.coerceIn(1, 300).toLong()
                   return OkHttpClient.Builder()
                       .connectTimeout(minOf(timeout, 8L), TimeUnit.SECONDS)
@@ -181,59 +174,18 @@ jobs:
                       .callTimeout(timeout, TimeUnit.SECONDS)
                       .build()
               }
-          ''',
-              1
-          )
-          c = c.replace("        execute(request, provider.displayName)\n", "        execute(request, provider.displayName, settings.providerTimeoutSeconds.forProvider(provider))\n", 1)
-          c = c.replace(
-              "    private fun execute(request: Request, label: String) {\n        client.newCall(request).execute().use { response ->",
-              "    private fun execute(request: Request, label: String, timeoutSeconds: Int = 12) {\n        client(timeoutSeconds).newCall(request).execute().use { response ->",
-              1
-          )
-          c = c.replace(
-              'return sha256("${provider.id}|$endpoint|$key")',
-              'return sha256("${provider.id}|$endpoint|$key|${settings.providerTimeoutSeconds.forProvider(provider)}")',
-              1
-          )
-          checker.write_text(c)
+          ''' + c[end:]
+          c = require_replace(c, "        execute(request, provider.displayName)\n", "        execute(request, provider.displayName, settings.providerTimeoutSeconds.forProvider(provider))\n", "provider test timeout")
+          c = require_replace(c, "    private fun execute(request: Request, label: String) {", "    private fun execute(request: Request, label: String, timeoutSeconds: Int = 12) {", "execute signature")
+          c = require_replace(c, "        client.newCall(request).execute().use { response ->", "        client(timeoutSeconds).newCall(request).execute().use { response ->", "execute client")
+          c = require_replace(c, 'return sha256("${provider.id}|$endpoint|$key")', 'return sha256("${provider.id}|$endpoint|$key|${settings.providerTimeoutSeconds.forProvider(provider)}")', "provider fingerprint timeout")
+          p.write_text(c)
 
-          # Provider cards expose daily cap and timeout under a collapsible Advanced area.
-          main = Path("app/src/main/java/de/drivetime/notifier/MainActivity.kt")
-          m = main.read_text()
-          old_calc = '''                val result = withTimeoutOrNull(28_000) {
-                      runCatching {
-                          val route = RoutingServiceFactory.create(context, settings)
-                              .route(RouteRequest(origin.trim(), destination.trim(), target))
-                          val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
-                          val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
-                          val routePois = if ((settings.showSpeedCameras || settings.showParking) && points.size >= 2) {
-                              withTimeoutOrNull(13_000) {
-                                  OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
-                              }.orEmpty()
-                          } else emptyList()
-                          Triple(route, plan, routePois)
-                      }
-                  }
-                  if (result == null) {
-                      error = tr(settings.language, "The routing service timed out. Try again or choose another provider.", "Der Routingdienst hat das Zeitlimit überschritten. Versuche es erneut oder wähle einen anderen Anbieter.")
-                  } else {
-                      result.onSuccess { (route, plan, routePois) ->
-                          estimate = route
-                          plannedStart = plan.departureMillis
-                          plannedEnd = plan.arrivalMillis
-                          pois = routePois
-                          val previousEnd = previousEndMillis
-                          planConflict = previousEnd != null && plan.departureMillis < previousEnd
-                          planWarning = listOfNotNull(
-                              planWarningText(settings.language, plan, settings.bufferMinutes),
-                              routeWarningText(settings.language, settings.routingProvider, route.warning)
-                          ).joinToString(" ").ifBlank { null }
-                      }.onFailure {
-                          error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
-                      }
-                  }
-          '''
-          new_calc = '''                val result = runCatching {
+          p = Path("app/src/main/java/de/drivetime/notifier/MainActivity.kt")
+          m = p.read_text()
+          start = m.index("                val result = withTimeoutOrNull(28_000) {")
+          end = m.index("                loading = false", start)
+          m = m[:start] + '''                val result = runCatching {
                       val route = RoutingServiceFactory.create(context, settings)
                           .route(RouteRequest(origin.trim(), destination.trim(), target))
                       val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
@@ -259,23 +211,11 @@ jobs:
                   }.onFailure {
                       error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
                   }
-          '''
-          if old_calc not in m:
-              raise SystemExit("MainActivity calculateRoute block not found")
-          m = m.replace(old_calc, new_calc, 1)
-
-          old_call = '''                        onCap = { cap ->
-                              onChange(settings.copy(providerCaps = settings.providerCaps.withProvider(provider, cap)))
-                          },
-                          onPeriod = { period ->
-                              onChange(
-                                  settings.copy(
-                                      providerLimitPeriods = settings.providerLimitPeriods.withProvider(provider, period)
-                                  )
-                              )
-                          }
-          '''
-          new_call = '''                        onCap = { cap ->
+          ''' + m[end:]
+          call_anchor = m.index("                    ProviderCard(")
+          start = m.index("                        onCap = { cap ->", call_anchor)
+          end = m.index("                    )\n                    Spacer(Modifier.height(10.dp))", start)
+          m = m[:start] + '''                        onCap = { cap ->
                               onChange(settings.copy(providerCaps = settings.providerCaps.withProvider(provider, cap)))
                           },
                           onTimeout = { seconds ->
@@ -285,21 +225,11 @@ jobs:
                                   )
                               )
                           }
-          '''
-          if old_call not in m:
-              raise SystemExit("ProviderCard call block not found")
-          m = m.replace(old_call, new_call, 1)
-
-          old_sig = '''        onSelect: () -> Unit,
-              onCap: (Int) -> Unit,
-              onPeriod: (LimitPeriod) -> Unit
-          ) {
-              val period = settings.providerLimitPeriods.forProvider(provider)
-              val used = remember(provider, period, settings.providerCaps) {
-                  RequestBudgetStore(this).used(provider, period)
-              }
-          '''
-          new_sig = '''        onSelect: () -> Unit,
+          ''' + m[end:]
+          card = m.index("    private fun ProviderCard(")
+          start = m.index("        onSelect: () -> Unit,", card)
+          end = m.index("        val key = keyStore.read(provider).orEmpty()", start)
+          m = m[:start] + '''        onSelect: () -> Unit,
               onCap: (Int) -> Unit,
               onTimeout: (Int) -> Unit
           ) {
@@ -307,51 +237,11 @@ jobs:
                   RequestBudgetStore(this).used(provider, LimitPeriod.DAILY)
               }
               var advancedExpanded by rememberSaveable(provider.id) { mutableStateOf(false) }
-          '''
-          if old_sig not in m:
-              raise SystemExit("ProviderCard signature block not found")
-          m = m.replace(old_sig, new_sig, 1)
-
-          old_advanced = '''                if (selected) {
-                      Spacer(Modifier.height(10.dp))
-                      Text(
-                          tr(settings.language, "Request cap period", "Zeitraum des Anfrage-Limits"),
-                          style = MaterialTheme.typography.labelMedium
-                      )
-                      Row(
-                          Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                          horizontalArrangement = Arrangement.spacedBy(8.dp)
-                      ) {
-                          LimitPeriod.entries.forEach { option ->
-                              FilterChip(
-                                  selected = period == option,
-                                  onClick = { onPeriod(option) },
-                                  label = { Text(limitPeriodLabel(settings.language, option)) }
-                              )
-                          }
-                      }
-                      Spacer(Modifier.height(6.dp))
-                      NumberDraftField(
-                          initialValue = settings.providerCaps.forProvider(provider),
-                          label = tr(
-                              settings.language,
-                              "Request cap (${limitPeriodLabel(settings.language, period)})",
-                              "Anfrage-Limit (${limitPeriodLabel(settings.language, period)})"
-                          ),
-                          onValid = { onCap(it.coerceIn(1, 1_000_000)) }
-                      )
-                      Text(
-                          tr(
-                              settings.language,
-                              "Used in the current period: $used. This is a local hard stop, not a provider billing meter and not a guarantee against provider-side charges.",
-                              "Im aktuellen Zeitraum genutzt: $used. Das ist ein lokaler harter Stopp, kein Abrechnungszähler des Anbieters und keine Garantie gegen Kosten auf Anbieterseite."
-                          ),
-                          style = MaterialTheme.typography.bodySmall,
-                          color = MaterialTheme.colorScheme.onSurfaceVariant
-                      )
-                  }
-          '''
-          new_advanced = '''                Spacer(Modifier.height(8.dp))
+          ''' + m[end:]
+          desc_anchor = m.index("providerDescription(provider, settings.language)", card)
+          start = m.index("                if (selected) {", desc_anchor)
+          end = m.index("            }\n        }\n    }\n\n    @Composable\n    private fun InterfaceStatusIcon", start)
+          m = m[:start] + '''                Spacer(Modifier.height(8.dp))
                   TextButton(
                       onClick = { advancedExpanded = !advancedExpanded },
                       modifier = Modifier.fillMaxWidth()
@@ -386,16 +276,13 @@ jobs:
                           color = MaterialTheme.colorScheme.onSurfaceVariant
                       )
                   }
-          '''
-          if old_advanced not in m:
-              raise SystemExit("ProviderCard advanced block not found")
-          m = m.replace(old_advanced, new_advanced, 1)
-          main.write_text(m)
+          ''' + m[end:]
+          p.write_text(m)
 
-          # Include timeout settings in password-protected device-transfer backups.
-          backup = Path("app/src/main/java/de/drivetime/notifier/security/PasswordBackup.kt")
-          b = backup.read_text()
-          b = b.replace(
+          p = Path("app/src/main/java/de/drivetime/notifier/security/PasswordBackup.kt")
+          b = p.read_text()
+          b = require_replace(
+              b,
               '''        put("providerPeriods", JSONObject().apply {
                   RoutingProvider.entries.forEach { put(it.id, s.providerLimitPeriods.forProvider(it).id) }
               })
@@ -407,47 +294,32 @@ jobs:
                   RoutingProvider.entries.forEach { put(it.id, s.providerTimeoutSeconds.forProvider(it)) }
               })
           ''',
-              1
+              "backup timeout export"
           )
-          b = b.replace(
-              '''        val periodsJson = j.optJSONObject("providerPeriods") ?: JSONObject()
-              var caps = defaults.providerCaps
-              var periods = defaults.providerLimitPeriods
-          ''',
-              '''        val periodsJson = j.optJSONObject("providerPeriods") ?: JSONObject()
-              val timeoutsJson = j.optJSONObject("providerTimeoutSeconds") ?: JSONObject()
-              var caps = defaults.providerCaps
-              var periods = defaults.providerLimitPeriods
-              var timeouts = defaults.providerTimeoutSeconds
-          ''',
-              1
-          )
-          b = b.replace(
-              '''            periods = periods.withProvider(
+          b = require_replace(b, "        val periodsJson = j.optJSONObject(\"providerPeriods\") ?: JSONObject()\n", "        val periodsJson = j.optJSONObject(\"providerPeriods\") ?: JSONObject()\n        val timeoutsJson = j.optJSONObject(\"providerTimeoutSeconds\") ?: JSONObject()\n", "backup timeout json")
+          b = require_replace(b, "        var periods = defaults.providerLimitPeriods\n", "        var periods = defaults.providerLimitPeriods\n        var timeouts = defaults.providerTimeoutSeconds\n", "backup timeout variable")
+          loop_marker = '''            periods = periods.withProvider(
                   provider,
                   LimitPeriod.fromId(periodsJson.optString(provider.id, periods.forProvider(provider).id))
               )
-          ''',
-              '''            periods = periods.withProvider(provider, LimitPeriod.DAILY)
-              timeouts = timeouts.withProvider(
+          '''
+          b = require_replace(
+              b,
+              loop_marker,
+              loop_marker + '''            timeouts = timeouts.withProvider(
                   provider,
                   timeoutsJson.optInt(provider.id, timeouts.forProvider(provider)).coerceIn(1, 300)
               )
           ''',
-              1
+              "backup timeout import loop"
           )
-          b = b.replace(
-              "            providerLimitPeriods = periods,\n            fallbackProviderIds =",
-              "            providerLimitPeriods = periods,\n            providerTimeoutSeconds = timeouts,\n            fallbackProviderIds =",
-              1
-          )
-          backup.write_text(b)
+          b = require_replace(b, "            providerLimitPeriods = periods,\n            fallbackProviderIds =", "            providerLimitPeriods = periods,\n            providerTimeoutSeconds = timeouts,\n            fallbackProviderIds =", "backup AppSettings timeout")
+          p.write_text(b)
 
-          # Update model tests for daily caps and provider-specific timeout defaults.
-          test = Path("app/src/test/java/de/drivetime/notifier/data/ProviderDefaultsTest.kt")
-          t = test.read_text()
-          t = t.replace("assertEquals(LimitPeriod.MONTHLY, periods.google)", "assertEquals(LimitPeriod.DAILY, periods.google)", 1)
-          insert = '''
+          p = Path("app/src/test/java/de/drivetime/notifier/data/ProviderDefaultsTest.kt")
+          t = p.read_text().replace("assertEquals(LimitPeriod.MONTHLY, periods.google)", "assertEquals(LimitPeriod.DAILY, periods.google)", 1)
+          if "providerTimeoutDefaultsAreServiceSpecific" not in t:
+              insert = '''
 
               @Test
               fun providerTimeoutDefaultsAreServiceSpecific() {
@@ -461,9 +333,9 @@ jobs:
                   assertEquals(18, timeouts.here)
               }
           '''
-          if "providerTimeoutDefaultsAreServiceSpecific" not in t:
-              t = t.replace("\n}\n", insert + "\n}\n", 1)
-          test.write_text(t)
+              pos = t.rfind("\n}")
+              t = t[:pos] + insert + t[pos:]
+          p.write_text(t)
           PY
 
       - name: Verify and build debug APK
