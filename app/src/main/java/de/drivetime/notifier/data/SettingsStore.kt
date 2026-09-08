@@ -105,7 +105,7 @@ data class ProviderLimitPeriods(
     val openRouteService: LimitPeriod = LimitPeriod.DAILY,
     val osrm: LimitPeriod = LimitPeriod.DAILY,
     val graphHopper: LimitPeriod = LimitPeriod.DAILY,
-    val google: LimitPeriod = LimitPeriod.MONTHLY,
+    val google: LimitPeriod = LimitPeriod.DAILY,
     val here: LimitPeriod = LimitPeriod.DAILY,
     val tomTom: LimitPeriod = LimitPeriod.DAILY
 ) {
@@ -120,6 +120,36 @@ data class ProviderLimitPeriods(
     }
 
     fun withProvider(provider: RoutingProvider, value: LimitPeriod): ProviderLimitPeriods = when (provider) {
+        RoutingProvider.VALHALLA -> copy(valhalla = value)
+        RoutingProvider.OPENROUTESERVICE -> copy(openRouteService = value)
+        RoutingProvider.OSRM -> copy(osrm = value)
+        RoutingProvider.GRAPHHOPPER -> copy(graphHopper = value)
+        RoutingProvider.GOOGLE -> copy(google = value)
+        RoutingProvider.HERE -> copy(here = value)
+        RoutingProvider.TOMTOM -> copy(tomTom = value)
+    }
+}
+
+data class ProviderTimeouts(
+    val valhalla: Int = 18,
+    val openRouteService: Int = 18,
+    val osrm: Int = 14,
+    val graphHopper: Int = 18,
+    val google: Int = 22,
+    val here: Int = 18,
+    val tomTom: Int = 16
+) {
+    fun forProvider(provider: RoutingProvider): Int = when (provider) {
+        RoutingProvider.VALHALLA -> valhalla
+        RoutingProvider.OPENROUTESERVICE -> openRouteService
+        RoutingProvider.OSRM -> osrm
+        RoutingProvider.GRAPHHOPPER -> graphHopper
+        RoutingProvider.GOOGLE -> google
+        RoutingProvider.HERE -> here
+        RoutingProvider.TOMTOM -> tomTom
+    }
+
+    fun withProvider(provider: RoutingProvider, value: Int): ProviderTimeouts = when (provider) {
         RoutingProvider.VALHALLA -> copy(valhalla = value)
         RoutingProvider.OPENROUTESERVICE -> copy(openRouteService = value)
         RoutingProvider.OSRM -> copy(osrm = value)
@@ -156,6 +186,7 @@ data class AppSettings(
     val palette: ColorPalette = ColorPalette.MATERIAL_YOU,
     val providerCaps: ProviderCaps = ProviderCaps(),
     val providerLimitPeriods: ProviderLimitPeriods = ProviderLimitPeriods(),
+    val providerTimeoutSeconds: ProviderTimeouts = ProviderTimeouts(),
     val fallbackProviderIds: List<String> = emptyList()
 )
 
@@ -199,6 +230,13 @@ class SettingsStore(private val context: Context) {
         val PERIOD_GRAPHHOPPER = stringPreferencesKey("period_graphhopper")
         val PERIOD_OSRM = stringPreferencesKey("period_osrm")
         val PERIOD_TOMTOM = stringPreferencesKey("period_tomtom")
+        val TIMEOUT_VALHALLA = intPreferencesKey("timeout_valhalla_seconds")
+        val TIMEOUT_ORS = intPreferencesKey("timeout_openrouteservice_seconds")
+        val TIMEOUT_GOOGLE = intPreferencesKey("timeout_google_seconds")
+        val TIMEOUT_HERE = intPreferencesKey("timeout_here_seconds")
+        val TIMEOUT_GRAPHHOPPER = intPreferencesKey("timeout_graphhopper_seconds")
+        val TIMEOUT_OSRM = intPreferencesKey("timeout_osrm_seconds")
+        val TIMEOUT_TOMTOM = intPreferencesKey("timeout_tomtom_seconds")
         val FALLBACK_PROVIDERS = stringPreferencesKey("fallback_providers")
         val CAP_DEFAULTS_VERSION = intPreferencesKey("cap_defaults_version")
     }
@@ -238,23 +276,16 @@ class SettingsStore(private val context: Context) {
                 here = if (migratedCaps && (p[K.CAP_HERE] == null || p[K.CAP_HERE] == 100)) 1_000 else p[K.CAP_HERE] ?: 1_000,
                 tomTom = if (migratedCaps && (p[K.CAP_TOMTOM] == null || p[K.CAP_TOMTOM] == 100)) 2_500 else p[K.CAP_TOMTOM] ?: 2_500
             ),
-            providerLimitPeriods = ProviderLimitPeriods(
-                valhalla = LimitPeriod.fromId(p[K.PERIOD_VALHALLA]),
-                openRouteService = LimitPeriod.fromId(p[K.PERIOD_ORS]),
-                osrm = LimitPeriod.fromId(p[K.PERIOD_OSRM]),
-                graphHopper = LimitPeriod.fromId(p[K.PERIOD_GRAPHHOPPER]),
-                google = LimitPeriod.fromId(p[K.PERIOD_GOOGLE] ?: LimitPeriod.MONTHLY.id),
-                here = if (migratedCaps && (p[K.PERIOD_HERE] == null || p[K.PERIOD_HERE] == LimitPeriod.MONTHLY.id)) {
-                    LimitPeriod.DAILY
-                } else {
-                    LimitPeriod.fromId(p[K.PERIOD_HERE] ?: LimitPeriod.DAILY.id)
-                },
-                tomTom = if (migratedCaps && (p[K.PERIOD_TOMTOM] == null || p[K.PERIOD_TOMTOM] == LimitPeriod.MONTHLY.id)) {
-                    LimitPeriod.DAILY
-                } else {
-                    LimitPeriod.fromId(p[K.PERIOD_TOMTOM] ?: LimitPeriod.DAILY.id)
-                }
-            ),
+            providerLimitPeriods = ProviderLimitPeriods(),
+    providerTimeoutSeconds = ProviderTimeouts(
+        valhalla = (p[K.TIMEOUT_VALHALLA] ?: 18).coerceIn(1, 300),
+        openRouteService = (p[K.TIMEOUT_ORS] ?: 18).coerceIn(1, 300),
+        osrm = (p[K.TIMEOUT_OSRM] ?: 14).coerceIn(1, 300),
+        graphHopper = (p[K.TIMEOUT_GRAPHHOPPER] ?: 18).coerceIn(1, 300),
+        google = (p[K.TIMEOUT_GOOGLE] ?: 22).coerceIn(1, 300),
+        here = (p[K.TIMEOUT_HERE] ?: 18).coerceIn(1, 300),
+        tomTom = (p[K.TIMEOUT_TOMTOM] ?: 16).coerceIn(1, 300)
+    ),
             fallbackProviderIds = p[K.FALLBACK_PROVIDERS]
                 .orEmpty()
                 .split(",")
@@ -295,13 +326,20 @@ class SettingsStore(private val context: Context) {
         p[K.CAP_GRAPHHOPPER] = sanitizeCap(s.providerCaps.graphHopper)
         p[K.CAP_OSRM] = sanitizeCap(s.providerCaps.osrm)
         p[K.CAP_TOMTOM] = sanitizeCap(s.providerCaps.tomTom)
-        p[K.PERIOD_VALHALLA] = s.providerLimitPeriods.valhalla.id
-        p[K.PERIOD_ORS] = s.providerLimitPeriods.openRouteService.id
-        p[K.PERIOD_GOOGLE] = s.providerLimitPeriods.google.id
-        p[K.PERIOD_HERE] = s.providerLimitPeriods.here.id
-        p[K.PERIOD_GRAPHHOPPER] = s.providerLimitPeriods.graphHopper.id
-        p[K.PERIOD_OSRM] = s.providerLimitPeriods.osrm.id
-        p[K.PERIOD_TOMTOM] = s.providerLimitPeriods.tomTom.id
+        p[K.PERIOD_VALHALLA] = LimitPeriod.DAILY.id
+        p[K.PERIOD_ORS] = LimitPeriod.DAILY.id
+        p[K.PERIOD_GOOGLE] = LimitPeriod.DAILY.id
+        p[K.PERIOD_HERE] = LimitPeriod.DAILY.id
+        p[K.PERIOD_GRAPHHOPPER] = LimitPeriod.DAILY.id
+        p[K.PERIOD_OSRM] = LimitPeriod.DAILY.id
+        p[K.PERIOD_TOMTOM] = LimitPeriod.DAILY.id
+        p[K.TIMEOUT_VALHALLA] = sanitizeTimeout(s.providerTimeoutSeconds.valhalla)
+        p[K.TIMEOUT_ORS] = sanitizeTimeout(s.providerTimeoutSeconds.openRouteService)
+        p[K.TIMEOUT_GOOGLE] = sanitizeTimeout(s.providerTimeoutSeconds.google)
+        p[K.TIMEOUT_HERE] = sanitizeTimeout(s.providerTimeoutSeconds.here)
+        p[K.TIMEOUT_GRAPHHOPPER] = sanitizeTimeout(s.providerTimeoutSeconds.graphHopper)
+        p[K.TIMEOUT_OSRM] = sanitizeTimeout(s.providerTimeoutSeconds.osrm)
+        p[K.TIMEOUT_TOMTOM] = sanitizeTimeout(s.providerTimeoutSeconds.tomTom)
         p[K.CAP_DEFAULTS_VERSION] = 2
         p[K.FALLBACK_PROVIDERS] = s.fallbackProviderIds
             .filter { id -> RoutingProvider.entries.any { it.id == id } }
@@ -311,6 +349,7 @@ class SettingsStore(private val context: Context) {
     }
 
     private fun sanitizeCap(value: Int) = value.coerceIn(1, 1_000_000)
+    private fun sanitizeTimeout(value: Int) = value.coerceIn(1, 300)
 
     private fun sanitizeHttpsBaseUrl(value: String, fallback: String): String {
         val clean = value.trim().removeSuffix("/")

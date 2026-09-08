@@ -20,7 +20,20 @@ class ProviderDefaultsTest {
         assertEquals(LimitPeriod.DAILY, periods.tomTom)
         assertEquals(LimitPeriod.DAILY, periods.openRouteService)
         assertEquals(LimitPeriod.DAILY, periods.graphHopper)
-        assertEquals(LimitPeriod.MONTHLY, periods.google)
+        assertEquals(LimitPeriod.DAILY, periods.google)
         assertEquals(LimitPeriod.DAILY, periods.here)
     }
+
+    @Test
+    fun providerTimeoutDefaultsAreServiceSpecific() {
+        val timeouts = ProviderTimeouts()
+        assertEquals(16, timeouts.tomTom)
+        assertEquals(18, timeouts.valhalla)
+        assertEquals(18, timeouts.openRouteService)
+        assertEquals(14, timeouts.osrm)
+        assertEquals(18, timeouts.graphHopper)
+        assertEquals(22, timeouts.google)
+        assertEquals(18, timeouts.here)
+    }
+
 }

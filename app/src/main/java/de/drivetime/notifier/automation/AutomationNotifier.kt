@@ -64,7 +64,6 @@ object AutomationNotifier {
             .setOnlyAlertOnce(true)
             .setProgress(0, 0, true)
             .setOngoing(false)
-            .setDeleteIntent(cancelPending)
             .addAction(0, tr(language, "Cancel", "Abbrechen"), cancelPending)
             .build()
 

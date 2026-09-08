@@ -28,12 +28,17 @@ class UnifiedRoutingService(
     private val budget: RequestBudgetStore,
     private val automated: Boolean = false
 ) : RoutingService {
+    private val timeoutSeconds = settings.providerTimeoutSeconds
+        .forProvider(settings.routingProvider)
+        .coerceIn(1, 300)
+        .toLong()
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(if (automated) 8 else 6, TimeUnit.SECONDS)
-        .readTimeout(readTimeoutSeconds(), TimeUnit.SECONDS)
-        .callTimeout(callTimeoutSeconds(), TimeUnit.SECONDS)
+        .connectTimeout(minOf(timeoutSeconds, 8L), TimeUnit.SECONDS)
+        .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+        .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
+
 
     override suspend fun route(request: RouteRequest): RouteEstimate = withContext(Dispatchers.IO) {
         val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName)
@@ -68,20 +73,6 @@ class UnifiedRoutingService(
 
     fun cancelActiveCalls() {
         client.dispatcher.cancelAll()
-    }
-
-    private fun readTimeoutSeconds(): Long = when {
-        automated && settings.routingProvider == RoutingProvider.TOMTOM -> 14
-        automated -> 18
-        settings.routingProvider == RoutingProvider.TOMTOM -> 8
-        else -> 9
-    }
-
-    private fun callTimeoutSeconds(): Long = when {
-        automated && settings.routingProvider == RoutingProvider.TOMTOM -> 16
-        automated -> 20
-        settings.routingProvider == RoutingProvider.TOMTOM -> 10
-        else -> 11
     }
 
     private fun valhalla(oLat: Double, oLon: Double, dLat: Double, dLon: Double, arrival: Long): RouteEstimate {

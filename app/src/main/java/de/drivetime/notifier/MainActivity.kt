@@ -341,38 +341,32 @@ class MainActivity : ComponentActivity() {
             scope.launch {
                 val target = LocalDateTime.of(appointmentDate, appointmentTime)
                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                val result = withTimeoutOrNull(28_000) {
-                    runCatching {
-                        val route = RoutingServiceFactory.create(context, settings)
-                            .route(RouteRequest(origin.trim(), destination.trim(), target))
-                        val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
-                        val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
-                        val routePois = if ((settings.showSpeedCameras || settings.showParking) && points.size >= 2) {
-                            withTimeoutOrNull(13_000) {
-                                OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
-                            }.orEmpty()
-                        } else emptyList()
-                        Triple(route, plan, routePois)
-                    }
-                }
-                if (result == null) {
-                    error = tr(settings.language, "The routing service timed out. Try again or choose another provider.", "Der Routingdienst hat das Zeitlimit überschritten. Versuche es erneut oder wähle einen anderen Anbieter.")
-                } else {
-                    result.onSuccess { (route, plan, routePois) ->
-                        estimate = route
-                        plannedStart = plan.departureMillis
-                        plannedEnd = plan.arrivalMillis
-                        pois = routePois
-                        val previousEnd = previousEndMillis
-                        planConflict = previousEnd != null && plan.departureMillis < previousEnd
-                        planWarning = listOfNotNull(
-                            planWarningText(settings.language, plan, settings.bufferMinutes),
-                            routeWarningText(settings.language, settings.routingProvider, route.warning)
-                        ).joinToString(" ").ifBlank { null }
-                    }.onFailure {
-                        error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
-                    }
-                }
+                val result = runCatching {
+            val route = RoutingServiceFactory.create(context, settings)
+                .route(RouteRequest(origin.trim(), destination.trim(), target))
+            val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
+            val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
+            val routePois = if ((settings.showSpeedCameras || settings.showParking) && points.size >= 2) {
+                withTimeoutOrNull(13_000) {
+                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                }.orEmpty()
+            } else emptyList()
+            Triple(route, plan, routePois)
+        }
+        result.onSuccess { (route, plan, routePois) ->
+            estimate = route
+            plannedStart = plan.departureMillis
+            plannedEnd = plan.arrivalMillis
+            pois = routePois
+            val previousEnd = previousEndMillis
+            planConflict = previousEnd != null && plan.departureMillis < previousEnd
+            planWarning = listOfNotNull(
+                planWarningText(settings.language, plan, settings.bufferMinutes),
+                routeWarningText(settings.language, settings.routingProvider, route.warning)
+            ).joinToString(" ").ifBlank { null }
+        }.onFailure {
+            error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
+        }
                 loading = false
             }
         }
@@ -1339,15 +1333,15 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         onCap = { cap ->
-                            onChange(settings.copy(providerCaps = settings.providerCaps.withProvider(provider, cap)))
-                        },
-                        onPeriod = { period ->
-                            onChange(
-                                settings.copy(
-                                    providerLimitPeriods = settings.providerLimitPeriods.withProvider(provider, period)
-                                )
-                            )
-                        }
+                    onChange(settings.copy(providerCaps = settings.providerCaps.withProvider(provider, cap)))
+                },
+                onTimeout = { seconds ->
+                    onChange(
+                        settings.copy(
+                            providerTimeoutSeconds = settings.providerTimeoutSeconds.withProvider(provider, seconds)
+                        )
+                    )
+                }
                     )
                     Spacer(Modifier.height(10.dp))
                 }
@@ -1794,13 +1788,13 @@ class MainActivity : ComponentActivity() {
         interfaceHealthStore: InterfaceHealthStore,
         healthRevision: Int,
         onSelect: () -> Unit,
-        onCap: (Int) -> Unit,
-        onPeriod: (LimitPeriod) -> Unit
-    ) {
-        val period = settings.providerLimitPeriods.forProvider(provider)
-        val used = remember(provider, period, settings.providerCaps) {
-            RequestBudgetStore(this).used(provider, period)
-        }
+    onCap: (Int) -> Unit,
+    onTimeout: (Int) -> Unit
+) {
+    val used = remember(provider, settings.providerCaps) {
+        RequestBudgetStore(this).used(provider, LimitPeriod.DAILY)
+    }
+    var advancedExpanded by rememberSaveable(provider.id) { mutableStateOf(false) }
         val key = keyStore.read(provider).orEmpty()
         val interfaceStatus = remember(
             provider,
@@ -1867,44 +1861,41 @@ class MainActivity : ComponentActivity() {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (selected) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        tr(settings.language, "Request cap period", "Zeitraum des Anfrage-Limits"),
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        LimitPeriod.entries.forEach { option ->
-                            FilterChip(
-                                selected = period == option,
-                                onClick = { onPeriod(option) },
-                                label = { Text(limitPeriodLabel(settings.language, option)) }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    NumberDraftField(
-                        initialValue = settings.providerCaps.forProvider(provider),
-                        label = tr(
-                            settings.language,
-                            "Request cap (${limitPeriodLabel(settings.language, period)})",
-                            "Anfrage-Limit (${limitPeriodLabel(settings.language, period)})"
-                        ),
-                        onValid = { onCap(it.coerceIn(1, 1_000_000)) }
-                    )
-                    Text(
-                        tr(
-                            settings.language,
-                            "Used in the current period: $used. This is a local hard stop, not a provider billing meter and not a guarantee against provider-side charges.",
-                            "Im aktuellen Zeitraum genutzt: $used. Das ist ein lokaler harter Stopp, kein Abrechnungszähler des Anbieters und keine Garantie gegen Kosten auf Anbieterseite."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = { advancedExpanded = !advancedExpanded },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                if (advancedExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = null
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(tr(settings.language, "Advanced", "Erweitert"))
+        }
+        if (advancedExpanded) {
+            NumberDraftField(
+                initialValue = settings.providerCaps.forProvider(provider),
+                label = tr(settings.language, "Daily request limit", "Tägliches Anfrage-Limit"),
+                onValid = { onCap(it.coerceIn(1, 1_000_000)) }
+            )
+            Spacer(Modifier.height(8.dp))
+            NumberDraftField(
+                initialValue = settings.providerTimeoutSeconds.forProvider(provider),
+                label = tr(settings.language, "Timeout in seconds", "Timeout in Sekunden"),
+                onValid = { onTimeout(it.coerceIn(1, 300)) }
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                tr(
+                    settings.language,
+                    "Used today: $used. The daily limit is a local hard stop. The timeout applies to each request to this provider and can be set from 1 to 300 seconds.",
+                    "Heute genutzt: $used. Das Tageslimit ist ein lokaler harter Stopp. Der Timeout gilt für jede Anfrage an diesen Dienst und kann zwischen 1 und 300 Sekunden eingestellt werden."
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
             }
         }
     }
