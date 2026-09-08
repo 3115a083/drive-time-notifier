@@ -1,0 +1,51 @@
+name: Apply import calendar fix
+
+on:
+  push:
+    branches:
+      - feature/background-dedup-timeouts
+    paths:
+      - .github/workflows/apply-import-calendar-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/background-dedup-timeouts
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Apply fix
+        run: python3 .github/scripts/fix_import_calendar.py
+      - name: Test and build
+        run: gradle clean test lint assembleDebug assembleRelease --stacktrace
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: drive-time-notifier-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Commit verified fix
+        run: |
+          git config user.name "3115a083"
+          git config user.email "9198182+3115a083@users.noreply.github.com"
+          git fetch origin main
+          git show origin/main:.github/workflows/android.yml > .github/workflows/android.yml
+          rm -f .github/workflows/patch-import-calendar-reselection.yml
+          rm -f .github/workflows/patch-import-calendar-reselection-v2.yml
+          rm -f .github/workflows/apply-import-calendar-fix.yml
+          rm -f .github/scripts/fix_import_calendar.py
+          git add -A
+          git commit -m "Fix imported calendar reselection flow"
+          git push origin HEAD:feature/background-dedup-timeouts
