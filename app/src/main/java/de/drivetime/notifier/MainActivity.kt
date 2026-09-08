@@ -935,6 +935,7 @@ class MainActivity : ComponentActivity() {
         var showCalendarReselectionPrompt by remember { mutableStateOf(false) }
         var calendarReselectionFlow by remember { mutableStateOf(false) }
         var pendingImportedSettings by remember { mutableStateOf<AppSettings?>(null) }
+        var pendingImportedApiKeys by remember { mutableStateOf<Map<RoutingProvider, String>>(emptyMap()) }
         var pendingReselectedSourceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
         var restoreAutomaticAfterCalendarSelection by remember { mutableStateOf(false) }
         var automationToken by remember { mutableStateOf(AutomationTokenStore(context).token()) }
@@ -945,6 +946,18 @@ class MainActivity : ComponentActivity() {
         var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
         var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
         val latestSettings by rememberUpdatedState(settings)
+
+        fun cancelCalendarReselection() {
+            showCalendarReselectionPrompt = false
+            calendarReselectionFlow = false
+            showSourcePicker = false
+            showTargetPicker = false
+            pendingImportedSettings = null
+            pendingImportedApiKeys = emptyMap()
+            pendingReselectedSourceIds = emptySet()
+            restoreAutomaticAfterCalendarSelection = false
+            backupMessage = tr(settings.language, "Import canceled.", "Import abgebrochen.")
+        }
 
         val exportBackupLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -994,6 +1007,11 @@ class MainActivity : ComponentActivity() {
 
         LaunchedEffect(hasCalendarPermission) {
             calendars = if (hasCalendarPermission) runCatching { calendarRepo.calendars() }.getOrDefault(emptyList()) else emptyList()
+        }
+        LaunchedEffect(hasCalendarPermission, showSourcePicker, showTargetPicker) {
+            if (hasCalendarPermission && (showSourcePicker || showTargetPicker)) {
+                calendars = runCatching { calendarRepo.calendars() }.getOrDefault(emptyList())
+            }
         }
         LaunchedEffect(homeNameDraft) {
             delay(500)
@@ -1651,7 +1669,7 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                         result.onSuccess { imported ->
-                                            imported.apiKeys.forEach { (provider, value) -> keyStore.save(provider, value) }
+                                            pendingImportedApiKeys = imported.apiKeys
                                             val restored = imported.settings.copy(
                                                 sourceCalendarIds = emptySet(),
                                                 targetCalendarId = -1L,
@@ -1703,7 +1721,7 @@ class MainActivity : ComponentActivity() {
 
         if (showCalendarReselectionPrompt) {
             AlertDialog(
-                onDismissRequest = {},
+                onDismissRequest = { cancelCalendarReselection() },
                 title = { Text(tr(settings.language, "Select calendars again", "Kalender erneut festlegen")) },
                 text = {
                     Text(
@@ -1716,12 +1734,33 @@ class MainActivity : ComponentActivity() {
                 },
                 confirmButton = {
                     Button(onClick = {
-                        showCalendarReselectionPrompt = false
-                        calendarReselectionFlow = true
-                        pendingReselectedSourceIds = emptySet()
-                        showSourcePicker = true
+                        if (!hasCalendarPermission) {
+                            onRequestCalendarPermission()
+                        } else {
+                            scope.launch {
+                                val refreshed = runCatching { calendarRepo.calendars() }.getOrDefault(emptyList())
+                                calendars = refreshed
+                                if (refreshed.isEmpty()) {
+                                    backupMessage = tr(
+                                        settings.language,
+                                        "No calendars are available on this device. Check calendar permission and synchronization, then try again.",
+                                        "Auf diesem Gerät sind keine Kalender verfügbar. Prüfe Kalenderberechtigung und Synchronisierung und versuche es erneut."
+                                    )
+                                } else {
+                                    showCalendarReselectionPrompt = false
+                                    calendarReselectionFlow = true
+                                    pendingReselectedSourceIds = emptySet()
+                                    showSourcePicker = true
+                                }
+                            }
+                        }
                     }) {
                         Text(tr(settings.language, "Select calendars", "Kalender festlegen"))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { cancelCalendarReselection() }) {
+                        Text(tr(settings.language, "Cancel import", "Import abbrechen"))
                     }
                 }
             )
@@ -1730,7 +1769,10 @@ class MainActivity : ComponentActivity() {
         if (showTargetPicker) {
             CalendarSinglePicker(
                 settings, calendars, if (calendarReselectionFlow) -1L else settings.targetCalendarId,
-                onDismiss = { if (!calendarReselectionFlow) showTargetPicker = false },
+                onDismiss = {
+                    if (calendarReselectionFlow) cancelCalendarReselection()
+                    else showTargetPicker = false
+                },
                 onSelect = { targetId ->
                     if (calendarReselectionFlow) {
                         val base = pendingImportedSettings ?: settings.copy(
@@ -1739,6 +1781,7 @@ class MainActivity : ComponentActivity() {
                             calendarStartLocations = emptySet(),
                             automaticEnabled = false
                         )
+                        pendingImportedApiKeys.forEach { (provider, value) -> keyStore.save(provider, value) }
                         onChange(
                             base.copy(
                                 sourceCalendarIds = pendingReselectedSourceIds,
@@ -1747,6 +1790,9 @@ class MainActivity : ComponentActivity() {
                             )
                         )
                         pendingImportedSettings = null
+                        pendingImportedApiKeys = emptyMap()
+                        pendingReselectedSourceIds = emptySet()
+                        restoreAutomaticAfterCalendarSelection = false
                         calendarReselectionFlow = false
                         showTargetPicker = false
                         backupMessage = tr(
@@ -1764,7 +1810,10 @@ class MainActivity : ComponentActivity() {
         if (showSourcePicker) {
             CalendarMultiPicker(
                 settings, calendars, if (calendarReselectionFlow) emptySet() else settings.sourceCalendarIds,
-                onDismiss = { if (!calendarReselectionFlow) showSourcePicker = false },
+                onDismiss = {
+                    if (calendarReselectionFlow) cancelCalendarReselection()
+                    else showSourcePicker = false
+                },
                 onApply = { selectedIds ->
                     if (calendarReselectionFlow) {
                         if (selectedIds.isNotEmpty()) {
