@@ -57,6 +57,17 @@ object PasswordBackup {
         password.fill('\u0000')
     }
 
+    fun hasValidHeader(input: InputStream): Boolean {
+        val header = ByteArray(MAGIC.size)
+        var offset = 0
+        while (offset < header.size) {
+            val read = input.read(header, offset, header.size - offset)
+            if (read <= 0) return false
+            offset += read
+        }
+        return header.contentEquals(MAGIC)
+    }
+
     fun import(input: InputStream, password: CharArray): BackupImportResult {
         require(password.size >= 8) { "Password must contain at least 8 characters." }
         val bytes = input.buffered().use { it.readBytes() }

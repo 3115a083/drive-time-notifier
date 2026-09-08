@@ -258,6 +258,41 @@ object AutomationNotifier {
             .notify((arrivalMillis xor destination.hashCode().toLong()).toInt().absoluteValue, notification)
     }
 
+    @SuppressLint("MissingPermission")
+    fun notifyBackgroundActionProblem(
+        context: Context,
+        language: AppLanguage,
+        english: String,
+        german: String
+    ) {
+        if (!canNotify(context)) return
+        createChannel(
+            context,
+            FAILURE_CHANNEL_ID,
+            tr(language, "Background action", "Hintergrundaktion"),
+            tr(language, "Problems while running a background app action.", "Probleme beim Ausführen einer Hintergrundaktion.")
+        )
+        val text = tr(language, english, german)
+        val openPending = PendingIntent.getActivity(
+            context,
+            text.hashCode(),
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        NotificationManagerCompat.from(context).notify(
+            70_000 + text.hashCode().absoluteValue % 10_000,
+            NotificationCompat.Builder(context, FAILURE_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(tr(language, "Background action could not run", "Hintergrundaktion konnte nicht ausgeführt werden"))
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .setContentIntent(openPending)
+                .build()
+        )
+    }
+
     fun cancelNotification(context: Context, notificationId: Int) {
         NotificationManagerCompat.from(context).cancel(notificationId)
     }

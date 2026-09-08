@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -75,9 +77,20 @@ import java.time.format.DateTimeFormatter
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        when (intent.action) {
+            AutomationReceiver.ACTION_PROCESS_NEXT_DAY -> {
+                AutomationScheduler.runNow(this)
+                finish()
+                return
+            }
+            ACTION_NEXT_DRIVE -> {
+                AutomationScheduler.runNextDriveNow(this)
+                finish()
+                return
+            }
+        }
         enableEdgeToEdge()
         Configuration.getInstance().userAgentValue = packageName
-        if (intent.action == AutomationReceiver.ACTION_PROCESS_NEXT_DAY) AutomationScheduler.runNow(this)
 
         val settingsStore = SettingsStore(this)
         setContent {
@@ -919,6 +932,11 @@ class MainActivity : ComponentActivity() {
         var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
         var pendingExportPassword by remember { mutableStateOf<String?>(null) }
         var backupMessage by remember { mutableStateOf<String?>(null) }
+        var showCalendarReselectionPrompt by remember { mutableStateOf(false) }
+        var calendarReselectionFlow by remember { mutableStateOf(false) }
+        var pendingImportedSettings by remember { mutableStateOf<AppSettings?>(null) }
+        var pendingReselectedSourceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+        var restoreAutomaticAfterCalendarSelection by remember { mutableStateOf(false) }
         var automationToken by remember { mutableStateOf(AutomationTokenStore(context).token()) }
         var homeNameDraft by remember { mutableStateOf(settings.homeName) }
         var homeDraft by remember { mutableStateOf(settings.homeAddress) }
@@ -954,9 +972,23 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.OpenDocument()
         ) { uri ->
             if (uri != null) {
-                pendingImportUri = uri
-                backupPassword = ""
-                backupPasswordMode = "import"
+                scope.launch {
+                    val valid = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { PasswordBackup.hasValidHeader(it) } == true
+                    }
+                    if (valid) {
+                        pendingImportUri = uri
+                        backupPassword = ""
+                        backupPasswordMode = "import"
+                    } else {
+                        pendingImportUri = null
+                        backupMessage = tr(
+                            latestSettings.language,
+                            "The selected file is not a Drive Time Notifier backup.",
+                            "Die ausgewählte Datei ist kein Drive-Time-Notifier-Backup."
+                        )
+                    }
+                }
             }
         }
 
@@ -1324,6 +1356,7 @@ class MainActivity : ComponentActivity() {
                         keyStore = keyStore,
                         interfaceHealthStore = interfaceHealthStore,
                         healthRevision = healthRevision,
+                        onHealthChanged = { healthRevision++ },
                         onSelect = {
                             onChange(
                                 settings.copy(
@@ -1450,7 +1483,7 @@ class MainActivity : ComponentActivity() {
                     OutlinedButton(
                         onClick = {
                             backupMessage = null
-                            importBackupLauncher.launch(arrayOf("application/octet-stream", "application/json", "*/*"))
+                            importBackupLauncher.launch(arrayOf("application/vnd.drivetime.notifier.backup", "application/octet-stream"))
                         },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -1619,19 +1652,24 @@ class MainActivity : ComponentActivity() {
                                         }
                                         result.onSuccess { imported ->
                                             imported.apiKeys.forEach { (provider, value) -> keyStore.save(provider, value) }
-                                            homeNameDraft = imported.settings.homeName
-                                            homeDraft = imported.settings.homeAddress
-                                            calendarTitleDraft = imported.settings.calendarEventTitle
-                                            osrmDraft = imported.settings.osrmBaseUrl
-                                            valhallaDraft = imported.settings.valhallaBaseUrl
-                                            photonDraft = imported.settings.photonBaseUrl
-                                            onChange(imported.settings)
-                                            healthRevision++
-                                            backupMessage = tr(
-                                                imported.settings.language,
-                                                "Backup imported. Review source and target calendars on this device.",
-                                                "Backup importiert. Prüfe Quell- und Zielkalender auf diesem Gerät."
+                                            val restored = imported.settings.copy(
+                                                sourceCalendarIds = emptySet(),
+                                                targetCalendarId = -1L,
+                                                calendarStartLocations = emptySet(),
+                                                automaticEnabled = false
                                             )
+                                            homeNameDraft = restored.homeName
+                                            homeDraft = restored.homeAddress
+                                            calendarTitleDraft = restored.calendarEventTitle
+                                            osrmDraft = restored.osrmBaseUrl
+                                            valhallaDraft = restored.valhallaBaseUrl
+                                            photonDraft = restored.photonBaseUrl
+                                            pendingImportedSettings = restored
+                                            pendingReselectedSourceIds = emptySet()
+                                            restoreAutomaticAfterCalendarSelection = imported.settings.automaticEnabled
+                                            healthRevision++
+                                            backupMessage = null
+                                            showCalendarReselectionPrompt = true
                                         }.onFailure {
                                             backupMessage = it.message ?: tr(
                                                 latestSettings.language,
@@ -1663,18 +1701,82 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        if (showCalendarReselectionPrompt) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text(tr(settings.language, "Select calendars again", "Kalender erneut festlegen")) },
+                text = {
+                    Text(
+                        tr(
+                            settings.language,
+                            "Calendar IDs are device-specific. Source calendars, target calendar and calendar-to-start-location assignments were intentionally not imported. Select the calendars on this device now. Automatic processing will be restored afterwards if it was enabled in the backup.",
+                            "Kalender-IDs sind gerätespezifisch. Quellkalender, Zielkalender und kalenderabhängige Startort-Zuordnungen wurden deshalb bewusst nicht übernommen. Lege die Kalender auf diesem Gerät jetzt neu fest. Die Automatik wird danach wieder aktiviert, falls sie im Backup aktiv war."
+                        )
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showCalendarReselectionPrompt = false
+                        calendarReselectionFlow = true
+                        pendingReselectedSourceIds = emptySet()
+                        showSourcePicker = true
+                    }) {
+                        Text(tr(settings.language, "Select calendars", "Kalender festlegen"))
+                    }
+                }
+            )
+        }
+
         if (showTargetPicker) {
             CalendarSinglePicker(
-                settings, calendars, settings.targetCalendarId,
-                onDismiss = { showTargetPicker = false },
-                onSelect = { onChange(settings.copy(targetCalendarId = it)); showTargetPicker = false }
+                settings, calendars, if (calendarReselectionFlow) -1L else settings.targetCalendarId,
+                onDismiss = { if (!calendarReselectionFlow) showTargetPicker = false },
+                onSelect = { targetId ->
+                    if (calendarReselectionFlow) {
+                        val base = pendingImportedSettings ?: settings.copy(
+                            sourceCalendarIds = emptySet(),
+                            targetCalendarId = -1L,
+                            calendarStartLocations = emptySet(),
+                            automaticEnabled = false
+                        )
+                        onChange(
+                            base.copy(
+                                sourceCalendarIds = pendingReselectedSourceIds,
+                                targetCalendarId = targetId,
+                                automaticEnabled = restoreAutomaticAfterCalendarSelection
+                            )
+                        )
+                        pendingImportedSettings = null
+                        calendarReselectionFlow = false
+                        showTargetPicker = false
+                        backupMessage = tr(
+                            base.language,
+                            "Backup imported and calendars reassigned.",
+                            "Backup importiert und Kalender neu zugeordnet."
+                        )
+                    } else {
+                        onChange(settings.copy(targetCalendarId = targetId))
+                        showTargetPicker = false
+                    }
+                }
             )
         }
         if (showSourcePicker) {
             CalendarMultiPicker(
-                settings, calendars, settings.sourceCalendarIds,
-                onDismiss = { showSourcePicker = false },
-                onApply = { onChange(settings.copy(sourceCalendarIds = it)); showSourcePicker = false }
+                settings, calendars, if (calendarReselectionFlow) emptySet() else settings.sourceCalendarIds,
+                onDismiss = { if (!calendarReselectionFlow) showSourcePicker = false },
+                onApply = { selectedIds ->
+                    if (calendarReselectionFlow) {
+                        if (selectedIds.isNotEmpty()) {
+                            pendingReselectedSourceIds = selectedIds
+                            showSourcePicker = false
+                            showTargetPicker = true
+                        }
+                    } else {
+                        onChange(settings.copy(sourceCalendarIds = selectedIds))
+                        showSourcePicker = false
+                    }
+                }
             )
         }
         if (showAutomationTimePicker) {
@@ -1787,6 +1889,7 @@ class MainActivity : ComponentActivity() {
         keyStore: SecureApiKeyStore,
         interfaceHealthStore: InterfaceHealthStore,
         healthRevision: Int,
+        onHealthChanged: () -> Unit,
         onSelect: () -> Unit,
     onCap: (Int) -> Unit,
     onTimeout: (Int) -> Unit
@@ -1795,6 +1898,8 @@ class MainActivity : ComponentActivity() {
         RequestBudgetStore(this).used(provider, LimitPeriod.DAILY)
     }
     var advancedExpanded by rememberSaveable(provider.id) { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+        var statusTesting by remember(provider) { mutableStateOf(false) }
         val key = keyStore.read(provider).orEmpty()
         val interfaceStatus = remember(
             provider,
@@ -1824,18 +1929,41 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    InterfaceStatusIcon(
-                        state = interfaceStatus,
-                        contentDescription = when (interfaceStatus) {
-                            InterfaceCheckState.VALID -> tr(
-                                settings.language,
-                                if (provider.keyRequired) "API key verified" else "Interface reachable",
-                                if (provider.keyRequired) "API-Key geprüft" else "Schnittstelle erreichbar"
-                            )
-                            InterfaceCheckState.INVALID -> tr(settings.language, "Interface/key check failed", "Schnittstellen-/Key-Prüfung fehlgeschlagen")
-                            InterfaceCheckState.UNKNOWN -> tr(settings.language, "Interface not checked", "Schnittstelle nicht geprüft")
-                        }
-                    )
+                    if (statusTesting) {
+                        CircularProgressIndicator(modifier = Modifier.size(21.dp), strokeWidth = 2.dp)
+                    } else {
+                        InterfaceStatusIcon(
+                            state = interfaceStatus,
+                            contentDescription = when (interfaceStatus) {
+                                InterfaceCheckState.VALID -> tr(
+                                    settings.language,
+                                    if (provider.keyRequired) "API key verified" else "Interface reachable",
+                                    if (provider.keyRequired) "API-Key geprüft" else "Schnittstelle erreichbar"
+                                )
+                                InterfaceCheckState.INVALID -> tr(
+                                    settings.language,
+                                    "Interface/key check failed. Hold to test again.",
+                                    "Schnittstellen-/Key-Prüfung fehlgeschlagen. Zum erneuten Testen gedrückt halten."
+                                )
+                                InterfaceCheckState.UNKNOWN -> tr(settings.language, "Interface not checked", "Schnittstelle nicht geprüft")
+                            },
+                            modifier = if (interfaceStatus == InterfaceCheckState.INVALID) {
+                                Modifier.pointerInput(provider, interfaceStatus) {
+                                    detectTapGestures(onLongPress = {
+                                        if (!statusTesting) {
+                                            statusTesting = true
+                                            scope.launch {
+                                                ProviderConnectivityChecker(this@MainActivity, settings, keyStore, interfaceHealthStore)
+                                                    .checkProvider(provider)
+                                                statusTesting = false
+                                                onHealthChanged()
+                                            }
+                                        }
+                                    })
+                                }
+                            } else Modifier
+                        )
+                    }
                     Spacer(Modifier.width(5.dp))
                     if (provider == RoutingProvider.TOMTOM) {
                         ProviderIconBadge(
@@ -1901,7 +2029,11 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun InterfaceStatusIcon(state: InterfaceCheckState, contentDescription: String) {
+    private fun InterfaceStatusIcon(
+        state: InterfaceCheckState,
+        contentDescription: String,
+        modifier: Modifier = Modifier
+    ) {
         val tint = when (state) {
             InterfaceCheckState.VALID -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
             InterfaceCheckState.INVALID -> MaterialTheme.colorScheme.error
@@ -1916,7 +2048,7 @@ class MainActivity : ComponentActivity() {
             icon,
             contentDescription = contentDescription,
             tint = tint,
-            modifier = Modifier.size(21.dp)
+            modifier = modifier.size(21.dp)
         )
     }
 

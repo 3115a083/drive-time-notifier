@@ -8,7 +8,7 @@
         <intent
             android:action="de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY"
             android:targetPackage="de.drivetime.notifier.debug"
-            android:targetClass="de.drivetime.notifier.MainActivity" />
+            android:targetClass="de.drivetime.notifier.automation.ShortcutActionActivity" />
     </shortcut>
 
     <shortcut
@@ -20,6 +20,6 @@
         <intent
             android:action="de.drivetime.notifier.ACTION_NEXT_DRIVE"
             android:targetPackage="de.drivetime.notifier.debug"
-            android:targetClass="de.drivetime.notifier.MainActivity" />
+            android:targetClass="de.drivetime.notifier.automation.ShortcutActionActivity" />
     </shortcut>
 </shortcuts>
