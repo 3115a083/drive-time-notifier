@@ -57,6 +57,17 @@ object PasswordBackup {
         password.fill('\u0000')
     }
 
+    fun hasValidHeader(input: InputStream): Boolean {
+        val header = ByteArray(MAGIC.size)
+        var offset = 0
+        while (offset < header.size) {
+            val read = input.read(header, offset, header.size - offset)
+            if (read <= 0) return false
+            offset += read
+        }
+        return header.contentEquals(MAGIC)
+    }
+
     fun import(input: InputStream, password: CharArray): BackupImportResult {
         require(password.size >= 8) { "Password must contain at least 8 characters." }
         val bytes = input.buffered().use { it.readBytes() }
@@ -130,19 +141,28 @@ object PasswordBackup {
         put("providerPeriods", JSONObject().apply {
             RoutingProvider.entries.forEach { put(it.id, s.providerLimitPeriods.forProvider(it).id) }
         })
+        put("providerTimeouts", JSONObject().apply {
+            RoutingProvider.entries.forEach { put(it.id, s.providerTimeoutSeconds.forProvider(it)) }
+        })
     }
 
     private fun settingsFromJson(j: JSONObject): AppSettings {
         val defaults = AppSettings()
         val capsJson = j.optJSONObject("providerCaps") ?: JSONObject()
         val periodsJson = j.optJSONObject("providerPeriods") ?: JSONObject()
+        val timeoutsJson = j.optJSONObject("providerTimeouts") ?: JSONObject()
         var caps = defaults.providerCaps
         var periods = defaults.providerLimitPeriods
+        var timeouts = defaults.providerTimeoutSeconds
         RoutingProvider.entries.forEach { provider ->
             caps = caps.withProvider(provider, capsJson.optInt(provider.id, caps.forProvider(provider)))
             periods = periods.withProvider(
                 provider,
                 LimitPeriod.fromId(periodsJson.optString(provider.id, periods.forProvider(provider).id))
+            )
+            timeouts = timeouts.withProvider(
+                provider,
+                timeoutsJson.optInt(provider.id, timeouts.forProvider(provider)).coerceIn(1, 300)
             )
         }
         return AppSettings(
@@ -171,6 +191,7 @@ object PasswordBackup {
             palette = ColorPalette.fromId(j.optString("palette", defaults.palette.id)),
             providerCaps = caps,
             providerLimitPeriods = periods,
+            providerTimeoutSeconds = timeouts,
             fallbackProviderIds = j.stringList("fallbackProviderIds")
                 .filter { id -> RoutingProvider.entries.any { it.id == id } }
                 .distinct()

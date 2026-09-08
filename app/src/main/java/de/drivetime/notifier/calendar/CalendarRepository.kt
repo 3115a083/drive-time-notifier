@@ -8,6 +8,7 @@ import de.drivetime.notifier.model.CalendarEventRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.ZoneId
+import kotlin.math.abs
 
 data class CalendarInfo(val id: Long, val name: String, val accountName: String)
 
@@ -69,6 +70,58 @@ class CalendarRepository(private val context: Context) {
             }
             out.distinctBy { it.id to it.startMillis }
         }
+
+    suspend fun findExistingDrive(
+        calendarId: Long,
+        destination: String,
+        destinationStartMillis: Long,
+        identityKey: String = DriveEntryIdentity.key(destination, destinationStartMillis)
+    ): ExistingDriveEntry? = withContext(Dispatchers.IO) {
+        if (calendarId < 0 || destination.isBlank() || destinationStartMillis <= 0) return@withContext null
+
+        val projection = arrayOf(
+            CalendarContract.Events._ID,
+            CalendarContract.Events.EVENT_LOCATION,
+            CalendarContract.Events.DESCRIPTION,
+            CalendarContract.Events.DTSTART,
+            CalendarContract.Events.DTEND
+        )
+        val from = destinationStartMillis - 24L * 60 * 60 * 1000
+        val to = destinationStartMillis + 5L * 60 * 1000
+        val selection = "${CalendarContract.Events.CALENDAR_ID}=? AND ${CalendarContract.Events.DTSTART}>=? AND ${CalendarContract.Events.DTSTART}<=?"
+        val args = arrayOf(calendarId.toString(), from.toString(), to.toString())
+        val normalizedDestination = DriveEntryIdentity.normalizeLocation(destination)
+        val legacyTolerance = 185L * 60 * 1000
+
+        context.contentResolver.query(
+            CalendarContract.Events.CONTENT_URI,
+            projection,
+            selection,
+            args,
+            CalendarContract.Events.DTSTART + " ASC"
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val eventId = cursor.getLong(0)
+                val location = cursor.getString(1).orEmpty()
+                val description = cursor.getString(2).orEmpty()
+                val startMillis = cursor.getLong(3)
+                val endMillis = cursor.getLong(4)
+
+                if (DriveEntryIdentity.hasMarker(description, identityKey)) {
+                    return@withContext ExistingDriveEntry(eventId, startMillis, endMillis)
+                }
+
+                val legacyMatch = DriveEntryIdentity.isOwnDescription(description) &&
+                    DriveEntryIdentity.normalizeLocation(location) == normalizedDestination &&
+                    endMillis <= destinationStartMillis + 5L * 60 * 1000 &&
+                    abs(destinationStartMillis - endMillis) <= legacyTolerance
+                if (legacyMatch) {
+                    return@withContext ExistingDriveEntry(eventId, startMillis, endMillis)
+                }
+            }
+        }
+        null
+    }
 
     suspend fun insertDrive(
         calendarId: Long,

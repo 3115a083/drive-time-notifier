@@ -17,7 +17,7 @@ class PhotonSearchService(
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(7, TimeUnit.SECONDS)
         .callTimeout(8, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(false)
+        .retryOnConnectionFailure(true)
         .build()
 ) {
     suspend fun suggest(query: String, language: String): List<AddressSuggestion> = withContext(Dispatchers.IO) {
@@ -36,10 +36,10 @@ class PhotonSearchService(
         val clean = query.trim()
         require(clean.isNotBlank()) { "Address is empty." }
         val country = Locale.getDefault().country.trim().uppercase()
-        val local = if (country.length == 2) search(clean, "en", country, 3) else emptyList()
-        (local + search(clean, "en", null, 3))
-            .distinctBy { it.label.lowercase() }
-            .firstOrNull()
+        if (country.length == 2) {
+            search(clean, "en", country, 3).firstOrNull()?.let { return@withContext it }
+        }
+        search(clean, "en", null, 3).firstOrNull()
             ?: error("Address not found: $clean")
     }
 

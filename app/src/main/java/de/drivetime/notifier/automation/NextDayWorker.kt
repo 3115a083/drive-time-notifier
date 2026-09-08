@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import de.drivetime.notifier.calendar.CalendarRepository
+import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.calendar.DriveEventDescriptionBuilder
 import de.drivetime.notifier.core.DrivePlanner
 import de.drivetime.notifier.data.SettingsStore
@@ -14,11 +15,12 @@ import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
 import de.drivetime.notifier.routing.OsmEnrichmentClient
 import de.drivetime.notifier.routing.PolylineDecoder
+import de.drivetime.notifier.routing.RoutingService
 import de.drivetime.notifier.routing.RoutingServiceFactory
 import de.drivetime.notifier.ui.resolvedDriveEventTitle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeout
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -29,6 +31,7 @@ class NextDayWorker(
     override suspend fun doWork(): Result {
         val settings = SettingsStore(applicationContext).flow.first()
         if (!settings.automaticEnabled && inputData.getBoolean("force", false).not()) return Result.success()
+        setForeground(AutomationNotifier.processingForegroundInfo(applicationContext, settings.language, id))
 
         val zone = ZoneId.systemDefault()
         val day = LocalDate.now(zone).plusDays(1)
@@ -44,6 +47,7 @@ class NextDayWorker(
         var previousEnd: Long? = null
 
         for (event in events) {
+            if (isStopped) return Result.failure()
             if (settings.excludesLocation(event.location)) {
                 previousEnd = event.endMillis
                 continue
@@ -53,6 +57,31 @@ class NextDayWorker(
             if (origin.isBlank()) {
                 previousEnd = event.endMillis
                 continue
+            }
+
+            val identityKey = DriveEntryIdentity.key(event.location, event.startMillis)
+            if (!settings.outputIcs) {
+                val duplicate = runCatching {
+                    calendar.findExistingDrive(
+                        settings.targetCalendarId,
+                        event.location,
+                        event.startMillis,
+                        identityKey
+                    )
+                }.getOrNull()
+                if (duplicate != null) {
+                    AutomationNotifier.notifyDuplicateDecision(
+                        applicationContext,
+                        settings.language,
+                        origin,
+                        event.location,
+                        event.startMillis,
+                        previousEnd,
+                        identityKey
+                    )
+                    previousEnd = event.endMillis
+                    continue
+                }
             }
 
             val estimate = routeWithRetry(routes, RouteRequest(origin, event.location, event.startMillis))
@@ -77,15 +106,20 @@ class NextDayWorker(
             )
             val pois = if (settings.showSpeedCameras || settings.showParking) {
                 val points = PolylineDecoder.decode(estimate.encodedPolyline)
-                runCatching { OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking) }.getOrDefault(emptyList())
+                runCatching {
+                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                }.getOrDefault(emptyList())
             } else emptyList()
-            val description = DriveEventDescriptionBuilder.build(
-                settings.language,
-                settings.routingProvider,
-                origin,
-                event.location,
-                estimate,
-                pois
+            val description = DriveEntryIdentity.attach(
+                DriveEventDescriptionBuilder.build(
+                    settings.language,
+                    settings.routingProvider,
+                    origin,
+                    event.location,
+                    estimate,
+                    pois
+                ),
+                identityKey
             )
 
             val title = resolvedDriveEventTitle(settings)
@@ -136,16 +170,15 @@ class NextDayWorker(
         return Result.success()
     }
 
-    private suspend fun routeWithRetry(
-        routes: de.drivetime.notifier.routing.RoutingService,
-        request: RouteRequest
-    ): RouteEstimate? {
+    private suspend fun routeWithRetry(routes: RoutingService, request: RouteRequest): RouteEstimate? {
         repeat(2) { attempt ->
-            val result = runCatching {
-                withTimeout(55_000) { routes.route(request) }
-            }.getOrNull()
-            if (result != null) return result
-            if (attempt == 0) delay(2_000)
+            try {
+                return routes.route(request)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (attempt == 0) delay(2_000)
+            }
         }
         return null
     }

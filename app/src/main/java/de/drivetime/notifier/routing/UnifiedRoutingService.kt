@@ -26,24 +26,40 @@ class UnifiedRoutingService(
     private val settings: AppSettings,
     private val keyStore: SecureApiKeyStore,
     private val budget: RequestBudgetStore,
-    private val automated: Boolean = false,
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(if (automated) 12 else 7, TimeUnit.SECONDS)
-        .readTimeout(if (automated) 28 else 12, TimeUnit.SECONDS)
-        .callTimeout(if (automated) 40 else 16, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(automated)
-        .build()
+    private val automated: Boolean = false
 ) : RoutingService {
+    private val timeoutSeconds = settings.providerTimeoutSeconds
+        .forProvider(settings.routingProvider)
+        .coerceIn(1, 300)
+        .toLong()
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(minOf(timeoutSeconds, 8L), TimeUnit.SECONDS)
+        .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+        .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
 
     override suspend fun route(request: RouteRequest): RouteEstimate = withContext(Dispatchers.IO) {
-        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName, client)
+        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName)
         val origin = geocoder.geocode(request.origin)
         val destination = geocoder.geocode(request.destination)
-        val oLat = origin.latitude ?: error("Origin latitude missing.")
-        val oLon = origin.longitude ?: error("Origin longitude missing.")
-        val dLat = destination.latitude ?: error("Destination latitude missing.")
-        val dLon = destination.longitude ?: error("Destination longitude missing.")
+        routeResolved(
+            request,
+            ResolvedRoutePoints(
+                originLatitude = origin.latitude ?: error("Origin latitude missing."),
+                originLongitude = origin.longitude ?: error("Origin longitude missing."),
+                destinationLatitude = destination.latitude ?: error("Destination latitude missing."),
+                destinationLongitude = destination.longitude ?: error("Destination longitude missing.")
+            )
+        )
+    }
 
+    suspend fun routeResolved(request: RouteRequest, points: ResolvedRoutePoints): RouteEstimate = withContext(Dispatchers.IO) {
+        val oLat = points.originLatitude
+        val oLon = points.originLongitude
+        val dLat = points.destinationLatitude
+        val dLon = points.destinationLongitude
         when (settings.routingProvider) {
             RoutingProvider.VALHALLA -> valhalla(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.OPENROUTESERVICE -> openRouteService(oLat, oLon, dLat, dLon)
@@ -53,6 +69,10 @@ class UnifiedRoutingService(
             RoutingProvider.HERE -> here(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.TOMTOM -> tomTom(oLat, oLon, dLat, dLon, request.arrivalMillis)
         }
+    }
+
+    fun cancelActiveCalls() {
+        client.dispatcher.cancelAll()
     }
 
     private fun valhalla(oLat: Double, oLon: Double, dLat: Double, dLon: Double, arrival: Long): RouteEstimate {
@@ -94,8 +114,10 @@ class UnifiedRoutingService(
                 distanceMeters = (summary.getDouble("length") * 1000.0).toLong(),
                 encodedPolyline = PolylineEncoder.encode(points),
                 warning = "Valhalla public routing is free/fair-use and does not include a guaranteed live-traffic feed.",
-                originLatitude = oLat, originLongitude = oLon,
-                destinationLatitude = dLat, destinationLongitude = dLon
+                originLatitude = oLat,
+                originLongitude = oLon,
+                destinationLatitude = dLat,
+                destinationLongitude = dLon
             )
         }
     }
@@ -126,9 +148,14 @@ class UnifiedRoutingService(
                 }
             }
             val duration = summary.getDouble("duration").toLong()
-            RouteEstimate(duration, duration, summary.getDouble("distance").toLong(), PolylineEncoder.encode(points),
+            RouteEstimate(
+                duration,
+                duration,
+                summary.getDouble("distance").toLong(),
+                PolylineEncoder.encode(points),
                 "openrouteservice does not provide predictive live traffic in this integration.",
-                oLat, oLon, dLat, dLon)
+                oLat, oLon, dLat, dLon
+            )
         }
     }
 
@@ -146,9 +173,14 @@ class UnifiedRoutingService(
             if (root.optString("code") != "Ok") error("OSRM could not calculate a route.")
             val route = root.getJSONArray("routes").getJSONObject(0)
             val duration = route.getDouble("duration").toLong()
-            RouteEstimate(duration, duration, route.getDouble("distance").toLong(), route.getString("geometry"),
+            RouteEstimate(
+                duration,
+                duration,
+                route.getDouble("distance").toLong(),
+                route.getString("geometry"),
                 "OSRM is a static OSM-based estimate without predictive live traffic.",
-                oLat, oLon, dLat, dLon)
+                oLat, oLon, dLat, dLon
+            )
         }
     }
 
@@ -162,15 +194,21 @@ class UnifiedRoutingService(
             .addQueryParameter("profile", "car")
             .addQueryParameter("points_encoded", "true")
             .addQueryParameter("instructions", "false")
-            .addQueryParameter("key", key).build()
+            .addQueryParameter("key", key)
+            .build()
         return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("GraphHopper: HTTP ${response.code}")
             val route = JSONObject(body).getJSONArray("paths").getJSONObject(0)
             val duration = route.getLong("time") / 1000L
-            RouteEstimate(duration, duration, route.getDouble("distance").toLong(), route.getString("points"),
+            RouteEstimate(
+                duration,
+                duration,
+                route.getDouble("distance").toLong(),
+                route.getString("points"),
                 "GraphHopper does not use predictive live traffic in this integration.",
-                oLat, oLon, dLat, dLon)
+                oLat, oLon, dLat, dLon
+            )
         }
     }
 
@@ -178,6 +216,7 @@ class UnifiedRoutingService(
         val key = keyStore.read(RoutingProvider.GOOGLE).orEmpty()
         require(key.isNotBlank()) { "Google Routes API key is missing." }
         budget.consume(RoutingProvider.GOOGLE, settings.providerCaps.google, settings.providerLimitPeriods.google, 2)
+
         fun compute(departureMillis: Long): RouteEstimate {
             val body = JSONObject().apply {
                 put("origin", waypoint(oLat, oLon))
@@ -200,10 +239,17 @@ class UnifiedRoutingService(
                 val route = JSONObject(text).getJSONArray("routes").getJSONObject(0)
                 val duration = seconds(route.getString("duration"))
                 val static = seconds(route.optString("staticDuration", route.getString("duration")))
-                return RouteEstimate(duration, static, route.getLong("distanceMeters"),
-                    route.getJSONObject("polyline").getString("encodedPolyline"), null, oLat, oLon, dLat, dLon)
+                RouteEstimate(
+                    duration,
+                    static,
+                    route.getLong("distanceMeters"),
+                    route.getJSONObject("polyline").getString("encodedPolyline"),
+                    null,
+                    oLat, oLon, dLat, dLon
+                )
             }
         }
+
         val first = compute((arrival - 30 * 60_000L).coerceAtLeast(System.currentTimeMillis()))
         return compute((arrival - first.durationSeconds * 1000L).coerceAtLeast(System.currentTimeMillis()))
     }
@@ -218,7 +264,8 @@ class UnifiedRoutingService(
             .addQueryParameter("destination", "$dLat,$dLon")
             .addQueryParameter("arrivalTime", Instant.ofEpochMilli(arrival).toString())
             .addQueryParameter("return", "summary,polyline")
-            .addQueryParameter("apiKey", key).build()
+            .addQueryParameter("apiKey", key)
+            .build()
         return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) error("HERE Routing: HTTP ${response.code}")
@@ -236,7 +283,14 @@ class UnifiedRoutingService(
                 val decoded = FlexiblePolylineDecoder.decode(section.getString("polyline"))
                 if (points.isNotEmpty() && decoded.isNotEmpty()) points += decoded.drop(1) else points += decoded
             }
-            RouteEstimate(duration, baseDuration.coerceAtLeast(1), distance, PolylineEncoder.encode(points), null, oLat, oLon, dLat, dLon)
+            RouteEstimate(
+                duration,
+                baseDuration.coerceAtLeast(1),
+                distance,
+                PolylineEncoder.encode(points),
+                null,
+                oLat, oLon, dLat, dLon
+            )
         }
     }
 
@@ -269,14 +323,25 @@ class UnifiedRoutingService(
                 }
             }
             val duration = summary.getLong("travelTimeInSeconds")
-            val static = summary.optLong("noTrafficTravelTimeInSeconds",
-                (duration - summary.optLong("trafficDelayInSeconds", 0)).coerceAtLeast(1))
-            RouteEstimate(duration, static, summary.getLong("lengthInMeters"), PolylineEncoder.encode(points), null, oLat, oLon, dLat, dLon)
+            val static = summary.optLong(
+                "noTrafficTravelTimeInSeconds",
+                (duration - summary.optLong("trafficDelayInSeconds", 0)).coerceAtLeast(1)
+            )
+            RouteEstimate(
+                duration,
+                static,
+                summary.getLong("lengthInMeters"),
+                PolylineEncoder.encode(points),
+                null,
+                oLat, oLon, dLat, dLon
+            )
         }
     }
 
-    private fun waypoint(lat: Double, lon: Double) = JSONObject().put("location",
-        JSONObject().put("latLng", JSONObject().put("latitude", lat).put("longitude", lon)))
+    private fun waypoint(lat: Double, lon: Double) = JSONObject().put(
+        "location",
+        JSONObject().put("latLng", JSONObject().put("latitude", lat).put("longitude", lon))
+    )
 
     private fun seconds(value: String): Long = value.removeSuffix("s").toDouble().toLong()
 }

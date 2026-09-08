@@ -59,11 +59,15 @@ class ProviderConnectivityChecker(
     private val store: InterfaceHealthStore = InterfaceHealthStore(context),
     private val budget: RequestBudgetStore = RequestBudgetStore(context)
 ) {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(7, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .callTimeout(12, TimeUnit.SECONDS)
-        .build()
+    private fun client(timeoutSeconds: Int): OkHttpClient {
+        val timeout = timeoutSeconds.coerceIn(1, 300).toLong()
+        return OkHttpClient.Builder()
+            .connectTimeout(minOf(timeout, 8L), TimeUnit.SECONDS)
+            .readTimeout(timeout, TimeUnit.SECONDS)
+            .callTimeout(timeout, TimeUnit.SECONDS)
+            .build()
+    }
+
 
     suspend fun checkProvider(provider: RoutingProvider): InterfaceCheckResult = withContext(Dispatchers.IO) {
         val key = keyStore.read(provider).orEmpty()
@@ -205,11 +209,11 @@ class ProviderConnectivityChecker(
                 Request.Builder().url(url).get().build()
             }
         }
-        execute(request, provider.displayName)
+        execute(request, provider.displayName, settings.providerTimeoutSeconds.forProvider(provider))
     }
 
-    private fun execute(request: Request, label: String) {
-        client.newCall(request).execute().use { response ->
+    private fun execute(request: Request, label: String, timeoutSeconds: Int = 12) {
+        client(timeoutSeconds).newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(120)
                 error("$label: HTTP ${response.code}${if (detail.isBlank()) "" else " · $detail"}")
@@ -230,7 +234,7 @@ class ProviderConnectivityChecker(
                 RoutingProvider.HERE -> "https://router.hereapi.com"
                 RoutingProvider.TOMTOM -> "https://api.tomtom.com"
             }
-            return sha256("${provider.id}|$endpoint|$key")
+            return sha256("${provider.id}|$endpoint|$key|${settings.providerTimeoutSeconds.forProvider(provider)}")
         }
 
         fun photonFingerprint(settings: AppSettings): String = sha256("photon|${settings.photonBaseUrl}")

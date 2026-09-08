@@ -1,27 +1,75 @@
 package de.drivetime.notifier.routing
 
 import android.content.Context
+import de.drivetime.notifier.calendar.CalendarRepository
+import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
 import de.drivetime.notifier.security.SecureApiKeyStore
+import de.drivetime.notifier.ui.tr
 
 interface RoutingService {
     suspend fun route(request: RouteRequest): RouteEstimate
+}
+
+interface CancelableRoutingService : RoutingService {
+    fun cancelActiveCalls()
 }
 
 interface AddressSearchService {
     suspend fun suggest(query: String, language: String): List<AddressSuggestion>
 }
 
+data class ResolvedRoutePoints(
+    val originLatitude: Double,
+    val originLongitude: Double,
+    val destinationLatitude: Double,
+    val destinationLongitude: Double
+)
+
 private class FallbackRoutingService(
     private val context: Context,
     private val settings: AppSettings,
     private val automated: Boolean
-) : RoutingService {
+) : CancelableRoutingService {
+    @Volatile
+    private var activeService: UnifiedRoutingService? = null
+
     override suspend fun route(request: RouteRequest): RouteEstimate {
+        if (!automated && !settings.outputIcs && settings.targetCalendarId >= 0) {
+            val identityKey = DriveEntryIdentity.key(request.destination, request.arrivalMillis)
+            val duplicate = runCatching {
+                CalendarRepository(context).findExistingDrive(
+                    settings.targetCalendarId,
+                    request.destination,
+                    request.arrivalMillis,
+                    identityKey
+                )
+            }.getOrNull()
+            if (duplicate != null) {
+                error(
+                    tr(
+                        settings.language,
+                        "A Drive Time Notifier entry for this destination and appointment time already exists. Delete the existing drive or change the appointment time before calculating it again.",
+                        "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Lösche die vorhandene Fahrt oder ändere die Terminzeit, bevor du sie erneut berechnest."
+                    )
+                )
+            }
+        }
+
+        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName)
+        val origin = geocoder.geocode(request.origin)
+        val destination = geocoder.geocode(request.destination)
+        val points = ResolvedRoutePoints(
+            originLatitude = origin.latitude ?: error("Origin latitude missing."),
+            originLongitude = origin.longitude ?: error("Origin longitude missing."),
+            destinationLatitude = destination.latitude ?: error("Destination latitude missing."),
+            destinationLongitude = destination.longitude ?: error("Destination longitude missing.")
+        )
+
         val providers = buildList {
             add(settings.routingProvider)
             settings.fallbackProviderIds
@@ -44,7 +92,9 @@ private class FallbackRoutingService(
                 budget = RequestBudgetStore(context),
                 automated = automated
             )
-            val result = runCatching { service.route(request) }
+            activeService = service
+            val result = runCatching { service.routeResolved(request, points) }
+            activeService = null
             result.getOrNull()?.let { return it }
             val message = result.exceptionOrNull()?.message.orEmpty().ifBlank { "unknown error" }
             failures += "${provider.displayName}: $message"
@@ -55,8 +105,11 @@ private class FallbackRoutingService(
             else "All configured routing providers failed. " + failures.joinToString(" | ")
         )
     }
-}
 
+    override fun cancelActiveCalls() {
+        activeService?.cancelActiveCalls()
+    }
+}
 
 object RoutingServiceFactory {
     fun create(context: Context, settings: AppSettings, automated: Boolean = false): RoutingService =

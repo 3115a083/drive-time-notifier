@@ -50,6 +50,17 @@ object AutomationScheduler {
         )
     }
 
+    fun runNextDriveNow(context: Context) {
+        val request = OneTimeWorkRequestBuilder<NextDriveWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "manual-next-drive-locator",
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
+
     private fun setRescheduleReceiverEnabled(context: Context, enabled: Boolean) {
         val component = ComponentName(context, RescheduleReceiver::class.java)
         context.packageManager.setComponentEnabledSetting(
