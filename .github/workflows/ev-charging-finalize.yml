@@ -27,7 +27,7 @@ jobs:
           gradle-version: "8.9"
 
       - name: Apply final charging navigation patch
-        run: python3 scripts/patch_ev_charging_navigation_v2.py
+        run: python3 scripts/patch_ev_charging_navigation_v3.py
 
       - name: Test, lint and build
         run: gradle clean test lint assembleDebug assembleRelease --stacktrace
@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f scripts/patch_ev_charging_navigation.py scripts/patch_ev_charging_navigation_v2.py .github/workflows/ev-charging-finalize.yml
+          rm -f scripts/patch_ev_charging_navigation.py scripts/patch_ev_charging_navigation_v2.py scripts/patch_ev_charging_navigation_v3.py .github/workflows/ev-charging-finalize.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
