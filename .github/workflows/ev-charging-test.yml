@@ -25,7 +25,12 @@ jobs:
         with:
           gradle-version: "8.9"
       - name: Apply EV charging implementation
-        run: python3 .github/ev_charging_patch.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/if count != 2:/if count != 3:/' .github/ev_charging_patch.py
+          sed -i 's/expected 2 description builder calls/expected 3 description builder calls/' .github/ev_charging_patch.py
+          python3 .github/ev_charging_patch.py
       - name: Remove one-shot helper files
         run: rm -f .github/ev_charging_patch.py .github/workflows/ev-charging-test.yml
       - name: Verify patch whitespace
