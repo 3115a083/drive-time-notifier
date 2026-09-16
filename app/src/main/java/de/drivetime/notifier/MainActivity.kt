@@ -293,7 +293,8 @@ class MainActivity : ComponentActivity() {
                             origin,
                             destination,
                             route,
-                            pois
+                            pois,
+                            settings.chargingNavigateViaStation
                         )
                         IcsExporter(context).writeToUri(
                             uri,
@@ -359,9 +360,14 @@ class MainActivity : ComponentActivity() {
                 .route(RouteRequest(origin.trim(), destination.trim(), target))
             val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
             val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
-            val routePois = if ((settings.showSpeedCameras || settings.showParking) && points.size >= 2) {
-                withTimeoutOrNull(13_000) {
-                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+            val routePois = if ((settings.showSpeedCameras || settings.showParking || settings.showChargingStations) && points.size >= 2) {
+                withTimeoutOrNull(22_000) {
+                    OsmEnrichmentClient().query(
+                        points,
+                        settings.showSpeedCameras,
+                        settings.showParking,
+                        ChargingSearchOptions.from(settings)
+                    )
                 }.orEmpty()
             } else emptyList()
             Triple(route, plan, routePois)
@@ -561,7 +567,8 @@ class MainActivity : ComponentActivity() {
                                         origin,
                                         destination,
                                         route,
-                                        pois
+                                        pois,
+                            settings.chargingNavigateViaStation
                                     )
                                     val uri = IcsExporter(context).create(
                                         origin,
@@ -607,7 +614,8 @@ class MainActivity : ComponentActivity() {
                                         origin,
                                         destination,
                                         route,
-                                        pois
+                                        pois,
+                            settings.chargingNavigateViaStation
                                     )
                                     calendarRepo.insertDrive(
                                         settings.targetCalendarId,
@@ -814,6 +822,17 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            if (settings.showChargingStations) {
+                Text(
+                    tr(
+                        settings.language,
+                        "Nearby public charging stations: ${pois.count { it.kind == RoutePoi.Kind.CHARGING_STATION }} results.",
+                        "Öffentliche Ladesäulen in Zielnähe: ${pois.count { it.kind == RoutePoi.Kind.CHARGING_STATION }} Treffer."
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             if (settings.showParking) {
                 Text(
                     tr(
@@ -870,17 +889,17 @@ class MainActivity : ComponentActivity() {
                         pois.forEach { poi ->
                             map.overlays.add(Marker(map).apply {
                                 position = poi.point
-                                title = if (poi.kind == RoutePoi.Kind.SPEED_CAMERA) {
-                                    tr(settings.language, "Speed camera", "Blitzer")
-                                } else {
-                                    poi.name ?: tr(settings.language, "Parking", "Parkplatz")
+                                title = when (poi.kind) {
+                                    RoutePoi.Kind.SPEED_CAMERA -> tr(settings.language, "Speed camera", "Blitzer")
+                                    RoutePoi.Kind.PARKING -> poi.name ?: tr(settings.language, "Parking", "Parkplatz")
+                                    RoutePoi.Kind.CHARGING_STATION -> poi.name ?: tr(settings.language, "Charging station", "Ladestation")
                                 }
                                 icon = ContextCompat.getDrawable(
                                     map.context,
-                                    if (poi.kind == RoutePoi.Kind.SPEED_CAMERA) {
-                                        R.drawable.ic_speed_camera_marker
-                                    } else {
-                                        R.drawable.ic_parking_marker
+                                    when (poi.kind) {
+                                        RoutePoi.Kind.SPEED_CAMERA -> R.drawable.ic_speed_camera_marker
+                                        RoutePoi.Kind.PARKING -> R.drawable.ic_parking_marker
+                                        RoutePoi.Kind.CHARGING_STATION -> R.drawable.ic_charging_marker
                                     }
                                 )
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -1333,6 +1352,123 @@ class MainActivity : ComponentActivity() {
                     tr(settings.language, "Find parking near destination", "Parkplätze am Ziel suchen"),
                     settings.showParking
                 ) { onChange(settings.copy(showParking = it)) }
+                SettingSwitch(
+                    tr(settings.language, "Find charging stations near destination", "Ladesäulen am Ziel suchen"),
+                    settings.showChargingStations
+                ) { onChange(settings.copy(showChargingStations = it)) }
+                if (settings.showChargingStations) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                tr(settings.language, "Charging-station search", "Ladesäulensuche"),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                tr(
+                                    settings.language,
+                                    "Only stations not marked as private or restricted are shown. Bundesnetzagentur registry entries are public charging infrastructure by definition.",
+                                    "Es werden nur Stationen angezeigt, die nicht als privat oder eingeschränkt markiert sind. Einträge des Bundesnetzagentur-Registers sind per Definition öffentliche Ladeinfrastruktur."
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(tr(settings.language, "Connector", "Steckertyp"), style = MaterialTheme.typography.labelLarge)
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                ChargingConnectorPreference.entries.forEach { connector ->
+                                    FilterChip(
+                                        selected = settings.chargingConnector == connector,
+                                        onClick = { onChange(settings.copy(chargingConnector = connector)) },
+                                        label = {
+                                            Text(
+                                                when (connector) {
+                                                    ChargingConnectorPreference.ANY -> tr(settings.language, "Any", "Beliebig")
+                                                    ChargingConnectorPreference.CCS -> "CCS"
+                                                    ChargingConnectorPreference.TYPE2 -> tr(settings.language, "Type 2", "Typ 2")
+                                                    ChargingConnectorPreference.CHADEMO -> "CHAdeMO"
+                                                }
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                            NumberDraftField(
+                                initialValue = settings.chargingMaxDistanceMeters,
+                                label = tr(settings.language, "Maximum distance from destination (m)", "Maximale Entfernung vom Ziel (m)"),
+                                onValid = { onChange(settings.copy(chargingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
+                            )
+                            Text(tr(settings.language, "Preferred charging speed", "Bevorzugte Ladegeschwindigkeit"), style = MaterialTheme.typography.labelLarge)
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                ChargingSpeedPreference.entries.forEach { speed ->
+                                    FilterChip(
+                                        selected = settings.chargingSpeedPreference == speed,
+                                        onClick = { onChange(settings.copy(chargingSpeedPreference = speed)) },
+                                        label = {
+                                            Text(
+                                                when (speed) {
+                                                    ChargingSpeedPreference.ANY -> tr(settings.language, "Any", "Beliebig")
+                                                    ChargingSpeedPreference.SLOW -> tr(settings.language, "Slow ≤22 kW", "Langsam ≤22 kW")
+                                                    ChargingSpeedPreference.MEDIUM -> tr(settings.language, "Medium 23–99 kW", "Mittel 23–99 kW")
+                                                    ChargingSpeedPreference.FAST -> tr(settings.language, "Fast 100–149 kW", "Schnell 100–149 kW")
+                                                    ChargingSpeedPreference.HPC -> "HPC ≥150 kW"
+                                                }
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                            OutlinedTextField(
+                                value = settings.chargingPreferredOperator,
+                                onValueChange = { onChange(settings.copy(chargingPreferredOperator = it.take(80))) },
+                                label = { Text(tr(settings.language, "Preferred network/operator (optional)", "Bevorzugter Netzbetreiber (optional)")) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            SettingSwitch(
+                                tr(settings.language, "Show other providers as well", "Andere Anbieter ebenfalls anzeigen"),
+                                settings.chargingShowOtherOperators
+                            ) { onChange(settings.copy(chargingShowOtherOperators = it)) }
+                            SettingSwitch(
+                                tr(settings.language, "Enrich with Bundesnetzagentur registry data", "Mit Bundesnetzagentur-Daten abgleichen"),
+                                settings.chargingUseBNetzA
+                            ) { onChange(settings.copy(chargingUseBNetzA = it)) }
+                            Text(
+                                tr(
+                                    settings.language,
+                                    "Optional registry enrichment uses Bundesnetzagentur data under CC BY 4.0 through a public Esri feature service. No API key is required.",
+                                    "Der optionale Register-Abgleich verwendet Daten der Bundesnetzagentur unter CC BY 4.0 über einen öffentlichen Esri-Feature-Service. Es ist kein API-Key nötig."
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            SettingSwitch(
+                                tr(settings.language, "Navigate to the nearest matching charger, then walk to the appointment", "Zur nächsten passenden Ladestation navigieren und von dort zum Termin laufen"),
+                                settings.chargingNavigateViaStation
+                            ) { onChange(settings.copy(chargingNavigateViaStation = it)) }
+                            Text(
+                                tr(
+                                    settings.language,
+                                    "The calendar entry keeps the original appointment destination. Its navigation link points to the first matching charger and adds a walking link to the destination.",
+                                    "Der Kalendereintrag behält das ursprüngliche Terminziel. Der Navigationslink führt zur ersten passenden Ladestation und ergänzt einen Fußweg-Link zum Ziel."
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 SettingSwitch(
                     tr(settings.language, "Export ICS instead of calendar event", "ICS statt Kalendereintrag erzeugen"),
                     settings.outputIcs

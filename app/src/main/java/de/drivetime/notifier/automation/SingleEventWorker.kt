@@ -11,6 +11,7 @@ import de.drivetime.notifier.data.SettingsStore
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.routing.ChargingSearchOptions
 import de.drivetime.notifier.routing.OsmEnrichmentClient
 import de.drivetime.notifier.routing.PolylineDecoder
 import de.drivetime.notifier.routing.RoutingService
@@ -77,10 +78,10 @@ class SingleEventWorker(
 
         return runCatching {
             val plan = DrivePlanner.plan(arrival, route.durationSeconds, settings.bufferMinutes, previousEnd)
-            val pois = if (settings.showSpeedCameras || settings.showParking) {
+            val pois = if (settings.showSpeedCameras || settings.showParking || settings.showChargingStations) {
                 val points = PolylineDecoder.decode(route.encodedPolyline)
                 runCatching {
-                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking, ChargingSearchOptions.from(settings))
                 }.getOrDefault(emptyList())
             } else emptyList()
             val description = DriveEntryIdentity.attach(
@@ -90,7 +91,8 @@ class SingleEventWorker(
                     origin,
                     destination,
                     route,
-                    pois
+                    pois,
+                    settings.chargingNavigateViaStation
                 ),
                 identityKey
             )

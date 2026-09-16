@@ -13,6 +13,7 @@ import de.drivetime.notifier.data.startLocationForCalendar
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.routing.ChargingSearchOptions
 import de.drivetime.notifier.routing.OsmEnrichmentClient
 import de.drivetime.notifier.routing.PolylineDecoder
 import de.drivetime.notifier.routing.RoutingService
@@ -104,10 +105,10 @@ class NextDayWorker(
                 requestedBufferMinutes = settings.bufferMinutes,
                 previousEventEndMillis = previousEnd
             )
-            val pois = if (settings.showSpeedCameras || settings.showParking) {
+            val pois = if (settings.showSpeedCameras || settings.showParking || settings.showChargingStations) {
                 val points = PolylineDecoder.decode(estimate.encodedPolyline)
                 runCatching {
-                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
+                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking, ChargingSearchOptions.from(settings))
                 }.getOrDefault(emptyList())
             } else emptyList()
             val description = DriveEntryIdentity.attach(
@@ -117,7 +118,8 @@ class NextDayWorker(
                     origin,
                     event.location,
                     estimate,
-                    pois
+                    pois,
+                    settings.chargingNavigateViaStation
                 ),
                 identityKey
             )

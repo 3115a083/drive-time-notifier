@@ -1,9 +1,11 @@
 package de.drivetime.notifier.calendar
 
 import de.drivetime.notifier.data.AppLanguage
+import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.routing.RoutePoi
+import de.drivetime.notifier.routing.RoutePoiSource
 import de.drivetime.notifier.ui.formatDuration
 import de.drivetime.notifier.ui.tr
 import java.net.URLEncoder
@@ -17,18 +19,24 @@ object DriveEventDescriptionBuilder {
         origin: String,
         destination: String,
         route: RouteEstimate,
-        pois: List<RoutePoi>
+        pois: List<RoutePoi>,
+        navigateViaChargingStation: Boolean = false
     ): String {
         val lat = route.destinationLatitude
         val lon = route.destinationLongitude
         val encodedDestination = URLEncoder.encode(destination, StandardCharsets.UTF_8.toString())
-        val googleMaps = if (lat != null && lon != null) {
-            "https://www.google.com/maps/dir/?api=1&destination=$lat,$lon&travelmode=driving"
+        val charging = pois.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
+            .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
+            .take(5)
+        val navigationStation = charging.firstOrNull().takeIf { navigateViaChargingStation }
+        val navLat = navigationStation?.point?.latitude ?: lat
+        val navLon = navigationStation?.point?.longitude ?: lon
+        val googleMaps = if (navLat != null && navLon != null) {
+            "https://www.google.com/maps/dir/?api=1&destination=$navLat,$navLon&travelmode=driving"
         } else {
             "https://www.google.com/maps/dir/?api=1&destination=$encodedDestination&travelmode=driving"
         }
-        val geo = if (lat != null && lon != null) "geo:$lat,$lon?q=$lat,$lon" else "geo:0,0?q=$encodedDestination"
-
+        val geo = if (navLat != null && navLon != null) "geo:$navLat,$navLon?q=$navLat,$navLon" else "geo:0,0?q=$encodedDestination"
         val cameras = pois.filter { it.kind == RoutePoi.Kind.SPEED_CAMERA }
         val parking = pois.filter { it.kind == RoutePoi.Kind.PARKING }
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
@@ -46,6 +54,43 @@ object DriveEventDescriptionBuilder {
             appendLine("${tr(language, "Start navigation", "Navigation starten")}:")
             appendLine("Google Maps: $googleMaps")
             appendLine("${tr(language, "Installed navigation app", "Installierte Navigations-App")}: $geo")
+
+            if (navigationStation != null) {
+                val pLat = navigationStation.point.latitude
+                val pLon = navigationStation.point.longitude
+                val walkingDestination = if (lat != null && lon != null) "$lat,$lon" else encodedDestination
+                val walking = "https://www.google.com/maps/dir/?api=1&origin=$pLat,$pLon&destination=$walkingDestination&travelmode=walking"
+                appendLine("${tr(language, "Navigation target", "Navigationsziel")}: ${navigationStation.name ?: tr(language, "Charging station", "Ladestation")}")
+                appendLine("${tr(language, "Then walk to the appointment destination", "Danach zu Fuß zum Terminziel")}: $walking")
+            }
+
+            if (charging.isNotEmpty()) {
+                appendLine()
+                appendLine(tr(language, "Nearby public charging stations:", "Öffentliche Ladesäulen in Zielnähe:"))
+                charging.forEachIndexed { index, poi ->
+                    val distance = poi.distanceFromDestinationMeters ?: 0
+                    val pLat = poi.point.latitude
+                    val pLon = poi.point.longitude
+                    val link = "https://www.google.com/maps/dir/?api=1&destination=$pLat,$pLon&travelmode=driving"
+                    val details = buildList {
+                        poi.operator?.takeIf { it.isNotBlank() }?.let(::add)
+                        if (poi.connectorTypes.isNotEmpty()) {
+                            add(poi.connectorTypes.joinToString("/") { connectorLabel(language, it) })
+                        }
+                        poi.maxPowerKw?.let { power ->
+                            val formatted = if (power % 1.0 == 0.0) power.toInt().toString() else "%.1f".format(power)
+                            add("$formatted kW")
+                        }
+                        poi.openingHours?.takeIf { it.isNotBlank() }?.let(::add)
+                        add("~$distance m ${tr(language, "from destination", "vom Ziel")}")
+                    }
+                    appendLine("${index + 1}. ${poi.name ?: tr(language, "Charging station", "Ladestation")} · ${details.joinToString(" · ")}: $link")
+                }
+                val hasOsm = charging.any { RoutePoiSource.OSM in it.sources }
+                val hasBNetzA = charging.any { RoutePoiSource.BUNDESNETZAGENTUR in it.sources }
+                if (hasOsm) appendLine(tr(language, "Charging data: OpenStreetMap amenity=charging_station via Overpass; restricted access tags are excluded.", "Ladedaten: OpenStreetMap amenity=charging_station über Overpass; als eingeschränkt markierte Zugänge werden ausgeschlossen."))
+                if (hasBNetzA) appendLine(tr(language, "Registry enrichment: Bundesnetzagentur.de data, CC BY 4.0, accessed through the public Esri feature service.", "Register-Anreicherung: Daten von Bundesnetzagentur.de, CC BY 4.0, abgerufen über den öffentlichen Esri-Feature-Service."))
+            }
 
             if (parking.isNotEmpty()) {
                 appendLine()
@@ -69,5 +114,12 @@ object DriveEventDescriptionBuilder {
                 appendLine(tr(language, "Source: OpenStreetMap highway=speed_camera via Overpass. Community data may be incomplete.", "Quelle: OpenStreetMap highway=speed_camera über Overpass. Community-Daten können unvollständig sein."))
             }
         }.trim()
+    }
+
+    private fun connectorLabel(language: AppLanguage, connector: ChargingConnectorPreference): String = when (connector) {
+        ChargingConnectorPreference.CCS -> "CCS"
+        ChargingConnectorPreference.TYPE2 -> tr(language, "Type 2", "Typ 2")
+        ChargingConnectorPreference.CHADEMO -> "CHAdeMO"
+        ChargingConnectorPreference.ANY -> tr(language, "Any connector", "Beliebiger Stecker")
     }
 }
