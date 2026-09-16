@@ -1,0 +1,55 @@
+name: Finalize EV charging test
+
+on:
+  push:
+    branches:
+      - feature/ev-charging-test
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Apply final charging navigation patch
+        run: python3 scripts/patch_ev_charging_navigation.py
+
+      - name: Test, lint and build
+        run: gradle clean test lint assembleDebug assembleRelease --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: drive-time-notifier-ev-charging-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Commit verified app changes and remove helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f scripts/patch_ev_charging_navigation.py .github/workflows/ev-charging-finalize.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No app changes to commit"
+            exit 0
+          fi
+          git commit -m "Route drives via selected charging station"
+          git push origin HEAD:feature/ev-charging-test
