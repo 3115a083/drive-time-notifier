@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, feature/android-app, release/publish-ready-v1 ]
+    branches: [ main, feature/android-app, release/publish-ready-v1, feature/charging-stations-debug ]
   pull_request:
 
 permissions:
