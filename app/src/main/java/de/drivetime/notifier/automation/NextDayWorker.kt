@@ -13,6 +13,7 @@ import de.drivetime.notifier.data.startLocationForCalendar
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.routing.ChargingRoutePlanner
 import de.drivetime.notifier.routing.ChargingSearchOptions
 import de.drivetime.notifier.routing.OsmEnrichmentClient
 import de.drivetime.notifier.routing.PolylineDecoder
@@ -85,8 +86,9 @@ class NextDayWorker(
                 }
             }
 
-            val estimate = routeWithRetry(routes, RouteRequest(origin, event.location, event.startMillis))
-            if (estimate == null) {
+            val request = RouteRequest(origin, event.location, event.startMillis)
+            val initialEstimate = routeWithRetry(routes, request)
+            if (initialEstimate == null) {
                 AutomationNotifier.notifyRoutingFailure(
                     applicationContext,
                     settings.language,
@@ -99,18 +101,21 @@ class NextDayWorker(
                 continue
             }
 
+            val enriched = ChargingRoutePlanner.prepare(
+                context = applicationContext,
+                settings = settings,
+                request = request,
+                initialRoute = initialEstimate,
+                automated = true
+            )
+            val estimate = enriched.route
             val plan = DrivePlanner.plan(
-                destinationStartMillis = event.startMillis,
+                destinationStartMillis = enriched.effectiveDestinationStartMillis,
                 routeDurationSeconds = estimate.durationSeconds,
                 requestedBufferMinutes = settings.bufferMinutes,
                 previousEventEndMillis = previousEnd
             )
-            val pois = if (settings.showSpeedCameras || settings.showParking || settings.showChargingStations) {
-                val points = PolylineDecoder.decode(estimate.encodedPolyline)
-                runCatching {
-                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking, ChargingSearchOptions.from(settings))
-                }.getOrDefault(emptyList())
-            } else emptyList()
+            val pois = enriched.pois
             val description = DriveEntryIdentity.attach(
                 DriveEventDescriptionBuilder.build(
                     settings.language,
@@ -119,7 +124,7 @@ class NextDayWorker(
                     event.location,
                     estimate,
                     pois,
-                    settings.chargingNavigateViaStation
+                    enriched.navigation
                 ),
                 identityKey
             )
@@ -132,7 +137,7 @@ class NextDayWorker(
                         origin,
                         event.location,
                         plan.departureMillis,
-                        plan.arrivalMillis,
+                        plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                         title,
                         description
                     )
@@ -142,7 +147,7 @@ class NextDayWorker(
                         origin,
                         event.location,
                         plan.departureMillis,
-                        plan.arrivalMillis,
+                        plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                         settings.reminderLeadMinutes,
                         title,
                         description

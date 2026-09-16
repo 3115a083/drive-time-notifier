@@ -4,6 +4,7 @@ import de.drivetime.notifier.data.AppLanguage
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.RouteEstimate
+import de.drivetime.notifier.routing.ChargingNavigation
 import de.drivetime.notifier.routing.RoutePoi
 import de.drivetime.notifier.routing.RoutePoiSource
 import de.drivetime.notifier.ui.formatDuration
@@ -20,7 +21,7 @@ object DriveEventDescriptionBuilder {
         destination: String,
         route: RouteEstimate,
         pois: List<RoutePoi>,
-        navigateViaChargingStation: Boolean = false
+        chargingNavigation: ChargingNavigation? = null
     ): String {
         val lat = route.destinationLatitude
         val lon = route.destinationLongitude
@@ -28,7 +29,7 @@ object DriveEventDescriptionBuilder {
         val charging = pois.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
             .take(5)
-        val navigationStation = charging.firstOrNull().takeIf { navigateViaChargingStation }
+        val navigationStation = chargingNavigation?.station
         val navLat = navigationStation?.point?.latitude ?: lat
         val navLon = navigationStation?.point?.longitude ?: lon
         val googleMaps = if (navLat != null && navLon != null) {
@@ -58,9 +59,11 @@ object DriveEventDescriptionBuilder {
             if (navigationStation != null) {
                 val pLat = navigationStation.point.latitude
                 val pLon = navigationStation.point.longitude
-                val walkingDestination = if (lat != null && lon != null) "$lat,$lon" else encodedDestination
-                val walking = "https://www.google.com/maps/dir/?api=1&origin=$pLat,$pLon&destination=$walkingDestination&travelmode=walking"
+                val walking = "https://www.google.com/maps/dir/?api=1&origin=$pLat,$pLon&destination=$encodedDestination&travelmode=walking"
                 appendLine("${tr(language, "Navigation target", "Navigationsziel")}: ${navigationStation.name ?: tr(language, "Charging station", "Ladestation")}")
+                chargingNavigation?.let { nav ->
+                    appendLine("${tr(language, "Approximate walk to appointment", "Ungefährer Fußweg zum Termin")}: ~${nav.walkingDistanceMeters} m / ${formatDuration(nav.walkingDurationSeconds, language)}")
+                }
                 appendLine("${tr(language, "Then walk to the appointment destination", "Danach zu Fuß zum Terminziel")}: $walking")
             }
 

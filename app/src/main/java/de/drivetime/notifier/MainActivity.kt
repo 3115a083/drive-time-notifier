@@ -261,6 +261,7 @@ class MainActivity : ComponentActivity() {
         }
         var estimate by remember { mutableStateOf<RouteEstimate?>(null) }
         var pois by remember { mutableStateOf<List<RoutePoi>>(emptyList()) }
+        var chargingNavigation by remember { mutableStateOf<ChargingNavigation?>(null) }
         var planWarning by remember { mutableStateOf<String?>(null) }
         var planConflict by remember { mutableStateOf(false) }
         var plannedStart by remember { mutableStateOf<Long?>(null) }
@@ -294,7 +295,7 @@ class MainActivity : ComponentActivity() {
                             destination,
                             route,
                             pois,
-                            settings.chargingNavigateViaStation
+                            chargingNavigation
                         )
                         IcsExporter(context).writeToUri(
                             uri,
@@ -352,31 +353,35 @@ class MainActivity : ComponentActivity() {
             loading = true
             estimate = null
             pois = emptyList()
+            chargingNavigation = null
             scope.launch {
                 val target = LocalDateTime.of(appointmentDate, appointmentTime)
                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 val result = runCatching {
-            val route = RoutingServiceFactory.create(context, settings)
-                .route(RouteRequest(origin.trim(), destination.trim(), target))
-            val plan = DrivePlanner.plan(target, route.durationSeconds, settings.bufferMinutes, previousEndMillis)
-            val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
-            val routePois = if ((settings.showSpeedCameras || settings.showParking || settings.showChargingStations) && points.size >= 2) {
-                withTimeoutOrNull(22_000) {
-                    OsmEnrichmentClient().query(
-                        points,
-                        settings.showSpeedCameras,
-                        settings.showParking,
-                        ChargingSearchOptions.from(settings)
-                    )
-                }.orEmpty()
-            } else emptyList()
-            Triple(route, plan, routePois)
+            val request = RouteRequest(origin.trim(), destination.trim(), target)
+            val initialRoute = RoutingServiceFactory.create(context, settings).route(request)
+            val enriched = ChargingRoutePlanner.prepare(
+                context = context,
+                settings = settings,
+                request = request,
+                initialRoute = initialRoute,
+                automated = false
+            )
+            val plan = DrivePlanner.plan(
+                enriched.effectiveDestinationStartMillis,
+                enriched.route.durationSeconds,
+                settings.bufferMinutes,
+                previousEndMillis
+            )
+            Pair(enriched, plan)
         }
-        result.onSuccess { (route, plan, routePois) ->
+        result.onSuccess { (enriched, plan) ->
+            val route = enriched.route
             estimate = route
             plannedStart = plan.departureMillis
-            plannedEnd = plan.arrivalMillis
-            pois = routePois
+            plannedEnd = plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L
+            pois = enriched.pois
+            chargingNavigation = enriched.navigation
             val previousEnd = previousEndMillis
             planConflict = previousEnd != null && plan.departureMillis < previousEnd
             planWarning = listOfNotNull(
@@ -568,7 +573,7 @@ class MainActivity : ComponentActivity() {
                                         destination,
                                         route,
                                         pois,
-                            settings.chargingNavigateViaStation
+                            chargingNavigation
                                     )
                                     val uri = IcsExporter(context).create(
                                         origin,
@@ -615,7 +620,7 @@ class MainActivity : ComponentActivity() {
                                         destination,
                                         route,
                                         pois,
-                            settings.chargingNavigateViaStation
+                            chargingNavigation
                                     )
                                     calendarRepo.insertDrive(
                                         settings.targetCalendarId,
