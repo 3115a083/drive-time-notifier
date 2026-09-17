@@ -50,6 +50,7 @@ import de.drivetime.notifier.automation.AutomationReceiver
 import de.drivetime.notifier.automation.AutomationScheduler
 import de.drivetime.notifier.calendar.*
 import de.drivetime.notifier.core.DrivePlanner
+import de.drivetime.notifier.core.DynamicArrivalBuffer
 import de.drivetime.notifier.data.*
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.CalendarEventRef
@@ -60,6 +61,7 @@ import de.drivetime.notifier.security.AutomationTokenStore
 import de.drivetime.notifier.security.PasswordBackup
 import de.drivetime.notifier.security.SecureApiKeyStore
 import de.drivetime.notifier.ui.*
+import de.drivetime.notifier.update.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -367,15 +369,20 @@ class MainActivity : ComponentActivity() {
                 initialRoute = initialRoute,
                 automated = false
             )
+            val effectiveBufferMinutes = DynamicArrivalBuffer.totalMinutes(
+                settings,
+                enriched.route.durationSeconds,
+                enriched.route.trafficDelaySeconds
+            )
             val plan = DrivePlanner.plan(
                 enriched.effectiveDestinationStartMillis,
                 enriched.route.durationSeconds,
-                settings.bufferMinutes,
+                effectiveBufferMinutes,
                 previousEndMillis
             )
-            Pair(enriched, plan)
+            Triple(enriched, plan, effectiveBufferMinutes)
         }
-        result.onSuccess { (enriched, plan) ->
+        result.onSuccess { (enriched, plan, effectiveBufferMinutes) ->
             val route = enriched.route
             estimate = route
             plannedStart = plan.departureMillis
@@ -385,7 +392,7 @@ class MainActivity : ComponentActivity() {
             val previousEnd = previousEndMillis
             planConflict = previousEnd != null && plan.departureMillis < previousEnd
             planWarning = listOfNotNull(
-                planWarningText(settings.language, plan, settings.bufferMinutes),
+                planWarningText(settings.language, plan, effectiveBufferMinutes),
                 routeWarningText(settings.language, settings.routingProvider, route.warning)
             ).joinToString(" ").ifBlank { null }
         }.onFailure {
@@ -969,6 +976,12 @@ class MainActivity : ComponentActivity() {
         var osrmDraft by remember { mutableStateOf(settings.osrmBaseUrl) }
         var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
         var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
+        val operatorCatalog = remember { ChargingOperatorCatalog(context) }
+        var operatorOptions by remember { mutableStateOf(operatorCatalog.operators()) }
+        var operatorRefreshing by remember { mutableStateOf(false) }
+        var showOperatorPicker by remember { mutableStateOf(false) }
+        var updateChecking by remember { mutableStateOf(false) }
+        var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
         val latestSettings by rememberUpdatedState(settings)
 
         fun cancelCalendarReselection() {
@@ -1338,6 +1351,41 @@ class MainActivity : ComponentActivity() {
                     label = tr(settings.language, "Arrival buffer (minutes)", "Ankunftspuffer (Minuten)"),
                     onValid = { onChange(settings.copy(bufferMinutes = it.coerceIn(0, 180))) }
                 )
+                SettingSwitch(
+                    tr(settings.language, "Add dynamic reserve for longer trips", "Dynamischen Zusatzpuffer für längere Fahrten verwenden"),
+                    settings.dynamicBufferEnabled
+                ) { onChange(settings.copy(dynamicBufferEnabled = it)) }
+                if (settings.dynamicBufferEnabled) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        DynamicBufferLevel.entries.forEach { level ->
+                            FilterChip(
+                                selected = settings.dynamicBufferLevel == level,
+                                onClick = { onChange(settings.copy(dynamicBufferLevel = level)) },
+                                label = {
+                                    Text(
+                                        when (level) {
+                                            DynamicBufferLevel.LOW -> tr(settings.language, "Low", "Gering")
+                                            DynamicBufferLevel.BALANCED -> tr(settings.language, "Balanced", "Ausgewogen")
+                                            DynamicBufferLevel.CAUTIOUS -> tr(settings.language, "Cautious", "Vorsichtig")
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    Text(
+                        tr(
+                            settings.language,
+                            "The extra reserve grows with trip duration. Providers without live traffic get a slightly larger uncertainty reserve. Road-type weighting is not guessed when a provider does not expose reliable road-class data.",
+                            "Der Zusatzpuffer wächst mit der Fahrtdauer. Dienste ohne Live-Verkehr erhalten eine etwas größere Unsicherheitsreserve. Eine Autobahn-/Stadt-Gewichtung wird nicht geraten, wenn der Anbieter keine verlässlichen Straßenklassen liefert."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 NumberDraftField(
                     initialValue = settings.reminderLeadMinutes,
                     label = tr(settings.language, "Departure reminder lead (minutes)", "Benachrichtigung vor Abfahrt (Minuten)"),
@@ -1384,31 +1432,58 @@ class MainActivity : ComponentActivity() {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(tr(settings.language, "Connector", "Steckertyp"), style = MaterialTheme.typography.labelLarge)
+                            Text(tr(settings.language, "Connector types", "Steckertypen"), style = MaterialTheme.typography.labelLarge)
                             Row(
                                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                ChargingConnectorPreference.entries.forEach { connector ->
+                                FilterChip(
+                                    selected = settings.chargingConnectors.isEmpty(),
+                                    onClick = { onChange(settings.copy(chargingConnectors = emptySet(), chargingConnector = ChargingConnectorPreference.ANY)) },
+                                    label = { Text(tr(settings.language, "No restriction", "Keine Einschränkung")) }
+                                )
+                                listOf(
+                                    ChargingConnectorPreference.CCS,
+                                    ChargingConnectorPreference.TYPE2,
+                                    ChargingConnectorPreference.CHADEMO
+                                ).forEach { connector ->
                                     FilterChip(
-                                        selected = settings.chargingConnector == connector,
-                                        onClick = { onChange(settings.copy(chargingConnector = connector)) },
+                                        selected = connector in settings.chargingConnectors,
+                                        onClick = {
+                                            val updated = if (connector in settings.chargingConnectors) {
+                                                settings.chargingConnectors - connector
+                                            } else settings.chargingConnectors + connector
+                                            onChange(settings.copy(chargingConnectors = updated, chargingConnector = ChargingConnectorPreference.ANY))
+                                        },
                                         label = {
                                             Text(
                                                 when (connector) {
-                                                    ChargingConnectorPreference.ANY -> tr(settings.language, "Any", "Beliebig")
-                                                    ChargingConnectorPreference.CCS -> "CCS"
+                                                    ChargingConnectorPreference.CCS -> "CCS / Combo 2"
                                                     ChargingConnectorPreference.TYPE2 -> tr(settings.language, "Type 2", "Typ 2")
                                                     ChargingConnectorPreference.CHADEMO -> "CHAdeMO"
+                                                    ChargingConnectorPreference.ANY -> tr(settings.language, "Any", "Beliebig")
                                                 }
                                             )
                                         }
                                     )
                                 }
                             }
+                            Text(tr(settings.language, "Maximum straight-line distance from destination", "Maximale Luftlinien-Entfernung vom Ziel"), style = MaterialTheme.typography.labelLarge)
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(250, 500, 750, 1000, 1500, 2000).forEach { meters ->
+                                    FilterChip(
+                                        selected = settings.chargingMaxDistanceMeters == meters,
+                                        onClick = { onChange(settings.copy(chargingMaxDistanceMeters = meters)) },
+                                        label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
+                                    )
+                                }
+                            }
                             NumberDraftField(
                                 initialValue = settings.chargingMaxDistanceMeters,
-                                label = tr(settings.language, "Maximum distance from destination (m)", "Maximale Entfernung vom Ziel (m)"),
+                                label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
                                 onValid = { onChange(settings.copy(chargingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
                             )
                             Text(tr(settings.language, "Preferred charging speed", "Bevorzugte Ladegeschwindigkeit"), style = MaterialTheme.typography.labelLarge)
@@ -1424,23 +1499,40 @@ class MainActivity : ComponentActivity() {
                                             Text(
                                                 when (speed) {
                                                     ChargingSpeedPreference.ANY -> tr(settings.language, "Any", "Beliebig")
-                                                    ChargingSpeedPreference.SLOW -> tr(settings.language, "Slow ≤22 kW", "Langsam ≤22 kW")
-                                                    ChargingSpeedPreference.MEDIUM -> tr(settings.language, "Medium 23–99 kW", "Mittel 23–99 kW")
-                                                    ChargingSpeedPreference.FAST -> tr(settings.language, "Fast 100–149 kW", "Schnell 100–149 kW")
-                                                    ChargingSpeedPreference.HPC -> "HPC ≥150 kW"
+                                                    ChargingSpeedPreference.SLOW -> tr(settings.language, "Slow ≤11 kW", "Langsam ≤11 kW")
+                                                    ChargingSpeedPreference.MEDIUM -> tr(settings.language, "Normal >11–22 kW", "Normal >11–22 kW")
+                                                    ChargingSpeedPreference.FAST -> tr(settings.language, "Fast >22–100 kW", "Schnell >22–100 kW")
+                                                    ChargingSpeedPreference.HPC -> "HPC >100 kW"
                                                 }
                                             )
                                         }
                                     )
                                 }
                             }
-                            OutlinedTextField(
-                                value = settings.chargingPreferredOperator,
-                                onValueChange = { onChange(settings.copy(chargingPreferredOperator = it.take(80))) },
-                                label = { Text(tr(settings.language, "Preferred network/operator (optional)", "Bevorzugter Netzbetreiber (optional)")) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
+                            Text(tr(settings.language, "Preferred operator/network", "Bevorzugter Betreiber/Netzwerk"), style = MaterialTheme.typography.labelLarge)
+                            SelectionButton(
+                                text = settings.chargingPreferredOperator.ifBlank { tr(settings.language, "No preference", "Keine Präferenz") },
+                                onClick = { showOperatorPicker = true },
+                                leadingIcon = Icons.Outlined.EvStation
                             )
+                            OutlinedButton(
+                                onClick = {
+                                    if (!operatorRefreshing) {
+                                        operatorRefreshing = true
+                                        scope.launch {
+                                            operatorOptions = operatorCatalog.refresh()
+                                            operatorRefreshing = false
+                                        }
+                                    }
+                                },
+                                enabled = !operatorRefreshing,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (operatorRefreshing) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                else Icon(Icons.Outlined.Refresh, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(tr(settings.language, "Update operator list", "Betreiberliste aktualisieren"))
+                            }
                             SettingSwitch(
                                 tr(settings.language, "Show other providers as well", "Andere Anbieter ebenfalls anzeigen"),
                                 settings.chargingShowOtherOperators
@@ -1733,18 +1825,116 @@ class MainActivity : ComponentActivity() {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text("Vibecoded with ❤️", style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = { uriHandler.openUri("https://github.com/3115a083/drive-time-notifier/") }) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_github),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
+                Text(
+                    tr(settings.language, "Installed version: ${BuildConfig.VERSION_NAME}", "Installierte Version: ${BuildConfig.VERSION_NAME}"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { uriHandler.openUri("https://github.com/3115a083/drive-time-notifier/") }) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_github),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text("GitHub")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            if (!updateChecking) {
+                                updateChecking = true
+                                scope.launch {
+                                    updateResult = UpdateChecker().check(BuildConfig.VERSION_NAME, BuildConfig.DEBUG)
+                                    updateChecking = false
+                                }
+                            }
+                        },
+                        enabled = !updateChecking
+                    ) {
+                        if (updateChecking) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Outlined.SystemUpdate, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(tr(settings.language, "Check update", "Update prüfen"))
+                    }
+                }
+                when (val result = updateResult) {
+                    is UpdateCheckResult.UpToDate -> Text(
+                        if (BuildConfig.DEBUG)
+                            tr(settings.language, "Debug build. Latest official release: ${result.latestVersion}.", "Debug-Build. Neueste offizielle Version: ${result.latestVersion}.")
+                        else tr(settings.language, "App is up to date (${result.latestVersion}).", "App ist aktuell (${result.latestVersion})."),
+                        style = MaterialTheme.typography.bodySmall
                     )
-                    Spacer(Modifier.width(7.dp))
-                    Text("GitHub")
+                    is UpdateCheckResult.UpdateAvailable -> {
+                        Text(
+                            tr(settings.language, "New official version ${result.latestVersion} is available.", "Neue offizielle Version ${result.latestVersion} ist verfügbar."),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                        TextButton(onClick = { uriHandler.openUri(result.releaseUrl) }) {
+                            Text(tr(settings.language, "Open release", "Release öffnen"))
+                            Spacer(Modifier.width(4.dp))
+                            Icon(Icons.Outlined.OpenInNew, null, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    is UpdateCheckResult.Error -> Text(
+                        tr(settings.language, "Update check failed: ${result.reason}", "Update-Prüfung fehlgeschlagen: ${result.reason}"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    null -> Unit
                 }
             }
 
             Spacer(Modifier.height(20.dp))
+        }
+
+        if (showOperatorPicker) {
+            Dialog(onDismissRequest = { showOperatorPicker = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    modifier = Modifier.fillMaxWidth(0.92f).heightIn(max = 650.dp)
+                ) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text(tr(settings.language, "Preferred operator/network", "Bevorzugter Betreiber/Netzwerk"), style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            tr(settings.language, "Choose a normalized name instead of typing it manually. Matching remains case-insensitive.", "Wähle einen normalisierten Namen statt ihn manuell einzugeben. Der Abgleich bleibt unabhängig von Groß-/Kleinschreibung."),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    onChange(settings.copy(chargingPreferredOperator = ""))
+                                    showOperatorPicker = false
+                                }.padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(settings.chargingPreferredOperator.isBlank(), onClick = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(tr(settings.language, "No preference", "Keine Präferenz"))
+                            }
+                            operatorOptions.forEach { operator ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        onChange(settings.copy(chargingPreferredOperator = operator.take(80)))
+                                        showOperatorPicker = false
+                                    }.padding(vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(settings.chargingPreferredOperator.equals(operator, true), onClick = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(operator)
+                                }
+                            }
+                        }
+                        TextButton(onClick = { showOperatorPicker = false }, modifier = Modifier.align(Alignment.End)) {
+                            Text(tr(settings.language, "Close", "Schließen"))
+                        }
+                    }
+                }
+            }
         }
 
         if (backupPasswordMode != null) {
@@ -3154,20 +3344,30 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun NumberDraftField(initialValue: Int, label: String, onValid: (Int) -> Unit) {
-        var text by remember { mutableStateOf(initialValue.toString()) }
+        var text by remember(label) { mutableStateOf(initialValue.toString()) }
+        var userEditing by remember(label) { mutableStateOf(false) }
         val latestOnValid by rememberUpdatedState(onValid)
         val latestInitial by rememberUpdatedState(initialValue)
-        LaunchedEffect(text) {
+        LaunchedEffect(text, userEditing) {
+            if (!userEditing) return@LaunchedEffect
             delay(450)
-            val parsed = text.toIntOrNull()
+            val submitted = text
+            val parsed = submitted.toIntOrNull()
             if (parsed != null && parsed != latestInitial) latestOnValid(parsed)
+            delay(120)
+            if (text == submitted) userEditing = false
         }
-        LaunchedEffect(initialValue) {
-            if (text.toIntOrNull() != initialValue) text = initialValue.toString()
+        LaunchedEffect(initialValue, userEditing) {
+            if (!userEditing && text.toIntOrNull() != initialValue) text = initialValue.toString()
         }
         OutlinedTextField(
             value = text,
-            onValueChange = { if (it.all(Char::isDigit)) text = it },
+            onValueChange = {
+                if (it.all(Char::isDigit)) {
+                    text = it
+                    userEditing = true
+                }
+            },
             label = { Text(label) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true

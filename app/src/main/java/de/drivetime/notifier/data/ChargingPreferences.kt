@@ -27,32 +27,14 @@ enum class ChargingSpeedPreference(val id: String) {
     fun penalty(powerKw: Double?): Int {
         if (this == ANY) return 0
         val power = powerKw ?: return 3
-        return when (this) {
-            ANY -> 0
-            SLOW -> when {
-                power <= 22.0 -> 0
-                power <= 50.0 -> 1
-                power <= 100.0 -> 2
-                else -> 3
-            }
-            MEDIUM -> when {
-                power in 23.0..99.999 -> 0
-                power <= 22.0 || power < 150.0 -> 1
-                else -> 2
-            }
-            FAST -> when {
-                power in 100.0..149.999 -> 0
-                power >= 150.0 -> 1
-                power >= 50.0 -> 1
-                power > 22.0 -> 2
-                else -> 3
-            }
-            HPC -> when {
-                power >= 150.0 -> 0
-                power >= 100.0 -> 1
-                power >= 50.0 -> 2
-                else -> 3
-            }
+        val band = when {
+            power <= 11.0 -> SLOW
+            power <= 22.0 -> MEDIUM
+            power <= 100.0 -> FAST
+            else -> HPC
         }
+        if (band == this) return 0
+        val order = listOf(SLOW, MEDIUM, FAST, HPC)
+        return kotlin.math.abs(order.indexOf(band) - order.indexOf(this)).coerceIn(1, 3)
     }
 }

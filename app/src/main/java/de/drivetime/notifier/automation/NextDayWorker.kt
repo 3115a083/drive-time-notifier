@@ -7,6 +7,7 @@ import de.drivetime.notifier.calendar.CalendarRepository
 import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.calendar.DriveEventDescriptionBuilder
 import de.drivetime.notifier.core.DrivePlanner
+import de.drivetime.notifier.core.DynamicArrivalBuffer
 import de.drivetime.notifier.data.SettingsStore
 import de.drivetime.notifier.data.excludesLocation
 import de.drivetime.notifier.data.startLocationForCalendar
@@ -112,7 +113,11 @@ class NextDayWorker(
             val plan = DrivePlanner.plan(
                 destinationStartMillis = enriched.effectiveDestinationStartMillis,
                 routeDurationSeconds = estimate.durationSeconds,
-                requestedBufferMinutes = settings.bufferMinutes,
+                requestedBufferMinutes = DynamicArrivalBuffer.totalMinutes(
+                    settings,
+                    estimate.durationSeconds,
+                    estimate.trafficDelaySeconds
+                ),
                 previousEventEndMillis = previousEnd
             )
             val pois = enriched.pois

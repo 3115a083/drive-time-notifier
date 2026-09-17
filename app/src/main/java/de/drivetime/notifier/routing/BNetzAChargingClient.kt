@@ -18,7 +18,9 @@ class BNetzAChargingClient(
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(7, TimeUnit.SECONDS)
         .callTimeout(9, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
         .build()
 ) {
     suspend fun query(destination: GeoPoint, radiusMeters: Int): List<RoutePoi> = withContext(Dispatchers.IO) {
@@ -46,83 +48,102 @@ class BNetzAChargingClient(
             .addQueryParameter("resultRecordCount", "250")
             .build()
 
-        client.newCall(
-            Request.Builder()
-                .url(url)
-                .header("User-Agent", "DriveTimeNotifier/1.1")
-                .get()
-                .build()
-        ).execute().use { response ->
-            if (!response.isSuccessful) return@withContext emptyList()
-            val root = JSONObject(response.body?.string().orEmpty())
-            if (root.has("error")) return@withContext emptyList()
-            val features = root.optJSONArray("features") ?: return@withContext emptyList()
-            buildList {
-                for (i in 0 until features.length()) {
-                    val feature = features.optJSONObject(i) ?: continue
-                    val attrs = feature.optJSONObject("attributes") ?: continue
-                    val status = attrs.optString("Status").lowercase()
-                    if (status.contains("außer betrieb") || status.contains("ausser betrieb") || status.contains("deaktiv")) continue
+        client.newCall(Request.Builder().url(url).header("User-Agent", "DriveTimeNotifier/1.1").get().build())
+            .execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body ?: return@withContext emptyList()
+                if (body.contentLength() > MAX_RESPONSE_BYTES) return@withContext emptyList()
+                val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
+                if (bytes.size > MAX_RESPONSE_BYTES) return@withContext emptyList()
+                val root = JSONObject(String(bytes, Charsets.UTF_8))
+                if (root.has("error")) return@withContext emptyList()
+                val features = root.optJSONArray("features") ?: return@withContext emptyList()
+                buildList {
+                    for (i in 0 until features.length()) {
+                        val feature = features.optJSONObject(i) ?: continue
+                        val attrs = feature.optJSONObject("attributes") ?: continue
+                        val status = clean(attrs.optString("Status"))?.lowercase().orEmpty()
+                        if (status.contains("außer betrieb") || status.contains("ausser betrieb") || status.contains("deaktiv")) continue
 
-                    val geometry = feature.optJSONObject("geometry")
-                    val lat = geometry?.optDouble("y", Double.NaN)?.takeIf { it.isFinite() }
-                        ?: attrs.optDouble("Breitengrad", Double.NaN).takeIf { it.isFinite() }
-                        ?: continue
-                    val lon = geometry?.optDouble("x", Double.NaN)?.takeIf { it.isFinite() }
-                        ?: attrs.optDouble("Längengrad", Double.NaN).takeIf { it.isFinite() }
-                        ?: continue
-                    val point = GeoPoint(lat, lon)
-                    val distance = ChargingStationSelector.haversineMeters(point, destination)
-                    if (distance > radius) continue
+                        val geometry = feature.optJSONObject("geometry")
+                        val lat = geometry?.optDouble("y", Double.NaN)?.takeIf { it.isFinite() }
+                            ?: attrs.optDouble("Breitengrad", Double.NaN).takeIf { it.isFinite() }
+                            ?: continue
+                        val lon = geometry?.optDouble("x", Double.NaN)?.takeIf { it.isFinite() }
+                            ?: attrs.optDouble("Längengrad", Double.NaN).takeIf { it.isFinite() }
+                            ?: continue
+                        val point = GeoPoint(lat, lon)
+                        val distance = ChargingStationSelector.haversineMeters(point, destination)
+                        if (distance > radius) continue
 
-                    val connectors = buildSet {
-                        for (index in 1..6) {
-                            addAll(parseConnector(attrs.optString("Steckertypen$index")))
+                        val connectors = buildSet {
+                            for (index in 1..8) addAll(parseConnector(attrs.optString("Steckertypen$index")))
                         }
-                    }
-                    val powerValues = buildList {
-                        attrs.optDouble("Nennleistung_Ladeeinrichtung__kW_", Double.NaN)
-                            .takeIf { it.isFinite() && it > 0.0 }
-                            ?.let(::add)
-                        for (index in 1..6) {
-                            parsePowerKw(attrs.optString("Nennleistung_Stecker$index"))?.let(::add)
+                        val powerValues = buildList {
+                            attrs.optDouble("Nennleistung_Ladeeinrichtung__kW_", Double.NaN)
+                                .takeIf { it.isFinite() && it > 0.0 }?.let(::add)
+                            for (index in 1..8) parsePowerKw(attrs.optString("Nennleistung_Stecker$index"))?.let(::add)
                         }
-                    }
-                    val operator = attrs.optString("Betreiber").ifBlank { null }
-                    val name = attrs.optString("Anzeigename__Karte_")
-                        .ifBlank { attrs.optString("Standortbezeichnung") }
-                        .ifBlank { operator.orEmpty() }
-                        .ifBlank { "Ladestation" }
-                    val openingHours = attrs.optString("Öffnungszeiten").ifBlank {
-                        listOf(
-                            attrs.optString("Öffnungszeiten__Wochentage"),
-                            attrs.optString("Öffnungszeiten__Tageszeiten")
-                        ).filter { it.isNotBlank() }.joinToString(" ")
-                    }.ifBlank { null }
-                    val address = listOf(
-                        listOf(attrs.optString("Straße"), attrs.optString("Hausnummer"))
-                            .filter { it.isNotBlank() }.joinToString(" "),
-                        listOf(attrs.optString("Postleitzahl"), attrs.optString("Ort"))
-                            .filter { it.isNotBlank() }.joinToString(" ")
-                    ).filter { it.isNotBlank() }.joinToString(", ").ifBlank { null }
-
-                    add(
-                        RoutePoi(
-                            point = point,
-                            kind = RoutePoi.Kind.CHARGING_STATION,
-                            name = name,
-                            distanceFromDestinationMeters = distance.roundToInt(),
-                            operator = operator,
-                            connectorTypes = connectors,
-                            maxPowerKw = powerValues.maxOrNull(),
-                            openingHours = openingHours,
-                            address = address,
-                            sources = setOf(RoutePoiSource.BUNDESNETZAGENTUR)
+                        val operator = first(attrs, "Betreiber", "Betreibername")
+                        val name = first(attrs, "Anzeigename__Karte_", "Standortbezeichnung") ?: operator
+                        val openingHours = first(
+                            attrs,
+                            "Öffnungszeiten",
+                            "Oeffnungszeiten",
+                            "Öffnungszeiten__Wochentage"
+                        ) ?: listOfNotNull(
+                            clean(attrs.optString("Öffnungszeiten__Wochentage")),
+                            clean(attrs.optString("Öffnungszeiten__Tageszeiten"))
+                        ).joinToString(" ").ifBlank { null }
+                        val maxStay = first(
+                            attrs,
+                            "Maximale_Parkdauer",
+                            "Maximale Parkdauer",
+                            "Parkdauer",
+                            "Parkraumbeschränkung",
+                            "Parkraumbeschraenkung",
+                            "Parkraumbeschränkungen"
                         )
-                    )
+                        val fee = first(attrs, "Gebuehrenpflicht", "Gebührenpflicht", "Kostenpflichtig")
+                        val parkingType = first(attrs, "Parkplatztyp", "Parkraumtyp", "Standortart")
+                        val capacity = listOf("Anzahl_Ladepunkte", "Anzahl Ladepunkte", "Ladepunkte")
+                            .asSequence().mapNotNull { attrs.optString(it).toIntOrNull() }.firstOrNull()
+                        val address = listOf(
+                            listOf(first(attrs, "Straße", "Strasse"), first(attrs, "Hausnummer"))
+                                .filterNotNull().joinToString(" "),
+                            listOf(first(attrs, "Postleitzahl", "PLZ"), first(attrs, "Ort"))
+                                .filterNotNull().joinToString(" ")
+                        ).filter { it.isNotBlank() }.joinToString(", ").ifBlank { null }
+
+                        add(
+                            RoutePoi(
+                                point = point,
+                                kind = RoutePoi.Kind.CHARGING_STATION,
+                                name = name,
+                                distanceFromDestinationMeters = distance.roundToInt(),
+                                operator = operator,
+                                connectorTypes = connectors,
+                                maxPowerKw = powerValues.maxOrNull(),
+                                access = "public",
+                                fee = fee,
+                                openingHours = openingHours,
+                                maxStay = maxStay,
+                                capacity = capacity,
+                                parkingType = parkingType,
+                                address = address,
+                                sources = setOf(RoutePoiSource.BUNDESNETZAGENTUR)
+                            )
+                        )
+                    }
                 }
             }
-        }
+    }
+
+    private fun first(attrs: JSONObject, vararg keys: String): String? =
+        keys.asSequence().mapNotNull { clean(attrs.optString(it)) }.firstOrNull()
+
+    private fun clean(raw: String?): String? = raw?.trim()?.takeIf {
+        it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true)
     }
 
     private fun parseConnector(raw: String): Set<ChargingConnectorPreference> {
@@ -135,17 +156,15 @@ class BNetzAChargingClient(
         }
     }
 
-    private fun parsePowerKw(raw: String): Double? {
-        if (raw.isBlank()) return null
-        return NUMBER.findAll(raw.replace(',', '.'))
-            .mapNotNull { it.value.toDoubleOrNull() }
-            .filter { it > 0.0 }
-            .maxOrNull()
-    }
+    private fun parsePowerKw(raw: String): Double? = NUMBER.findAll(raw.replace(',', '.'))
+        .mapNotNull { it.value.toDoubleOrNull() }
+        .filter { it > 0.0 }
+        .maxOrNull()
 
     companion object {
-        // Public ArcGIS mirror of Bundesnetzagentur charging-register data, CC BY 4.0.
-        private const val BASE_URL = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Ladesaeulen_in_Deutschland/FeatureServer/0/query"
+        // Public Esri representation of Bundesnetzagentur charging-register data, CC BY 4.0.
+        internal const val BASE_URL = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Ladesaeulen_in_Deutschland/FeatureServer/0/query"
         private val NUMBER = Regex("[0-9]+(?:\\.[0-9]+)?")
+        private const val MAX_RESPONSE_BYTES = 1_500_000L
     }
 }

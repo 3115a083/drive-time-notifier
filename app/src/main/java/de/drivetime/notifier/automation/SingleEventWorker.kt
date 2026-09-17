@@ -7,6 +7,7 @@ import de.drivetime.notifier.calendar.CalendarRepository
 import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.calendar.DriveEventDescriptionBuilder
 import de.drivetime.notifier.core.DrivePlanner
+import de.drivetime.notifier.core.DynamicArrivalBuffer
 import de.drivetime.notifier.data.SettingsStore
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
@@ -90,7 +91,7 @@ class SingleEventWorker(
             val plan = DrivePlanner.plan(
                 enriched.effectiveDestinationStartMillis,
                 route.durationSeconds,
-                settings.bufferMinutes,
+                DynamicArrivalBuffer.totalMinutes(settings, route.durationSeconds, route.trafficDelaySeconds),
                 previousEnd
             )
             val pois = enriched.pois

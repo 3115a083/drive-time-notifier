@@ -167,6 +167,8 @@ data class AppSettings(
     val calendarStartLocations: Set<String> = emptySet(),
     val exclusionRules: Set<String> = emptySet(),
     val bufferMinutes: Int = 15,
+    val dynamicBufferEnabled: Boolean = false,
+    val dynamicBufferLevel: DynamicBufferLevel = DynamicBufferLevel.BALANCED,
     val reminderLeadMinutes: Int = 0,
     val automaticEnabled: Boolean = false,
     val autoHour: Int = 21,
@@ -176,6 +178,7 @@ data class AppSettings(
     val showParking: Boolean = false,
     val showChargingStations: Boolean = false,
     val chargingConnector: ChargingConnectorPreference = ChargingConnectorPreference.ANY,
+    val chargingConnectors: Set<ChargingConnectorPreference> = emptySet(),
     val chargingMaxDistanceMeters: Int = 1_500,
     val chargingSpeedPreference: ChargingSpeedPreference = ChargingSpeedPreference.ANY,
     val chargingPreferredOperator: String = "",
@@ -206,6 +209,8 @@ class SettingsStore(private val context: Context) {
         val CALENDAR_START_LOCATIONS = stringSetPreferencesKey("calendar_start_locations")
         val EXCLUSION_RULES = stringSetPreferencesKey("exclusion_rules")
         val BUFFER = intPreferencesKey("buffer_minutes")
+        val DYNAMIC_BUFFER = booleanPreferencesKey("dynamic_buffer_enabled")
+        val DYNAMIC_BUFFER_LEVEL = stringPreferencesKey("dynamic_buffer_level")
         val REMINDER = intPreferencesKey("reminder_lead")
         val AUTO = booleanPreferencesKey("automatic_enabled")
         val HOUR = intPreferencesKey("auto_hour")
@@ -215,6 +220,7 @@ class SettingsStore(private val context: Context) {
         val PARKING = booleanPreferencesKey("show_parking")
         val CHARGING = booleanPreferencesKey("show_charging_stations")
         val CHARGING_CONNECTOR = stringPreferencesKey("charging_connector")
+        val CHARGING_CONNECTORS = stringSetPreferencesKey("charging_connectors")
         val CHARGING_MAX_DISTANCE = intPreferencesKey("charging_max_distance_meters")
         val CHARGING_SPEED = stringPreferencesKey("charging_speed_preference")
         val CHARGING_OPERATOR = stringPreferencesKey("charging_preferred_operator")
@@ -266,6 +272,8 @@ class SettingsStore(private val context: Context) {
             calendarStartLocations = p[K.CALENDAR_START_LOCATIONS] ?: emptySet(),
             exclusionRules = p[K.EXCLUSION_RULES] ?: emptySet(),
             bufferMinutes = p[K.BUFFER] ?: 15,
+            dynamicBufferEnabled = p[K.DYNAMIC_BUFFER] ?: false,
+            dynamicBufferLevel = DynamicBufferLevel.fromId(p[K.DYNAMIC_BUFFER_LEVEL]),
             reminderLeadMinutes = p[K.REMINDER] ?: 0,
             automaticEnabled = p[K.AUTO] ?: false,
             autoHour = p[K.HOUR] ?: 21,
@@ -275,6 +283,14 @@ class SettingsStore(private val context: Context) {
             showParking = p[K.PARKING] ?: false,
             showChargingStations = p[K.CHARGING] ?: false,
             chargingConnector = ChargingConnectorPreference.fromId(p[K.CHARGING_CONNECTOR]),
+            chargingConnectors = p[K.CHARGING_CONNECTORS]
+                ?.map { ChargingConnectorPreference.fromId(it) }
+                ?.filterNot { it == ChargingConnectorPreference.ANY }
+                ?.toSet()
+                ?: ChargingConnectorPreference.fromId(p[K.CHARGING_CONNECTOR])
+                    .takeUnless { it == ChargingConnectorPreference.ANY }
+                    ?.let(::setOf)
+                    .orEmpty(),
             chargingMaxDistanceMeters = (p[K.CHARGING_MAX_DISTANCE] ?: 1_500).coerceIn(100, 10_000),
             chargingSpeedPreference = ChargingSpeedPreference.fromId(p[K.CHARGING_SPEED]),
             chargingPreferredOperator = p[K.CHARGING_OPERATOR].orEmpty(),
@@ -326,6 +342,8 @@ class SettingsStore(private val context: Context) {
         p[K.CALENDAR_START_LOCATIONS] = s.calendarStartLocations
         p[K.EXCLUSION_RULES] = s.exclusionRules
         p[K.BUFFER] = s.bufferMinutes.coerceIn(0, 180)
+        p[K.DYNAMIC_BUFFER] = s.dynamicBufferEnabled
+        p[K.DYNAMIC_BUFFER_LEVEL] = s.dynamicBufferLevel.id
         p[K.REMINDER] = s.reminderLeadMinutes.coerceIn(0, 180)
         p[K.AUTO] = s.automaticEnabled
         p[K.HOUR] = s.autoHour.coerceIn(0, 23)
@@ -334,7 +352,8 @@ class SettingsStore(private val context: Context) {
         p[K.CAMERAS] = s.showSpeedCameras
         p[K.PARKING] = s.showParking
         p[K.CHARGING] = s.showChargingStations
-        p[K.CHARGING_CONNECTOR] = s.chargingConnector.id
+        p[K.CHARGING_CONNECTOR] = s.chargingConnectors.firstOrNull()?.id ?: ChargingConnectorPreference.ANY.id
+        p[K.CHARGING_CONNECTORS] = s.chargingConnectors.filterNot { it == ChargingConnectorPreference.ANY }.map { it.id }.toSet()
         p[K.CHARGING_MAX_DISTANCE] = s.chargingMaxDistanceMeters.coerceIn(100, 10_000)
         p[K.CHARGING_SPEED] = s.chargingSpeedPreference.id
         p[K.CHARGING_OPERATOR] = s.chargingPreferredOperator.trim().take(80)

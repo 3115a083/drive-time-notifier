@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import org.osmdroid.util.GeoPoint
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.*
 
@@ -22,7 +23,12 @@ data class RoutePoi(
     val network: String? = null,
     val connectorTypes: Set<ChargingConnectorPreference> = emptySet(),
     val maxPowerKw: Double? = null,
+    val access: String? = null,
+    val fee: String? = null,
     val openingHours: String? = null,
+    val maxStay: String? = null,
+    val capacity: Int? = null,
+    val parkingType: String? = null,
     val address: String? = null,
     val sources: Set<RoutePoiSource> = setOf(RoutePoiSource.OSM)
 ) {
@@ -34,6 +40,8 @@ class OsmEnrichmentClient(
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(9, TimeUnit.SECONDS)
         .callTimeout(12, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .retryOnConnectionFailure(false)
         .build()
 ) {
@@ -64,9 +72,13 @@ class OsmEnrichmentClient(
                 add("node(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"charging_station\"];")
                 add("way(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"charging_station\"];")
                 add("relation(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"charging_station\"];")
+                // Some fuel stations expose charging only through fuel:electricity=yes.
+                add("node(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];")
+                add("way(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];")
+                add("relation(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];")
             }
         }.joinToString("")
-        val query = "[out:json][timeout:10];($parts);out center 180;"
+        val query = "[out:json][timeout:10];($parts);out center 240;"
         val request = Request.Builder()
             .url("https://overpass-api.de/api/interpreter")
             .header("User-Agent", "DriveTimeNotifier/1.1")
@@ -75,44 +87,52 @@ class OsmEnrichmentClient(
 
         val osmResults = client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@use emptyList<RoutePoi>()
-            val elements = JSONObject(response.body?.string().orEmpty()).optJSONArray("elements")
+            val body = response.body ?: return@use emptyList<RoutePoi>()
+            if (body.contentLength() > MAX_RESPONSE_BYTES) return@use emptyList<RoutePoi>()
+            val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
+            if (bytes.size > MAX_RESPONSE_BYTES) return@use emptyList<RoutePoi>()
+            val elements = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
                 ?: return@use emptyList<RoutePoi>()
             val out = mutableListOf<RoutePoi>()
             for (i in 0 until elements.length()) {
-                val e = elements.getJSONObject(i)
+                val e = elements.optJSONObject(i) ?: continue
                 val tags = e.optJSONObject("tags") ?: continue
                 val center = e.optJSONObject("center")
                 val lat = if (e.has("lat")) e.optDouble("lat") else center?.optDouble("lat") ?: continue
                 val lon = if (e.has("lon")) e.optDouble("lon") else center?.optDouble("lon") ?: continue
+                if (!lat.isFinite() || !lon.isFinite()) continue
                 val point = GeoPoint(lat, lon)
                 when {
                     tags.optString("highway") == "speed_camera" -> {
                         if (distanceToRouteMeters(point, points) <= 120.0) {
-                            out += RoutePoi(point, RoutePoi.Kind.SPEED_CAMERA, tags.optString("name").ifBlank { null })
+                            out += RoutePoi(point, RoutePoi.Kind.SPEED_CAMERA, clean(tags.optString("name")))
                         }
                     }
                     tags.optString("amenity") == "parking" -> {
-                        val distance = haversineMeters(point, destination).roundToInt()
                         out += RoutePoi(
                             point = point,
                             kind = RoutePoi.Kind.PARKING,
-                            name = tags.optString("name").ifBlank { "Parking" },
-                            distanceFromDestinationMeters = distance
+                            name = clean(tags.optString("name")) ?: "Parking",
+                            distanceFromDestinationMeters = haversineMeters(point, destination).roundToInt(),
+                            access = clean(tags.optString("access")),
+                            fee = clean(tags.optString("fee")),
+                            openingHours = clean(tags.optString("opening_hours")),
+                            maxStay = clean(tags.optString("maxstay")) ?: clean(tags.optString("parking:maxstay")),
+                            capacity = firstInt(tags, "capacity", "capacity:car"),
+                            parkingType = clean(tags.optString("parking")) ?: clean(tags.optString("parking:condition"))
                         )
                     }
-                    tags.optString("amenity") == "charging_station" && charging != null -> {
-                        if (!isPublicCharging(tags)) continue
+                    isCharging(tags) && charging != null -> {
+                        val access = clean(tags.optString("access"))
+                        if (!isUsablePublicAccess(access)) continue
                         val distance = haversineMeters(point, destination).roundToInt()
                         if (distance > charging.maxDistanceMeters) continue
-                        val connectors = parseConnectors(tags)
-                        val power = parseMaxPowerKw(tags)
-                        val operator = tags.optString("operator").ifBlank { null }
-                        val network = tags.optString("network").ifBlank { null }
-                        val name = tags.optString("name")
-                            .ifBlank { tags.optString("brand") }
-                            .ifBlank { operator.orEmpty() }
-                            .ifBlank { network.orEmpty() }
-                            .ifBlank { "Ladestation" }
+                        val operator = clean(tags.optString("operator"))
+                        val network = clean(tags.optString("network"))
+                        val name = clean(tags.optString("name"))
+                            ?: clean(tags.optString("brand"))
+                            ?: operator
+                            ?: network
                         out += RoutePoi(
                             point = point,
                             kind = RoutePoi.Kind.CHARGING_STATION,
@@ -120,9 +140,17 @@ class OsmEnrichmentClient(
                             distanceFromDestinationMeters = distance,
                             operator = operator,
                             network = network,
-                            connectorTypes = connectors,
-                            maxPowerKw = power,
-                            openingHours = tags.optString("opening_hours").ifBlank { null },
+                            connectorTypes = parseConnectors(tags),
+                            maxPowerKw = parseMaxPowerKw(tags),
+                            access = access,
+                            fee = clean(tags.optString("fee")),
+                            openingHours = clean(tags.optString("opening_hours")),
+                            maxStay = clean(tags.optString("maxstay")) ?: clean(tags.optString("parking:maxstay")),
+                            capacity = firstInt(tags, "capacity:charging", "capacity"),
+                            parkingType = clean(tags.optString("parking"))
+                                ?: clean(tags.optString("parking:condition"))
+                                ?: clean(tags.optString("parking:lane")),
+                            address = address(tags),
                             sources = setOf(RoutePoiSource.OSM)
                         )
                     }
@@ -132,18 +160,17 @@ class OsmEnrichmentClient(
         }
 
         val camerasOut = osmResults.filter { it.kind == RoutePoi.Kind.SPEED_CAMERA }
-            .distinctBy { "${it.point.latitude},${it.point.longitude}" }
+            .distinctBy(::key)
         val parkingOut = osmResults.filter { it.kind == RoutePoi.Kind.PARKING }
-            .distinctBy { "${it.point.latitude},${it.point.longitude}" }
+            .distinctBy(::key)
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
             .take(5)
         val chargingOut = if (charging != null) {
             val osmCharging = osmResults.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
-                .distinctBy { "${it.point.latitude},${it.point.longitude}" }
+                .distinctBy(::key)
             val registry = if (charging.useBNetzA) {
-                runCatching {
-                    BNetzAChargingClient().query(destination, charging.maxDistanceMeters)
-                }.getOrDefault(emptyList())
+                runCatching { BNetzAChargingClient().query(destination, charging.maxDistanceMeters) }
+                    .getOrDefault(emptyList())
             } else emptyList()
             ChargingStationSelector.mergeAndRank(osmCharging, registry, charging)
         } else emptyList()
@@ -151,11 +178,15 @@ class OsmEnrichmentClient(
         camerasOut + chargingOut + parkingOut
     }
 
-    private fun isPublicCharging(tags: JSONObject): Boolean {
-        val restricted = setOf("private", "no", "customers", "destination", "permit", "members")
-        val access = tags.optString("access").trim().lowercase()
-        val motorcar = tags.optString("motorcar").trim().lowercase()
-        return access !in restricted && motorcar !in setOf("private", "no")
+    private fun isCharging(tags: JSONObject): Boolean =
+        tags.optString("amenity") == "charging_station" ||
+            (tags.optString("amenity") == "fuel" && tags.optString("fuel:electricity").equals("yes", true))
+
+    private fun isUsablePublicAccess(access: String?): Boolean {
+        // "customers" remains usable for public fuel/retail charging. Truly private,
+        // permit/member-only and explicitly forbidden locations are excluded.
+        val restricted = setOf("private", "no", "permit", "members", "military")
+        return access == null || access.lowercase(Locale.ROOT) !in restricted
     }
 
     private fun parseConnectors(tags: JSONObject): Set<ChargingConnectorPreference> = buildSet {
@@ -169,9 +200,9 @@ class OsmEnrichmentClient(
     }
 
     private fun positiveSocket(tags: JSONObject, key: String): Boolean {
-        val raw = tags.optString(key).trim().lowercase()
-        if (raw.isBlank() || raw == "no" || raw == "0") return false
-        return raw == "yes" || raw.toIntOrNull()?.let { it > 0 } == true || raw.contains(';')
+        val raw = clean(tags.optString(key))?.lowercase(Locale.ROOT) ?: return false
+        if (raw == "no" || raw == "0") return false
+        return raw == "yes" || raw.toIntOrNull()?.let { it > 0 } == true || ';' in raw
     }
 
     private fun parseMaxPowerKw(tags: JSONObject): Double? {
@@ -179,7 +210,7 @@ class OsmEnrichmentClient(
         val keys = tags.keys()
         while (keys.hasNext()) {
             val key = keys.next()
-            if (key == "charging_station:output" || key.endsWith(":output")) {
+            if (key == "maxpower" || key == "charging_station:output" || key.endsWith(":output")) {
                 parsePowerKw(tags.optString(key))?.let(values::add)
             }
         }
@@ -187,15 +218,34 @@ class OsmEnrichmentClient(
     }
 
     private fun parsePowerKw(raw: String): Double? {
-        if (raw.isBlank()) return null
-        val lower = raw.lowercase().replace(',', '.')
+        val lower = raw.lowercase(Locale.ROOT).replace(',', '.')
         val values = Regex("[0-9]+(?:\\.[0-9]+)?").findAll(lower)
             .mapNotNull { it.value.toDoubleOrNull() }
             .toList()
         if (values.isEmpty()) return null
         val max = values.maxOrNull() ?: return null
-        return if ("mw" in lower) max * 1000.0 else if ("w" in lower && "kw" !in lower) max / 1000.0 else max
+        return when {
+            "mw" in lower -> max * 1000.0
+            "w" in lower && "kw" !in lower -> max / 1000.0
+            else -> max
+        }
     }
+
+    private fun firstInt(tags: JSONObject, vararg names: String): Int? =
+        names.asSequence().mapNotNull { tags.optString(it).toIntOrNull() }.firstOrNull()
+
+    private fun address(tags: JSONObject): String? = listOf(
+        listOf(clean(tags.optString("addr:street")), clean(tags.optString("addr:housenumber")))
+            .filterNotNull().joinToString(" "),
+        listOf(clean(tags.optString("addr:postcode")), clean(tags.optString("addr:city")))
+            .filterNotNull().joinToString(" ")
+    ).filter { it.isNotBlank() }.joinToString(", ").ifBlank { null }
+
+    private fun clean(value: String?): String? = value?.trim()?.takeIf {
+        it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true)
+    }
+
+    private fun key(poi: RoutePoi) = "%.5f,%.5f".format(Locale.ROOT, poi.point.latitude, poi.point.longitude)
 
     private fun distanceToRouteMeters(point: GeoPoint, route: List<GeoPoint>): Double {
         if (route.isEmpty()) return Double.MAX_VALUE
@@ -212,4 +262,8 @@ class OsmEnrichmentClient(
 
     private fun haversineMeters(a: GeoPoint, b: GeoPoint): Double =
         ChargingStationSelector.haversineMeters(a, b)
+
+    companion object {
+        private const val MAX_RESPONSE_BYTES = 2_000_000L
+    }
 }

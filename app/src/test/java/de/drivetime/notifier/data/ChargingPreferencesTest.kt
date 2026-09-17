@@ -12,17 +12,15 @@ class ChargingPreferencesTest {
     }
 
     @Test
-    fun slowChargingPrefersLowPower() {
-        val preference = ChargingSpeedPreference.SLOW
-        assertEquals(0, preference.penalty(11.0))
-        assertEquals(0, preference.penalty(22.0))
-        assertEquals(3, preference.penalty(150.0))
+    fun speedBandsMatchDocumentedBoundaries() {
+        assertEquals(0, ChargingSpeedPreference.SLOW.penalty(11.0))
+        assertEquals(0, ChargingSpeedPreference.MEDIUM.penalty(22.0))
+        assertEquals(0, ChargingSpeedPreference.FAST.penalty(100.0))
+        assertEquals(0, ChargingSpeedPreference.HPC.penalty(101.0))
     }
 
     @Test
-    fun hpcChargingPrefersHighPower() {
-        val preference = ChargingSpeedPreference.HPC
-        assertEquals(0, preference.penalty(300.0))
-        assertEquals(3, preference.penalty(22.0))
+    fun hpcPenalizesSlowCharging() {
+        assertEquals(3, ChargingSpeedPreference.HPC.penalty(11.0))
     }
 }
