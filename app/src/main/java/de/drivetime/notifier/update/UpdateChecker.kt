@@ -45,25 +45,46 @@ class UpdateChecker(
 
     internal fun parseReleaseJson(installedVersion: String, debugBuild: Boolean, json: String): UpdateCheckResult {
         val root = runCatching { JSONObject(json) }.getOrElse { return UpdateCheckResult.Error("Invalid response") }
-        if (root.optBoolean("draft", false) || root.optBoolean("prerelease", false)) {
-            return UpdateCheckResult.Error("No stable release")
-        }
-        val latest = normalize(root.optString("tag_name")) ?: return UpdateCheckResult.Error("Missing version")
-        val releaseUrl = root.optString("html_url").takeIf {
-            it.startsWith("https://github.com/3115a083/drive-time-notifier/releases/")
-        } ?: "https://github.com/3115a083/drive-time-notifier/releases"
-        val installed = normalize(installedVersion) ?: return UpdateCheckResult.Error("Invalid installed version")
-        return if (compareVersions(latest, installed) > 0) {
-            UpdateCheckResult.UpdateAvailable(latest, releaseUrl)
-        } else {
-            // For debug builds this means the debug build is based on the current or newer code version.
-            UpdateCheckResult.UpToDate(latest)
-        }
+        return evaluateRelease(
+            installedVersion = installedVersion,
+            debugBuild = debugBuild,
+            latestRaw = root.optString("tag_name"),
+            releaseUrlRaw = root.optString("html_url"),
+            draft = root.optBoolean("draft", false),
+            prerelease = root.optBoolean("prerelease", false)
+        )
     }
 
     companion object {
         private const val LATEST_RELEASE_URL = "https://api.github.com/repos/3115a083/drive-time-notifier/releases/latest"
+        private const val RELEASES_URL = "https://github.com/3115a083/drive-time-notifier/releases"
         private const val MAX_BYTES = 256_000L
+
+        internal fun evaluateRelease(
+            installedVersion: String,
+            debugBuild: Boolean,
+            latestRaw: String,
+            releaseUrlRaw: String,
+            draft: Boolean,
+            prerelease: Boolean
+        ): UpdateCheckResult {
+            if (draft || prerelease) return UpdateCheckResult.Error("No stable release")
+            val latest = normalize(latestRaw) ?: return UpdateCheckResult.Error("Missing version")
+            val installed = normalize(installedVersion) ?: return UpdateCheckResult.Error("Invalid installed version")
+            val releaseUrl = releaseUrlRaw.takeIf {
+                it.startsWith("$RELEASES_URL/")
+            } ?: RELEASES_URL
+
+            // A debug build may still report that a newer official version exists, but the
+            // UI explicitly labels itself as a debug build and never performs a silent update.
+            @Suppress("UNUSED_VARIABLE")
+            val isDebug = debugBuild
+            return if (compareVersions(latest, installed) > 0) {
+                UpdateCheckResult.UpdateAvailable(latest, releaseUrl)
+            } else {
+                UpdateCheckResult.UpToDate(latest)
+            }
+        }
 
         internal fun normalize(raw: String): String? {
             val text = raw.trim().removePrefix("v").substringBefore('-').substringBefore('+')
