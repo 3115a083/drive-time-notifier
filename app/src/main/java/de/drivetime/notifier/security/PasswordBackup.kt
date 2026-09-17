@@ -124,6 +124,14 @@ object PasswordBackup {
         put("outputIcs", s.outputIcs)
         put("showSpeedCameras", s.showSpeedCameras)
         put("showParking", s.showParking)
+        put("showChargingStations", s.showChargingStations)
+        put("chargingConnector", s.chargingConnector.id)
+        put("chargingMaxDistanceMeters", s.chargingMaxDistanceMeters)
+        put("chargingSpeedPreference", s.chargingSpeedPreference.id)
+        put("chargingPreferredOperator", s.chargingPreferredOperator)
+        put("chargingShowOtherOperators", s.chargingShowOtherOperators)
+        put("chargingUseBNetzA", s.chargingUseBNetzA)
+        put("chargingNavigateViaStation", s.chargingNavigateViaStation)
         put("targetCalendarId", s.targetCalendarId)
         put("sourceCalendarIds", JSONArray(s.sourceCalendarIds.toList()))
         put("calendarEventTitle", s.calendarEventTitle)
@@ -179,6 +187,14 @@ object PasswordBackup {
             outputIcs = j.optBoolean("outputIcs", defaults.outputIcs),
             showSpeedCameras = j.optBoolean("showSpeedCameras", defaults.showSpeedCameras),
             showParking = j.optBoolean("showParking", defaults.showParking),
+            showChargingStations = j.optBoolean("showChargingStations", defaults.showChargingStations),
+            chargingConnector = ChargingConnectorPreference.fromId(j.optString("chargingConnector", defaults.chargingConnector.id)),
+            chargingMaxDistanceMeters = j.optInt("chargingMaxDistanceMeters", defaults.chargingMaxDistanceMeters).coerceIn(100, 10_000),
+            chargingSpeedPreference = ChargingSpeedPreference.fromId(j.optString("chargingSpeedPreference", defaults.chargingSpeedPreference.id)),
+            chargingPreferredOperator = j.optString("chargingPreferredOperator", defaults.chargingPreferredOperator),
+            chargingShowOtherOperators = j.optBoolean("chargingShowOtherOperators", defaults.chargingShowOtherOperators),
+            chargingUseBNetzA = j.optBoolean("chargingUseBNetzA", defaults.chargingUseBNetzA),
+            chargingNavigateViaStation = j.optBoolean("chargingNavigateViaStation", defaults.chargingNavigateViaStation),
             targetCalendarId = j.optLong("targetCalendarId", defaults.targetCalendarId),
             sourceCalendarIds = j.stringSet("sourceCalendarIds"),
             calendarEventTitle = j.optString("calendarEventTitle", defaults.calendarEventTitle),
