@@ -5,8 +5,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UpdateCheckerTest {
-    private val checker = UpdateChecker()
-
     @Test
     fun semanticVersionComparisonWorks() {
         assertTrue(UpdateChecker.compareVersions("1.2.0", "1.1.9") > 0)
@@ -20,16 +18,40 @@ class UpdateCheckerTest {
 
     @Test
     fun stableReleaseCanBeReportedAsNewer() {
-        val result = checker.parseReleaseJson(
-            "1.1.0-debug",
-            true,
-            """{"tag_name":"v1.2.0","html_url":"https://github.com/3115a083/drive-time-notifier/releases/tag/v1.2.0","draft":false,"prerelease":false}"""
+        val result = UpdateChecker.evaluateRelease(
+            installedVersion = "1.1.0-debug",
+            debugBuild = true,
+            latestRaw = "v1.2.0",
+            releaseUrlRaw = "https://github.com/3115a083/drive-time-notifier/releases/tag/v1.2.0",
+            draft = false,
+            prerelease = false
         )
         assertTrue(result is UpdateCheckResult.UpdateAvailable)
     }
 
     @Test
-    fun invalidPayloadFailsClosed() {
-        assertTrue(checker.parseReleaseJson("1.1.0", false, "not-json") is UpdateCheckResult.Error)
+    fun prereleaseIsNotOfferedAsStableUpdate() {
+        val result = UpdateChecker.evaluateRelease(
+            installedVersion = "1.1.0",
+            debugBuild = false,
+            latestRaw = "v1.2.0-rc1",
+            releaseUrlRaw = "https://github.com/3115a083/drive-time-notifier/releases/tag/v1.2.0-rc1",
+            draft = false,
+            prerelease = true
+        )
+        assertTrue(result is UpdateCheckResult.Error)
+    }
+
+    @Test
+    fun invalidInstalledVersionFailsClosed() {
+        val result = UpdateChecker.evaluateRelease(
+            installedVersion = "broken",
+            debugBuild = false,
+            latestRaw = "v1.2.0",
+            releaseUrlRaw = "https://github.com/3115a083/drive-time-notifier/releases/tag/v1.2.0",
+            draft = false,
+            prerelease = false
+        )
+        assertTrue(result is UpdateCheckResult.Error)
     }
 }
