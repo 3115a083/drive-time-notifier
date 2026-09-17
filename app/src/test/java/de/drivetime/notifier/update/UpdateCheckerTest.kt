@@ -23,7 +23,7 @@ class UpdateCheckerTest {
         val result = checker.parseReleaseJson(
             "1.1.0-debug",
             true,
-            """{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/3115a083/drive-time-notifier/releases/tag/v1.2.0\",\"draft\":false,\"prerelease\":false}"""
+            """{"tag_name":"v1.2.0","html_url":"https://github.com/3115a083/drive-time-notifier/releases/tag/v1.2.0","draft":false,"prerelease":false}"""
         )
         assertTrue(result is UpdateCheckResult.UpdateAvailable)
     }
