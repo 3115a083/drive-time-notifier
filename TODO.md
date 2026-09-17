@@ -19,3 +19,8 @@
 - Debug-Build: klar anzeigen, dass es sich um die Debug-Version handelt, und nicht versehentlich einen regulären Release als direkt installierbares Update über die Debug-App behandeln.
 - Unit-Tests für Versionsvergleich, Prerelease-Behandlung, ungültige Versionsstrings, Netzwerkfehler und `keine neue Version` ergänzen.
 - Vor Veröffentlichung mit `clean test lint assembleDebug assembleRelease` prüfen.
+
+## Aktueller Debug-Feature-Stand
+
+- Vollständigen EV-Ladefunktionsstand aus `feature/ev-charging-test` übernommen.
+- Weitere Fixes und Updater werden auf `feature/charging-stations-debug` umgesetzt.
