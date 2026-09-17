@@ -14,6 +14,7 @@ class ChargingRoutePlannerTest {
     @Test
     fun hpcPreferencePrefersHighPower() {
         assertEquals(0, ChargingSpeedPreference.HPC.penalty(300.0))
-        assertEquals(3, ChargingSpeedPreference.HPC.penalty(22.0))
+        assertEquals(2, ChargingSpeedPreference.HPC.penalty(22.0))
+        assertEquals(3, ChargingSpeedPreference.HPC.penalty(11.0))
     }
 }
