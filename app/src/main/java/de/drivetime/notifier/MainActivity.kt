@@ -54,6 +54,7 @@ import de.drivetime.notifier.core.DynamicArrivalBuffer
 import de.drivetime.notifier.data.*
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.CalendarEventRef
+import de.drivetime.notifier.model.DrivePlan
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
 import de.drivetime.notifier.routing.*
@@ -74,6 +75,14 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.time.*
 import java.time.format.DateTimeFormatter
+
+private data class ManualRouteCalculation(
+    val enriched: ChargingRouteOutcome,
+    val plan: DrivePlan,
+    val effectiveBufferMinutes: Int,
+    val duplicateExists: Boolean,
+    val identityKey: String
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -266,6 +275,8 @@ class MainActivity : ComponentActivity() {
         var chargingNavigation by remember { mutableStateOf<ChargingNavigation?>(null) }
         var planWarning by remember { mutableStateOf<String?>(null) }
         var planConflict by remember { mutableStateOf(false) }
+        var duplicateExists by remember { mutableStateOf(false) }
+        var driveIdentityKey by remember { mutableStateOf("") }
         var plannedStart by remember { mutableStateOf<Long?>(null) }
         var plannedEnd by remember { mutableStateOf<Long?>(null) }
         var calendarSaving by remember { mutableStateOf(false) }
@@ -356,11 +367,25 @@ class MainActivity : ComponentActivity() {
             estimate = null
             pois = emptyList()
             chargingNavigation = null
+            duplicateExists = false
+            driveIdentityKey = ""
             scope.launch {
                 val target = LocalDateTime.of(appointmentDate, appointmentTime)
                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 val result = runCatching {
-            val request = RouteRequest(origin.trim(), destination.trim(), target)
+            val cleanDestination = destination.trim()
+            val request = RouteRequest(origin.trim(), cleanDestination, target)
+            val identityKey = DriveEntryIdentity.key(cleanDestination, target)
+            val existingDrive = if (!settings.outputIcs && settings.targetCalendarId >= 0) {
+                runCatching {
+                    calendarRepo.findExistingDrive(
+                        settings.targetCalendarId,
+                        cleanDestination,
+                        target,
+                        identityKey
+                    )
+                }.getOrNull()
+            } else null
             val initialRoute = RoutingServiceFactory.create(context, settings).route(request)
             val enriched = ChargingRoutePlanner.prepare(
                 context = context,
@@ -380,18 +405,39 @@ class MainActivity : ComponentActivity() {
                 effectiveBufferMinutes,
                 previousEndMillis
             )
-            Triple(enriched, plan, effectiveBufferMinutes)
+            ManualRouteCalculation(
+                enriched = enriched,
+                plan = plan,
+                effectiveBufferMinutes = effectiveBufferMinutes,
+                duplicateExists = existingDrive != null,
+                identityKey = identityKey
+            )
         }
-        result.onSuccess { (enriched, plan, effectiveBufferMinutes) ->
+        result.onSuccess { calculation ->
+            val enriched = calculation.enriched
+            val plan = calculation.plan
+            val effectiveBufferMinutes = calculation.effectiveBufferMinutes
             val route = enriched.route
             estimate = route
             plannedStart = plan.departureMillis
             plannedEnd = plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L
             pois = enriched.pois
             chargingNavigation = enriched.navigation
+            duplicateExists = calculation.duplicateExists
+            driveIdentityKey = calculation.identityKey
             val previousEnd = previousEndMillis
             planConflict = previousEnd != null && plan.departureMillis < previousEnd
             planWarning = listOfNotNull(
+                if (calculation.duplicateExists) tr(
+                    settings.language,
+                    "A Drive Time Notifier entry already exists for this destination and appointment time. You can still save another drive if you want to.",
+                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Du kannst die Fahrt auf Wunsch trotzdem erneut speichern."
+                ) else null,
+                if (enriched.enrichmentUnavailable) tr(
+                    settings.language,
+                    "OpenStreetMap additional data is currently unavailable. The route is valid, but speed cameras, parking and charging stations may be missing.",
+                    "OpenStreetMap-Zusatzdaten sind derzeit nicht erreichbar. Die Route ist gültig, aber Blitzer, Parkplätze und Ladesäulen können fehlen."
+                ) else null,
                 planWarningText(settings.language, plan, effectiveBufferMinutes),
                 routeWarningText(settings.language, settings.routingProvider, route.warning)
             ).joinToString(" ").ifBlank { null }
@@ -580,7 +626,7 @@ class MainActivity : ComponentActivity() {
                                         destination,
                                         route,
                                         pois,
-                            chargingNavigation
+                                        chargingNavigation
                                     )
                                     val uri = IcsExporter(context).create(
                                         origin,
@@ -620,15 +666,18 @@ class MainActivity : ComponentActivity() {
                             error = null
                             scope.launch {
                                 runCatching {
-                                    val description = DriveEventDescriptionBuilder.build(
+                                    val rawDescription = DriveEventDescriptionBuilder.build(
                                         settings.language,
                                         settings.routingProvider,
                                         origin,
                                         destination,
                                         route,
                                         pois,
-                            chargingNavigation
+                                        chargingNavigation
                                     )
+                                    val description = driveIdentityKey.takeIf { it.isNotBlank() }
+                                        ?.let { DriveEntryIdentity.attach(rawDescription, it) }
+                                        ?: rawDescription
                                     calendarRepo.insertDrive(
                                         settings.targetCalendarId,
                                         origin,
@@ -674,6 +723,8 @@ class MainActivity : ComponentActivity() {
                         Text(
                             if (calendarSaved)
                                 tr(settings.language, "Added successfully", "Erfolgreich eingetragen")
+                            else if (duplicateExists)
+                                tr(settings.language, "Save anyway", "Trotzdem speichern")
                             else
                                 tr(settings.language, "Save drive to calendar", "Fahrt im Kalender speichern")
                         )

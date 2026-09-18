@@ -88,7 +88,9 @@ class CalendarRepository(private val context: Context) {
         )
         val from = destinationStartMillis - 24L * 60 * 60 * 1000
         val to = destinationStartMillis + 5L * 60 * 1000
-        val selection = "${CalendarContract.Events.CALENDAR_ID}=? AND ${CalendarContract.Events.DTSTART}>=? AND ${CalendarContract.Events.DTSTART}<=?"
+        val selection = "${CalendarContract.Events.CALENDAR_ID}=? AND " +
+            "${CalendarContract.Events.DELETED}=0 AND " +
+            "${CalendarContract.Events.DTSTART}>=? AND ${CalendarContract.Events.DTSTART}<=?"
         val args = arrayOf(calendarId.toString(), from.toString(), to.toString())
         val normalizedDestination = DriveEntryIdentity.normalizeLocation(destination)
         val legacyTolerance = 185L * 60 * 1000

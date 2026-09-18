@@ -1,6 +1,8 @@
 package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -35,6 +37,16 @@ data class RoutePoi(
     enum class Kind { SPEED_CAMERA, PARKING, CHARGING_STATION }
 }
 
+data class OsmEnrichmentResult(
+    val pois: List<RoutePoi>,
+    val unavailable: Boolean
+)
+
+private data class OverpassBatch(
+    val elements: List<JSONObject>,
+    val available: Boolean
+)
+
 class OsmEnrichmentClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
@@ -50,66 +62,35 @@ class OsmEnrichmentClient(
         cameras: Boolean,
         parking: Boolean,
         charging: ChargingSearchOptions? = null
-    ): List<RoutePoi> = withContext(Dispatchers.IO) {
-        if (points.isEmpty() || (!cameras && !parking && charging == null)) return@withContext emptyList()
+    ): OsmEnrichmentResult = withContext(Dispatchers.IO) {
+        if (points.isEmpty() || (!cameras && !parking && charging == null)) {
+            return@withContext OsmEnrichmentResult(emptyList(), unavailable = false)
+        }
         val destination = points.last()
-        val pad = 0.002
-        val minLat = points.minOf { it.latitude } - pad
-        val maxLat = points.maxOf { it.latitude } + pad
-        val minLon = points.minOf { it.longitude } - pad
-        val maxLon = points.maxOf { it.longitude } + pad
-        val bbox = "$minLat,$minLon,$maxLat,$maxLon"
-
-        val parts = buildList {
-            if (cameras) add("node[\"highway\"=\"speed_camera\"]($bbox);")
-            if (parking) {
-                add("node(around:1400,${destination.latitude},${destination.longitude})[\"amenity\"=\"parking\"];")
-                add("way(around:1400,${destination.latitude},${destination.longitude})[\"amenity\"=\"parking\"];")
-                add("relation(around:1400,${destination.latitude},${destination.longitude})[\"amenity\"=\"parking\"];")
-            }
-            charging?.let { options ->
-                val radius = options.maxDistanceMeters.coerceIn(100, 10_000)
-                add("node(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"charging_station\"];")
-                add("way(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"charging_station\"];")
-                add("relation(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"charging_station\"];")
-                // Some fuel stations expose charging only through fuel:electricity=yes.
-                add("node(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];")
-                add("way(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];")
-                add("relation(around:$radius,${destination.latitude},${destination.longitude})[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];")
-            }
-        }.joinToString("")
-        val query = "[out:json][timeout:10];($parts);out center 240;"
-        val request = Request.Builder()
-            .url("https://overpass-api.de/api/interpreter")
-            .header("User-Agent", "DriveTimeNotifier/1.1")
-            .post(FormBody.Builder().add("data", query).build())
-            .build()
-
-        val osmResults = client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return@use emptyList<RoutePoi>()
-            val body = response.body ?: return@use emptyList<RoutePoi>()
-            if (body.contentLength() > MAX_RESPONSE_BYTES) return@use emptyList<RoutePoi>()
-            val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
-            if (bytes.size > MAX_RESPONSE_BYTES) return@use emptyList<RoutePoi>()
-            val elements = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
-                ?: return@use emptyList<RoutePoi>()
-            val out = mutableListOf<RoutePoi>()
-            for (i in 0 until elements.length()) {
-                val e = elements.optJSONObject(i) ?: continue
+        val queries = buildList {
+            if (cameras) add(cameraQuery(points))
+            if (parking) add(parkingQuery(destination))
+            charging?.let { add(chargingQuery(destination, it.maxDistanceMeters)) }
+        }
+        val batches = coroutineScope {
+            queries.map { query -> async { fetchElements(query) } }.map { it.await() }
+        }
+        val osmResults = buildList {
+            for (e in batches.flatMap { it.elements }) {
                 val tags = e.optJSONObject("tags") ?: continue
                 val center = e.optJSONObject("center")
                 val lat = if (e.has("lat")) e.optDouble("lat") else center?.optDouble("lat") ?: continue
                 val lon = if (e.has("lon")) e.optDouble("lon") else center?.optDouble("lon") ?: continue
-                if (!lat.isFinite() || !lon.isFinite()) continue
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) continue
                 val point = GeoPoint(lat, lon)
                 when {
                     tags.optString("highway") == "speed_camera" -> {
                         if (distanceToRouteMeters(point, points) <= 120.0) {
-                            out += RoutePoi(point, RoutePoi.Kind.SPEED_CAMERA, clean(tags.optString("name")))
+                            add(RoutePoi(point, RoutePoi.Kind.SPEED_CAMERA, clean(tags.optString("name"))))
                         }
                     }
                     tags.optString("amenity") == "parking" -> {
-                        out += RoutePoi(
+                        add(RoutePoi(
                             point = point,
                             kind = RoutePoi.Kind.PARKING,
                             name = clean(tags.optString("name")) ?: "Parking",
@@ -120,7 +101,7 @@ class OsmEnrichmentClient(
                             maxStay = clean(tags.optString("maxstay")) ?: clean(tags.optString("parking:maxstay")),
                             capacity = firstInt(tags, "capacity", "capacity:car"),
                             parkingType = clean(tags.optString("parking")) ?: clean(tags.optString("parking:condition"))
-                        )
+                        ))
                     }
                     isCharging(tags) && charging != null -> {
                         val access = clean(tags.optString("access"))
@@ -133,7 +114,7 @@ class OsmEnrichmentClient(
                             ?: clean(tags.optString("brand"))
                             ?: operator
                             ?: network
-                        out += RoutePoi(
+                        add(RoutePoi(
                             point = point,
                             kind = RoutePoi.Kind.CHARGING_STATION,
                             name = name,
@@ -152,11 +133,10 @@ class OsmEnrichmentClient(
                                 ?: clean(tags.optString("parking:lane")),
                             address = address(tags),
                             sources = setOf(RoutePoiSource.OSM)
-                        )
+                        ))
                     }
                 }
             }
-            out
         }
 
         val camerasOut = osmResults.filter { it.kind == RoutePoi.Kind.SPEED_CAMERA }
@@ -165,17 +145,84 @@ class OsmEnrichmentClient(
             .distinctBy(::key)
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
             .take(5)
+        val registryResult = if (charging?.useBNetzA == true) {
+            runCatching { BNetzAChargingClient().query(destination, charging.maxDistanceMeters) }
+        } else null
         val chargingOut = if (charging != null) {
             val osmCharging = osmResults.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
                 .distinctBy(::key)
-            val registry = if (charging.useBNetzA) {
-                runCatching { BNetzAChargingClient().query(destination, charging.maxDistanceMeters) }
-                    .getOrDefault(emptyList())
-            } else emptyList()
+            val registry = registryResult?.getOrDefault(emptyList()).orEmpty()
             ChargingStationSelector.mergeAndRank(osmCharging, registry, charging)
         } else emptyList()
 
-        camerasOut + chargingOut + parkingOut
+        OsmEnrichmentResult(
+            pois = camerasOut + chargingOut + parkingOut,
+            unavailable = batches.any { !it.available } || registryResult?.isFailure == true
+        )
+    }
+
+    private fun cameraQuery(points: List<GeoPoint>): String {
+        val sampled = sampleRoute(points, 80)
+        val line = sampled.joinToString(",") {
+            "%.6f,%.6f".format(Locale.ROOT, it.latitude, it.longitude)
+        }
+        return "[out:json][timeout:10];node(around:160,$line)[\"highway\"=\"speed_camera\"];out 800;"
+    }
+
+    private fun parkingQuery(destination: GeoPoint): String {
+        val center = "${destination.latitude},${destination.longitude}"
+        return "[out:json][timeout:10];(" +
+            "node(around:1400,$center)[\"amenity\"=\"parking\"];" +
+            "way(around:1400,$center)[\"amenity\"=\"parking\"];" +
+            "relation(around:1400,$center)[\"amenity\"=\"parking\"];" +
+            ");out center 300;"
+    }
+
+    private fun chargingQuery(destination: GeoPoint, requestedRadius: Int): String {
+        val radius = requestedRadius.coerceIn(100, 10_000)
+        val center = "${destination.latitude},${destination.longitude}"
+        return "[out:json][timeout:10];(" +
+            "node(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
+            "way(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
+            "relation(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
+            "node(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
+            "way(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
+            "relation(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
+            ");out center 500;"
+    }
+
+    private fun sampleRoute(points: List<GeoPoint>, maximum: Int): List<GeoPoint> {
+        if (points.size <= maximum) return points
+        val lastIndex = points.lastIndex
+        return (0 until maximum).map { index ->
+            points[(index.toLong() * lastIndex / (maximum - 1)).toInt()]
+        }.distinctBy { "%.6f,%.6f".format(Locale.ROOT, it.latitude, it.longitude) }
+    }
+
+    private fun fetchElements(query: String): OverpassBatch {
+        for (endpoint in OVERPASS_ENDPOINTS) {
+            val elements = runCatching {
+                val request = Request.Builder()
+                    .url(endpoint)
+                    .header("User-Agent", "DriveTimeNotifier/1.1")
+                    .post(FormBody.Builder().add("data", query).build())
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    check(response.isSuccessful) { "Overpass HTTP ${response.code}" }
+                    val body = response.body ?: error("Overpass returned no body")
+                    check(body.contentLength() <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
+                    val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
+                    check(bytes.size <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
+                    val array = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
+                        ?: error("Overpass response contains no elements array")
+                    buildList {
+                        for (i in 0 until array.length()) array.optJSONObject(i)?.let(::add)
+                    }
+                }
+            }.getOrNull()
+            if (elements != null) return OverpassBatch(elements, available = true)
+        }
+        return OverpassBatch(emptyList(), available = false)
     }
 
     private fun isCharging(tags: JSONObject): Boolean =
@@ -241,9 +288,11 @@ class OsmEnrichmentClient(
             .filterNotNull().joinToString(" ")
     ).filter { it.isNotBlank() }.joinToString(", ").ifBlank { null }
 
-    private fun clean(value: String?): String? = value?.trim()?.takeIf {
-        it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true)
-    }
+    private fun clean(value: String?): String? = value
+        ?.filterNot { it.isISOControl() }
+        ?.trim()
+        ?.take(MAX_REMOTE_TEXT_LENGTH)
+        ?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }
 
     private fun key(poi: RoutePoi) = "%.5f,%.5f".format(Locale.ROOT, poi.point.latitude, poi.point.longitude)
 
@@ -265,5 +314,10 @@ class OsmEnrichmentClient(
 
     companion object {
         private const val MAX_RESPONSE_BYTES = 2_000_000L
+        private const val MAX_REMOTE_TEXT_LENGTH = 240
+        private val OVERPASS_ENDPOINTS = listOf(
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter"
+        )
     }
 }

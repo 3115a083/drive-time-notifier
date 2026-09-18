@@ -72,6 +72,7 @@ class BNetzAChargingClient(
                         val lon = geometry?.optDouble("x", Double.NaN)?.takeIf { it.isFinite() }
                             ?: attrs.optDouble("Längengrad", Double.NaN).takeIf { it.isFinite() }
                             ?: continue
+                        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) continue
                         val point = GeoPoint(lat, lon)
                         val distance = ChargingStationSelector.haversineMeters(point, destination)
                         if (distance > radius) continue
@@ -142,9 +143,11 @@ class BNetzAChargingClient(
     private fun first(attrs: JSONObject, vararg keys: String): String? =
         keys.asSequence().mapNotNull { clean(attrs.optString(it)) }.firstOrNull()
 
-    private fun clean(raw: String?): String? = raw?.trim()?.takeIf {
-        it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true)
-    }
+    private fun clean(raw: String?): String? = raw
+        ?.filterNot { it.isISOControl() }
+        ?.trim()
+        ?.take(MAX_REMOTE_TEXT_LENGTH)
+        ?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }
 
     private fun parseConnector(raw: String): Set<ChargingConnectorPreference> {
         if (raw.isBlank()) return emptySet()
@@ -166,5 +169,6 @@ class BNetzAChargingClient(
         internal const val BASE_URL = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Ladesaeulen_in_Deutschland/FeatureServer/0/query"
         private val NUMBER = Regex("[0-9]+(?:\\.[0-9]+)?")
         private const val MAX_RESPONSE_BYTES = 1_500_000L
+        private const val MAX_REMOTE_TEXT_LENGTH = 240
     }
 }

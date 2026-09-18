@@ -80,17 +80,22 @@ class IcsExporter(private val context: Context) {
         description: String
     ): String {
         val formatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
-        fun esc(s: String) = s
-            .replace("\\", "\\\\")
-            .replace(",", "\\,")
-            .replace(";", "\\;")
-            .replace("\r\n", "\\n")
-            .replace("\n", "\\n")
         val body = description.ifBlank { "Start: $origin" }
         return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Drive Time Notifier//EN\r\n" +
             "BEGIN:VEVENT\r\nUID:${UUID.randomUUID()}@drive-time-notifier\r\n" +
             "DTSTAMP:${formatter.format(Instant.now())}\r\nDTSTART:${formatter.format(Instant.ofEpochMilli(start))}\r\n" +
-            "DTEND:${formatter.format(Instant.ofEpochMilli(end))}\r\nSUMMARY:${esc(title)}\r\n" +
-            "LOCATION:${esc(destination)}\r\nDESCRIPTION:${esc(body)}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            "DTEND:${formatter.format(Instant.ofEpochMilli(end))}\r\nSUMMARY:${escapeIcsText(title)}\r\n" +
+            "LOCATION:${escapeIcsText(destination)}\r\nDESCRIPTION:${escapeIcsText(body)}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    }
+
+    companion object {
+        internal fun escapeIcsText(value: String): String = value
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .filter { it == '\n' || it == '\t' || !it.isISOControl() }
+            .replace("\\", "\\\\")
+            .replace(",", "\\,")
+            .replace(";", "\\;")
+            .replace("\n", "\\n")
     }
 }

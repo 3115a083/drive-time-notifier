@@ -56,13 +56,16 @@ class ChargingOperatorCatalog(context: Context) {
         operators()
     }
 
-    private fun clean(value: String?): String? = value?.trim()?.takeIf {
-        it.isNotEmpty() && !it.equals("null", true)
-    }
+    private fun clean(value: String?): String? = value
+        ?.filterNot { it.isISOControl() }
+        ?.trim()
+        ?.take(MAX_OPERATOR_LENGTH)
+        ?.takeIf { it.isNotEmpty() && !it.equals("null", true) }
 
     companion object {
         private const val KEY = "operators"
         private const val MAX_BYTES = 1_000_000L
+        private const val MAX_OPERATOR_LENGTH = 80
         private val BUILT_IN = setOf(
             "EnBW", "IONITY", "Tesla", "Aral pulse", "Allego", "E.ON Drive", "Shell Recharge",
             "Mer", "Pfalzwerke", "Westfalen Weser", "Stadtwerke München", "Stadtwerke Düsseldorf",

@@ -20,7 +20,8 @@ data class ChargingRouteOutcome(
     val effectiveDestinationStartMillis: Long,
     val walkingDurationSeconds: Long,
     val pois: List<RoutePoi>,
-    val navigation: ChargingNavigation?
+    val navigation: ChargingNavigation?,
+    val enrichmentUnavailable: Boolean = false
 )
 
 object ChargingRoutePlanner {
@@ -34,7 +35,7 @@ object ChargingRoutePlanner {
         val initialPoints = runCatching { PolylineDecoder.decode(initialRoute.encodedPolyline) }
             .getOrDefault(emptyList())
         val wantsEnrichment = settings.showSpeedCameras || settings.showParking || settings.showChargingStations
-        val initialPois = if (wantsEnrichment && initialPoints.size >= 2) {
+        val initialEnrichment = if (wantsEnrichment && initialPoints.size >= 2) {
             runCatching {
                 OsmEnrichmentClient().query(
                     initialPoints,
@@ -42,8 +43,9 @@ object ChargingRoutePlanner {
                     settings.showParking,
                     ChargingSearchOptions.from(settings)
                 )
-            }.getOrDefault(emptyList())
-        } else emptyList()
+            }.getOrElse { OsmEnrichmentResult(emptyList(), unavailable = true) }
+        } else OsmEnrichmentResult(emptyList(), unavailable = false)
+        val initialPois = initialEnrichment.pois
 
         val station = initialPois
             .firstOrNull { it.kind == RoutePoi.Kind.CHARGING_STATION }
@@ -57,7 +59,8 @@ object ChargingRoutePlanner {
                 effectiveDestinationStartMillis = request.arrivalMillis,
                 walkingDurationSeconds = 0L,
                 pois = initialPois,
-                navigation = null
+                navigation = null,
+                enrichmentUnavailable = initialEnrichment.unavailable
             )
         }
 
@@ -88,12 +91,13 @@ object ChargingRoutePlanner {
                 effectiveDestinationStartMillis = request.arrivalMillis,
                 walkingDurationSeconds = 0L,
                 pois = initialPois,
-                navigation = null
+                navigation = null,
+                enrichmentUnavailable = initialEnrichment.unavailable
             )
         }
 
         val destinationPois = initialPois.filter { it.kind != RoutePoi.Kind.SPEED_CAMERA }
-        val cameraPois = if (settings.showSpeedCameras) {
+        val cameraEnrichment = if (settings.showSpeedCameras) {
             val reroutedPoints = runCatching { PolylineDecoder.decode(rerouted.encodedPolyline) }
                 .getOrDefault(emptyList())
             if (reroutedPoints.size >= 2) {
@@ -104,16 +108,18 @@ object ChargingRoutePlanner {
                         parking = false,
                         charging = null
                     )
-                }.getOrDefault(emptyList()).filter { it.kind == RoutePoi.Kind.SPEED_CAMERA }
-            } else emptyList()
-        } else emptyList()
+                }.getOrElse { OsmEnrichmentResult(emptyList(), unavailable = true) }
+            } else OsmEnrichmentResult(emptyList(), unavailable = false)
+        } else OsmEnrichmentResult(emptyList(), unavailable = false)
+        val cameraPois = cameraEnrichment.pois.filter { it.kind == RoutePoi.Kind.SPEED_CAMERA }
 
         return ChargingRouteOutcome(
             route = rerouted,
             effectiveDestinationStartMillis = effectiveArrival,
             walkingDurationSeconds = walkingSeconds,
             pois = cameraPois + destinationPois,
-            navigation = ChargingNavigation(station, walkingMeters, walkingSeconds)
+            navigation = ChargingNavigation(station, walkingMeters, walkingSeconds),
+            enrichmentUnavailable = initialEnrichment.unavailable || cameraEnrichment.unavailable
         )
     }
 
