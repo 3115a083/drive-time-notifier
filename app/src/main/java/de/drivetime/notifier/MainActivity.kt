@@ -438,6 +438,11 @@ class MainActivity : ComponentActivity() {
                     "OpenStreetMap additional data is currently unavailable. The route is valid, but speed cameras, parking and charging stations may be missing.",
                     "OpenStreetMap-Zusatzdaten sind derzeit nicht erreichbar. Die Route ist gültig, aber Blitzer, Parkplätze und Ladesäulen können fehlen."
                 ) else null,
+                if (enriched.chargingRegistryUnavailable) tr(
+                    settings.language,
+                    "The Federal Network Agency charging register is currently unavailable. OpenStreetMap results are still shown.",
+                    "Das Ladesäulenregister der Bundesnetzagentur ist derzeit nicht erreichbar. OpenStreetMap-Ergebnisse werden weiterhin angezeigt."
+                ) else null,
                 planWarningText(settings.language, plan, effectiveBufferMinutes),
                 routeWarningText(settings.language, settings.routingProvider, route.warning)
             ).joinToString(" ").ifBlank { null }

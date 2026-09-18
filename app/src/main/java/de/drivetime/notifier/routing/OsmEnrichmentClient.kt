@@ -1,8 +1,6 @@
 package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -39,7 +37,8 @@ data class RoutePoi(
 
 data class OsmEnrichmentResult(
     val pois: List<RoutePoi>,
-    val unavailable: Boolean
+    val unavailable: Boolean,
+    val registryUnavailable: Boolean = false
 )
 
 private data class OverpassBatch(
@@ -49,9 +48,9 @@ private data class OverpassBatch(
 
 class OsmEnrichmentClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(9, TimeUnit.SECONDS)
-        .callTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(18, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
@@ -67,16 +66,11 @@ class OsmEnrichmentClient(
             return@withContext OsmEnrichmentResult(emptyList(), unavailable = false)
         }
         val destination = points.last()
-        val queries = buildList {
-            if (cameras) add(cameraQuery(points))
-            if (parking) add(parkingQuery(destination))
-            charging?.let { add(chargingQuery(destination, it.maxDistanceMeters)) }
-        }
-        val batches = coroutineScope {
-            queries.map { query -> async { fetchElements(query) } }.map { it.await() }
-        }
+        // Public Overpass instances explicitly discourage parallel scripts. A single
+        // combined request is also much less likely to exhaust the per-client slots.
+        val batch = fetchElements(combinedQuery(points, cameras, parking, charging))
         val osmResults = buildList {
-            for (e in batches.flatMap { it.elements }) {
+            for (e in batch.elements) {
                 val tags = e.optJSONObject("tags") ?: continue
                 val center = e.optJSONObject("center")
                 val lat = if (e.has("lat")) e.optDouble("lat") else center?.optDouble("lat") ?: continue
@@ -157,8 +151,22 @@ class OsmEnrichmentClient(
 
         OsmEnrichmentResult(
             pois = camerasOut + chargingOut + parkingOut,
-            unavailable = batches.any { !it.available } || registryResult?.isFailure == true
+            unavailable = !batch.available,
+            registryUnavailable = registryResult?.isFailure == true
         )
+    }
+
+    internal fun combinedQuery(
+        points: List<GeoPoint>,
+        cameras: Boolean,
+        parking: Boolean,
+        charging: ChargingSearchOptions?
+    ): String = buildString {
+        append("[out:json][timeout:15];(")
+        if (cameras) append(cameraQuery(points))
+        if (parking) append(parkingQuery(points.last()))
+        charging?.let { append(chargingQuery(points.last(), it.maxDistanceMeters)) }
+        append(");out center;")
     }
 
     private fun cameraQuery(points: List<GeoPoint>): String {
@@ -166,29 +174,29 @@ class OsmEnrichmentClient(
         val line = sampled.joinToString(",") {
             "%.6f,%.6f".format(Locale.ROOT, it.latitude, it.longitude)
         }
-        return "[out:json][timeout:10];node(around:160,$line)[\"highway\"=\"speed_camera\"];out 800;"
+        return "node(around:160,$line)[\"highway\"=\"speed_camera\"];"
     }
 
     private fun parkingQuery(destination: GeoPoint): String {
         val center = "${destination.latitude},${destination.longitude}"
-        return "[out:json][timeout:10];(" +
+        return "(" +
             "node(around:1400,$center)[\"amenity\"=\"parking\"];" +
             "way(around:1400,$center)[\"amenity\"=\"parking\"];" +
             "relation(around:1400,$center)[\"amenity\"=\"parking\"];" +
-            ");out center 300;"
+            ");"
     }
 
     private fun chargingQuery(destination: GeoPoint, requestedRadius: Int): String {
         val radius = requestedRadius.coerceIn(100, 10_000)
         val center = "${destination.latitude},${destination.longitude}"
-        return "[out:json][timeout:10];(" +
+        return "(" +
             "node(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
             "way(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
             "relation(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
             "node(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
             "way(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
             "relation(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
-            ");out center 500;"
+            ");"
     }
 
     private fun sampleRoute(points: List<GeoPoint>, maximum: Int): List<GeoPoint> {
@@ -200,11 +208,15 @@ class OsmEnrichmentClient(
     }
 
     private fun fetchElements(query: String): OverpassBatch {
-        for (endpoint in OVERPASS_ENDPOINTS) {
+        val preferred = lastSuccessfulEndpoint
+        val endpoints = if (preferred == null) OVERPASS_ENDPOINTS else {
+            listOf(preferred) + OVERPASS_ENDPOINTS.filterNot { it == preferred }
+        }
+        for (endpoint in endpoints) {
             val elements = runCatching {
                 val request = Request.Builder()
                     .url(endpoint)
-                    .header("User-Agent", "DriveTimeNotifier/1.1")
+                    .header("User-Agent", "DriveTimeNotifier/1.1 (+https://github.com/3115a083/drive-time-notifier)")
                     .post(FormBody.Builder().add("data", query).build())
                     .build()
                 client.newCall(request).execute().use { response ->
@@ -220,7 +232,10 @@ class OsmEnrichmentClient(
                     }
                 }
             }.getOrNull()
-            if (elements != null) return OverpassBatch(elements, available = true)
+            if (elements != null) {
+                lastSuccessfulEndpoint = endpoint
+                return OverpassBatch(elements, available = true)
+            }
         }
         return OverpassBatch(emptyList(), available = false)
     }
@@ -313,11 +328,14 @@ class OsmEnrichmentClient(
         ChargingStationSelector.haversineMeters(a, b)
 
     companion object {
-        private const val MAX_RESPONSE_BYTES = 2_000_000L
+        private const val MAX_RESPONSE_BYTES = 4_000_000L
         private const val MAX_REMOTE_TEXT_LENGTH = 240
         private val OVERPASS_ENDPOINTS = listOf(
             "https://overpass-api.de/api/interpreter",
-            "https://overpass.kumi.systems/api/interpreter"
+            "https://overpass.private.coffee/api/interpreter",
+            "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
         )
+        @Volatile
+        private var lastSuccessfulEndpoint: String? = null
     }
 }

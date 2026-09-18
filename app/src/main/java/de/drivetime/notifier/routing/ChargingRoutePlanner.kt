@@ -21,7 +21,8 @@ data class ChargingRouteOutcome(
     val walkingDurationSeconds: Long,
     val pois: List<RoutePoi>,
     val navigation: ChargingNavigation?,
-    val enrichmentUnavailable: Boolean = false
+    val enrichmentUnavailable: Boolean = false,
+    val chargingRegistryUnavailable: Boolean = false
 )
 
 object ChargingRoutePlanner {
@@ -60,7 +61,8 @@ object ChargingRoutePlanner {
                 walkingDurationSeconds = 0L,
                 pois = initialPois,
                 navigation = null,
-                enrichmentUnavailable = initialEnrichment.unavailable
+                enrichmentUnavailable = initialEnrichment.unavailable,
+                chargingRegistryUnavailable = initialEnrichment.registryUnavailable
             )
         }
 
@@ -92,7 +94,8 @@ object ChargingRoutePlanner {
                 walkingDurationSeconds = 0L,
                 pois = initialPois,
                 navigation = null,
-                enrichmentUnavailable = initialEnrichment.unavailable
+                enrichmentUnavailable = initialEnrichment.unavailable,
+                chargingRegistryUnavailable = initialEnrichment.registryUnavailable
             )
         }
 
@@ -119,7 +122,8 @@ object ChargingRoutePlanner {
             walkingDurationSeconds = walkingSeconds,
             pois = cameraPois + destinationPois,
             navigation = ChargingNavigation(station, walkingMeters, walkingSeconds),
-            enrichmentUnavailable = initialEnrichment.unavailable || cameraEnrichment.unavailable
+            enrichmentUnavailable = initialEnrichment.unavailable || cameraEnrichment.unavailable,
+            chargingRegistryUnavailable = initialEnrichment.registryUnavailable
         )
     }
 
