@@ -38,7 +38,7 @@ object ChargingRoutePlanner {
         val wantsEnrichment = settings.showSpeedCameras || settings.showParking || settings.showChargingStations
         val initialEnrichment = if (wantsEnrichment && initialPoints.size >= 2) {
             runCatching {
-                OsmEnrichmentClient().query(
+                OsmEnrichmentClient(settings.overpassBaseUrl).query(
                     initialPoints,
                     settings.showSpeedCameras,
                     settings.showParking,
@@ -105,7 +105,7 @@ object ChargingRoutePlanner {
                 .getOrDefault(emptyList())
             if (reroutedPoints.size >= 2) {
                 runCatching {
-                    OsmEnrichmentClient().query(
+                    OsmEnrichmentClient(settings.overpassBaseUrl).query(
                         reroutedPoints,
                         cameras = true,
                         parking = false,

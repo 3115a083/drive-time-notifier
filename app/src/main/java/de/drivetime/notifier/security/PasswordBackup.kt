@@ -144,6 +144,7 @@ object PasswordBackup {
         put("osrmBaseUrl", s.osrmBaseUrl)
         put("valhallaBaseUrl", s.valhallaBaseUrl)
         put("photonBaseUrl", s.photonBaseUrl)
+        put("overpassBaseUrl", s.overpassBaseUrl)
         put("language", s.language.id)
         put("appearance", s.appearance.id)
         put("palette", s.palette.id)
@@ -220,6 +221,7 @@ object PasswordBackup {
             osrmBaseUrl = j.optString("osrmBaseUrl", defaults.osrmBaseUrl),
             valhallaBaseUrl = j.optString("valhallaBaseUrl", defaults.valhallaBaseUrl),
             photonBaseUrl = j.optString("photonBaseUrl", defaults.photonBaseUrl),
+            overpassBaseUrl = j.optString("overpassBaseUrl", defaults.overpassBaseUrl),
             language = AppLanguage.fromId(j.optString("language", defaults.language.id)),
             appearance = AppAppearance.fromId(j.optString("appearance", defaults.appearance.id)),
             palette = ColorPalette.fromId(j.optString("palette", defaults.palette.id)),

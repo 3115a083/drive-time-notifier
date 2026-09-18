@@ -1,6 +1,7 @@
 package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
+import de.drivetime.notifier.debug.RequestDebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -48,17 +49,38 @@ class BNetzAChargingClient(
             .addQueryParameter("resultRecordCount", "250")
             .build()
 
-        client.newCall(Request.Builder().url(url).header("User-Agent", "DriveTimeNotifier/1.1").get().build())
-            .execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
-                val body = response.body ?: return@withContext emptyList()
-                if (body.contentLength() > MAX_RESPONSE_BYTES) return@withContext emptyList()
+        val started = System.nanoTime()
+        try {
+            client.newCall(Request.Builder().url(url).header("User-Agent", "DriveTimeNotifier/1.1").get().build())
+                .execute().use { response ->
+                if (!response.isSuccessful) {
+                    val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(1_200)
+                    RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "HTTP ${response.code}", detail)
+                    return@withContext emptyList()
+                }
+                val body = response.body ?: run {
+                    RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "empty response body")
+                    return@withContext emptyList()
+                }
+                if (body.contentLength() > MAX_RESPONSE_BYTES) {
+                    RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response too large: ${body.contentLength()} bytes")
+                    return@withContext emptyList()
+                }
                 val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
-                if (bytes.size > MAX_RESPONSE_BYTES) return@withContext emptyList()
+                if (bytes.size > MAX_RESPONSE_BYTES) {
+                    RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response exceeded $MAX_RESPONSE_BYTES bytes")
+                    return@withContext emptyList()
+                }
                 val root = JSONObject(String(bytes, Charsets.UTF_8))
-                if (root.has("error")) return@withContext emptyList()
-                val features = root.optJSONArray("features") ?: return@withContext emptyList()
-                buildList {
+                if (root.has("error")) {
+                    RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "API error", root.optJSONObject("error")?.toString().orEmpty())
+                    return@withContext emptyList()
+                }
+                val features = root.optJSONArray("features") ?: run {
+                    RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response contains no features array")
+                    return@withContext emptyList()
+                }
+                val results = buildList {
                     for (i in 0 until features.length()) {
                         val feature = features.optJSONObject(i) ?: continue
                         val attrs = feature.optJSONObject("attributes") ?: continue
@@ -137,8 +159,29 @@ class BNetzAChargingClient(
                         )
                     }
                 }
-            }
+                RequestDebugLog.add(
+                    "Bundesnetzagentur",
+                    "charging register",
+                    elapsedMillis(started),
+                    "success",
+                    "HTTP ${response.code}, ${bytes.size} bytes, ${features.length()} features, ${results.size} usable"
+                )
+                results
+                }
+        } catch (error: Exception) {
+            RequestDebugLog.add(
+                "Bundesnetzagentur",
+                "charging register",
+                elapsedMillis(started),
+                "failed",
+                "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
+            )
+            throw error
+        }
     }
+
+    private fun elapsedMillis(startedNanos: Long): Long =
+        (System.nanoTime() - startedNanos) / 1_000_000L
 
     private fun first(attrs: JSONObject, vararg keys: String): String? =
         keys.asSequence().mapNotNull { clean(attrs.optString(it)) }.firstOrNull()

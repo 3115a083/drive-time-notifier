@@ -1,6 +1,7 @@
 package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
+import de.drivetime.notifier.debug.RequestDebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -46,7 +47,16 @@ private data class OverpassBatch(
     val available: Boolean
 )
 
+internal enum class OsmQueryKind(val label: String) {
+    CHARGING("charging stations"),
+    PARKING("parking"),
+    SPEED_CAMERAS("speed cameras")
+}
+
+internal data class PrioritizedOsmQuery(val kind: OsmQueryKind, val query: String)
+
 class OsmEnrichmentClient(
+    preferredEndpoint: String = DEFAULT_OVERPASS_ENDPOINT,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -56,6 +66,9 @@ class OsmEnrichmentClient(
         .retryOnConnectionFailure(false)
         .build()
 ) {
+    private val endpoints = endpointOrder(preferredEndpoint)
+    private var lastSuccessfulEndpoint: String? = null
+
     suspend fun query(
         points: List<GeoPoint>,
         cameras: Boolean,
@@ -66,11 +79,22 @@ class OsmEnrichmentClient(
             return@withContext OsmEnrichmentResult(emptyList(), unavailable = false)
         }
         val destination = points.last()
-        // Public Overpass instances explicitly discourage parallel scripts. A single
-        // combined request is also much less likely to exhaust the per-client slots.
-        val batch = fetchElements(combinedQuery(points, cameras, parking, charging))
+        // Requests are deliberately sequential. Charging has priority, then parking,
+        // while the potentially expensive route-wide camera query runs last.
+        val batches = mutableListOf<Pair<OsmQueryKind, OverpassBatch>>()
+        var registryResult: Result<List<RoutePoi>>? = null
+        prioritizedQueries(points, cameras, parking, charging).forEach { request ->
+            batches += request.kind to fetchElements(request.query, request.kind)
+            if (request.kind == OsmQueryKind.CHARGING) {
+                charging?.takeIf { it.useBNetzA }?.let { options ->
+                    registryResult = runCatching {
+                        BNetzAChargingClient().query(destination, options.maxDistanceMeters)
+                    }
+                }
+            }
+        }
         val osmResults = buildList {
-            for (e in batch.elements) {
+            for (e in batches.flatMap { it.second.elements }) {
                 val tags = e.optJSONObject("tags") ?: continue
                 val center = e.optJSONObject("center")
                 val lat = if (e.has("lat")) e.optDouble("lat") else center?.optDouble("lat") ?: continue
@@ -139,9 +163,6 @@ class OsmEnrichmentClient(
             .distinctBy(::key)
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
             .take(5)
-        val registryResult = if (charging?.useBNetzA == true) {
-            runCatching { BNetzAChargingClient().query(destination, charging.maxDistanceMeters) }
-        } else null
         val chargingOut = if (charging != null) {
             val osmCharging = osmResults.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
                 .distinctBy(::key)
@@ -151,23 +172,25 @@ class OsmEnrichmentClient(
 
         OsmEnrichmentResult(
             pois = camerasOut + chargingOut + parkingOut,
-            unavailable = !batch.available,
+            unavailable = batches.any { !it.second.available },
             registryUnavailable = registryResult?.isFailure == true
         )
     }
 
-    internal fun combinedQuery(
+    internal fun prioritizedQueries(
         points: List<GeoPoint>,
         cameras: Boolean,
         parking: Boolean,
         charging: ChargingSearchOptions?
-    ): String = buildString {
-        append("[out:json][timeout:15];(")
-        if (cameras) append(cameraQuery(points))
-        if (parking) append(parkingQuery(points.last()))
-        charging?.let { append(chargingQuery(points.last(), it.maxDistanceMeters)) }
-        append(");out center;")
+    ): List<PrioritizedOsmQuery> = buildList {
+        charging?.let {
+            add(PrioritizedOsmQuery(OsmQueryKind.CHARGING, wrapQuery(chargingQuery(points.last(), it.maxDistanceMeters))))
+        }
+        if (parking) add(PrioritizedOsmQuery(OsmQueryKind.PARKING, wrapQuery(parkingQuery(points.last()))))
+        if (cameras) add(PrioritizedOsmQuery(OsmQueryKind.SPEED_CAMERAS, wrapQuery(cameraQuery(points))))
     }
+
+    private fun wrapQuery(body: String) = "[out:json][timeout:15];($body);out center;"
 
     private fun cameraQuery(points: List<GeoPoint>): String {
         val sampled = sampleRoute(points, 80)
@@ -207,35 +230,51 @@ class OsmEnrichmentClient(
         }.distinctBy { "%.6f,%.6f".format(Locale.ROOT, it.latitude, it.longitude) }
     }
 
-    private fun fetchElements(query: String): OverpassBatch {
+    private fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
         val preferred = lastSuccessfulEndpoint
-        val endpoints = if (preferred == null) OVERPASS_ENDPOINTS else {
-            listOf(preferred) + OVERPASS_ENDPOINTS.filterNot { it == preferred }
+        val orderedEndpoints = if (preferred == null || preferred !in endpoints) endpoints else {
+            listOf(preferred) + endpoints.filterNot { it == preferred }
         }
-        for (endpoint in endpoints) {
-            val elements = runCatching {
+        for (endpoint in orderedEndpoints) {
+            val started = System.nanoTime()
+            val attempt = runCatching {
                 val request = Request.Builder()
                     .url(endpoint)
                     .header("User-Agent", "DriveTimeNotifier/1.1 (+https://github.com/3115a083/drive-time-notifier)")
                     .post(FormBody.Builder().add("data", query).build())
                     .build()
                 client.newCall(request).execute().use { response ->
-                    check(response.isSuccessful) { "Overpass HTTP ${response.code}" }
+                    if (!response.isSuccessful) {
+                        val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(1_200)
+                        error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
+                    }
                     val body = response.body ?: error("Overpass returned no body")
                     check(body.contentLength() <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
                     val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
                     check(bytes.size <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
                     val array = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
                         ?: error("Overpass response contains no elements array")
-                    buildList {
+                    val elements = buildList {
                         for (i in 0 until array.length()) array.optJSONObject(i)?.let(::add)
                     }
+                    elements to "HTTP ${response.code}, ${bytes.size} bytes, ${elements.size} elements"
                 }
-            }.getOrNull()
-            if (elements != null) {
+            }
+            val duration = (System.nanoTime() - started) / 1_000_000L
+            val value = attempt.getOrNull()
+            if (value != null) {
+                val (elements, detail) = value
+                RequestDebugLog.add("Overpass", "${kind.label} via $endpoint", duration, "success", detail)
                 lastSuccessfulEndpoint = endpoint
                 return OverpassBatch(elements, available = true)
             }
+            RequestDebugLog.add(
+                "Overpass",
+                "${kind.label} via $endpoint",
+                duration,
+                "failed",
+                attempt.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
+            )
         }
         return OverpassBatch(emptyList(), available = false)
     }
@@ -330,12 +369,16 @@ class OsmEnrichmentClient(
     companion object {
         private const val MAX_RESPONSE_BYTES = 4_000_000L
         private const val MAX_REMOTE_TEXT_LENGTH = 240
-        private val OVERPASS_ENDPOINTS = listOf(
-            "https://overpass-api.de/api/interpreter",
+        const val DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
+        private val FALLBACK_OVERPASS_ENDPOINTS = listOf(
             "https://overpass.private.coffee/api/interpreter",
             "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
         )
-        @Volatile
-        private var lastSuccessfulEndpoint: String? = null
+        internal fun endpointOrder(preferredEndpoint: String): List<String> {
+            val preferred = preferredEndpoint.trim().removeSuffix("/")
+                .takeIf { it.startsWith("https://") && it.length <= 240 }
+                ?: DEFAULT_OVERPASS_ENDPOINT
+            return (listOf(preferred, DEFAULT_OVERPASS_ENDPOINT) + FALLBACK_OVERPASS_ENDPOINTS).distinct()
+        }
     }
 }

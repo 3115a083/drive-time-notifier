@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -52,6 +53,7 @@ import de.drivetime.notifier.calendar.*
 import de.drivetime.notifier.core.DrivePlanner
 import de.drivetime.notifier.core.DynamicArrivalBuffer
 import de.drivetime.notifier.data.*
+import de.drivetime.notifier.debug.RequestDebugLog
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.CalendarEventRef
 import de.drivetime.notifier.model.DrivePlan
@@ -435,8 +437,8 @@ class MainActivity : ComponentActivity() {
                 ) else null,
                 if (enriched.enrichmentUnavailable) tr(
                     settings.language,
-                    "OpenStreetMap additional data is currently unavailable. The route is valid, but speed cameras, parking and charging stations may be missing.",
-                    "OpenStreetMap-Zusatzdaten sind derzeit nicht erreichbar. Die Route ist gültig, aber Blitzer, Parkplätze und Ladesäulen können fehlen."
+                    "At least one OpenStreetMap additional-data request failed. Available results are still shown. Open Network Debug for details.",
+                    "Mindestens eine OpenStreetMap-Zusatzabfrage ist fehlgeschlagen. Verfügbare Ergebnisse werden weiterhin angezeigt. Details stehen im Netzwerk-Debug."
                 ) else null,
                 if (enriched.chargingRegistryUnavailable) tr(
                     settings.language,
@@ -1032,12 +1034,17 @@ class MainActivity : ComponentActivity() {
         var osrmDraft by remember { mutableStateOf(settings.osrmBaseUrl) }
         var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
         var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
+        var overpassDraft by remember { mutableStateOf(settings.overpassBaseUrl) }
         val operatorCatalog = remember { ChargingOperatorCatalog(context) }
         var operatorOptions by remember { mutableStateOf(operatorCatalog.operators()) }
         var operatorRefreshing by remember { mutableStateOf(false) }
         var showOperatorPicker by remember { mutableStateOf(false) }
         var updateChecking by remember { mutableStateOf(false) }
         var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
+        var debugVisible by rememberSaveable { mutableStateOf(false) }
+        var debugTapCount by remember { mutableIntStateOf(0) }
+        var lastDebugTap by remember { mutableLongStateOf(0L) }
+        val debugEntries by RequestDebugLog.entries.collectAsState()
         val latestSettings by rememberUpdatedState(settings)
 
         fun cancelCalendarReselection() {
@@ -1140,6 +1147,12 @@ class MainActivity : ComponentActivity() {
             delay(600)
             if (photonDraft != latestSettings.photonBaseUrl) {
                 onChange(latestSettings.copy(photonBaseUrl = photonDraft))
+            }
+        }
+        LaunchedEffect(overpassDraft) {
+            delay(600)
+            if (overpassDraft != latestSettings.overpassBaseUrl) {
+                onChange(latestSettings.copy(overpassBaseUrl = overpassDraft))
             }
         }
 
@@ -1465,6 +1478,17 @@ class MainActivity : ComponentActivity() {
                     tr(settings.language, "Find charging stations near destination", "Ladesäulen am Ziel suchen"),
                     settings.showChargingStations
                 ) { onChange(settings.copy(showChargingStations = it)) }
+                if (listOf(settings.showChargingStations, settings.showParking, settings.showSpeedCameras).count { it } > 1) {
+                    Text(
+                        tr(
+                            settings.language,
+                            "Several OpenStreetMap data types are enabled. They are requested one after another to avoid server overload: charging stations first, parking second, speed cameras last. The calculation can therefore take longer.",
+                            "Mehrere OpenStreetMap-Zusatzdaten sind aktiv. Sie werden zum Schutz vor Serverüberlastung nacheinander abgefragt: zuerst Ladesäulen, danach Parkplätze und zuletzt Blitzer. Die Berechnung kann dadurch länger dauern."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 if (settings.showChargingStations) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -1751,12 +1775,14 @@ class MainActivity : ComponentActivity() {
                     osrmDraft = osrmDraft,
                     valhallaDraft = valhallaDraft,
                     photonDraft = photonDraft,
+                    overpassDraft = overpassDraft,
                     interfaceHealthStore = interfaceHealthStore,
                     healthRevision = healthRevision,
                     onHealthChanged = { healthRevision++ },
                     onOsrmDraft = { osrmDraft = it },
                     onValhallaDraft = { valhallaDraft = it },
                     onPhotonDraft = { photonDraft = it },
+                    onOverpassDraft = { overpassDraft = it },
                     onOpenUrl = { uriHandler.openUri(it) }
                 )
 
@@ -1876,11 +1902,85 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            if (debugVisible) {
+                val debugText = buildString {
+                    appendLine("Version: ${BuildConfig.VERSION_NAME}")
+                    appendLine("Overpass endpoint: ${settings.overpassBaseUrl}")
+                    appendLine("Charging: ${settings.showChargingStations}, parking: ${settings.showParking}, cameras: ${settings.showSpeedCameras}")
+                    appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
+                    appendLine()
+                    append(RequestDebugLog.format(debugEntries))
+                }
+                SettingsCard(
+                    title = tr(settings.language, "Network debug", "Netzwerk-Debug"),
+                    icon = Icons.Outlined.BugReport
+                ) {
+                    Text(
+                        tr(
+                            settings.language,
+                            "Only technical request diagnostics are recorded. Calendar titles, addresses, API keys and route coordinates are not included.",
+                            "Es werden nur technische Anfrageinformationen protokolliert. Kalendertitel, Adressen, API-Keys und Routenkoordinaten sind nicht enthalten."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(debugText)) }) {
+                            Icon(Icons.Outlined.ContentCopy, null)
+                            Spacer(Modifier.width(5.dp))
+                            Text(tr(settings.language, "Copy", "Kopieren"))
+                        }
+                        TextButton(onClick = { RequestDebugLog.clear() }) {
+                            Icon(Icons.Outlined.DeleteOutline, null)
+                            Spacer(Modifier.width(5.dp))
+                            Text(tr(settings.language, "Clear", "Leeren"))
+                        }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { debugVisible = false }) {
+                            Icon(Icons.Outlined.Close, null)
+                            Spacer(Modifier.width(5.dp))
+                            Text(tr(settings.language, "Close", "Schließen"))
+                        }
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 360.dp)
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                text = debugText,
+                                modifier = Modifier.padding(12.dp).verticalScroll(rememberScrollState()),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            }
+
             Column(
                 Modifier.fillMaxWidth().padding(vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Vibecoded with ❤️", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Vibecoded with ❤️",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable {
+                        val now = SystemClock.elapsedRealtime()
+                        debugTapCount = if (now - lastDebugTap <= 2_500L) debugTapCount + 1 else 1
+                        lastDebugTap = now
+                        if (debugTapCount >= 5) {
+                            debugVisible = true
+                            debugTapCount = 0
+                            Toast.makeText(
+                                context,
+                                tr(settings.language, "Network debug opened", "Netzwerk-Debug geöffnet"),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }.padding(8.dp)
+                )
                 Text(
                     tr(settings.language, "Installed version: ${BuildConfig.VERSION_NAME}", "Installierte Version: ${BuildConfig.VERSION_NAME}"),
                     style = MaterialTheme.typography.bodySmall,
@@ -1896,7 +1996,7 @@ class MainActivity : ComponentActivity() {
                         Spacer(Modifier.width(7.dp))
                         Text("GitHub")
                     }
-                    OutlinedButton(
+                    TextButton(
                         onClick = {
                             if (!updateChecking) {
                                 updateChecking = true
@@ -2069,6 +2169,7 @@ class MainActivity : ComponentActivity() {
                                             osrmDraft = restored.osrmBaseUrl
                                             valhallaDraft = restored.valhallaBaseUrl
                                             photonDraft = restored.photonBaseUrl
+                                            overpassDraft = restored.overpassBaseUrl
                                             pendingImportedSettings = restored
                                             pendingReselectedSourceIds = emptySet()
                                             restoreAutomaticAfterCalendarSelection = imported.settings.automaticEnabled
@@ -2633,12 +2734,14 @@ class MainActivity : ComponentActivity() {
         osrmDraft: String,
         valhallaDraft: String,
         photonDraft: String,
+        overpassDraft: String,
         interfaceHealthStore: InterfaceHealthStore,
         healthRevision: Int,
         onHealthChanged: () -> Unit,
         onOsrmDraft: (String) -> Unit,
         onValhallaDraft: (String) -> Unit,
         onPhotonDraft: (String) -> Unit,
+        onOverpassDraft: (String) -> Unit,
         onOpenUrl: (String) -> Unit
     ) {
         val context = LocalContext.current
@@ -2646,6 +2749,7 @@ class MainActivity : ComponentActivity() {
         var testingId by remember { mutableStateOf<String?>(null) }
         var confirmProvider by remember { mutableStateOf<RoutingProvider?>(null) }
         var confirmPhoton by remember { mutableStateOf(false) }
+        var confirmOverpass by remember { mutableStateOf(false) }
 
         fun providerStatus(provider: RoutingProvider): InterfaceCheckState {
             val key = keyStore.read(provider).orEmpty()
@@ -2685,10 +2789,27 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        fun runOverpassTest() {
+            if (testingId != null) return
+            testingId = ProviderConnectivityChecker.OVERPASS_ID
+            scope.launch {
+                ProviderConnectivityChecker(context, settings, keyStore, interfaceHealthStore)
+                    .checkOverpass()
+                onHealthChanged()
+                testingId = null
+            }
+        }
+
         val photonStatus = remember(healthRevision, settings.photonBaseUrl) {
             interfaceHealthStore.read(
                 ProviderConnectivityChecker.PHOTON_ID,
                 ProviderConnectivityChecker.photonFingerprint(settings)
+            )?.state ?: InterfaceCheckState.UNKNOWN
+        }
+        val overpassStatus = remember(healthRevision, settings.overpassBaseUrl) {
+            interfaceHealthStore.read(
+                ProviderConnectivityChecker.OVERPASS_ID,
+                ProviderConnectivityChecker.overpassFingerprint(settings)
             )?.state ?: InterfaceCheckState.UNKNOWN
         }
 
@@ -2729,6 +2850,48 @@ class MainActivity : ComponentActivity() {
                 language = settings.language,
                 onClick = {
                     if (photonStatus == InterfaceCheckState.VALID) confirmPhoton = true else runPhotonTest()
+                }
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            InterfaceStatusIcon(
+                state = overpassStatus,
+                contentDescription = when (overpassStatus) {
+                    InterfaceCheckState.VALID -> tr(settings.language, "Overpass reachable", "Overpass erreichbar")
+                    InterfaceCheckState.INVALID -> tr(settings.language, "Overpass check failed", "Overpass-Prüfung fehlgeschlagen")
+                    InterfaceCheckState.UNKNOWN -> tr(settings.language, "Overpass not checked", "Overpass nicht geprüft")
+                }
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                tr(
+                    settings.language,
+                    "OpenStreetMap additional data: Overpass. The selected instance is tried first; direct fallback instances are used only if it fails.",
+                    "OpenStreetMap-Zusatzdaten: Overpass. Die ausgewählte Instanz wird zuerst verwendet; direkte Ersatzinstanzen folgen nur bei einem Fehler."
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = overpassDraft,
+                onValueChange = onOverpassDraft,
+                label = { Text("Overpass HTTPS endpoint") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            Spacer(Modifier.width(8.dp))
+            ProviderTestButton(
+                state = overpassStatus,
+                testing = testingId == ProviderConnectivityChecker.OVERPASS_ID,
+                language = settings.language,
+                onClick = {
+                    if (overpassStatus == InterfaceCheckState.VALID) confirmOverpass = true else runOverpassTest()
                 }
             )
         }
@@ -2864,6 +3027,32 @@ class MainActivity : ComponentActivity() {
                 },
                 dismissButton = {
                     TextButton(onClick = { confirmPhoton = false }) {
+                        Text(tr(settings.language, "Cancel", "Abbrechen"))
+                    }
+                }
+            )
+        }
+        if (confirmOverpass) {
+            AlertDialog(
+                onDismissRequest = { confirmOverpass = false },
+                title = { Text(tr(settings.language, "Test again?", "Erneut testen?")) },
+                text = {
+                    Text(
+                        tr(
+                            settings.language,
+                            "Overpass is already reachable. Testing again sends another small request to the selected instance.",
+                            "Overpass ist bereits erreichbar. Ein erneuter Test sendet eine weitere kleine Anfrage an die ausgewählte Instanz."
+                        )
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmOverpass = false
+                        runOverpassTest()
+                    }) { Text(tr(settings.language, "Test again", "Erneut testen")) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmOverpass = false }) {
                         Text(tr(settings.language, "Cancel", "Abbrechen"))
                     }
                 }

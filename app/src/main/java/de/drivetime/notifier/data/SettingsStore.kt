@@ -192,6 +192,7 @@ data class AppSettings(
     val osrmBaseUrl: String = "https://router.project-osrm.org",
     val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
+    val overpassBaseUrl: String = "https://overpass-api.de/api/interpreter",
     val language: AppLanguage = if (Locale.getDefault().language.equals("de", true)) AppLanguage.GERMAN else AppLanguage.ENGLISH,
     val appearance: AppAppearance = AppAppearance.SYSTEM,
     val palette: ColorPalette = ColorPalette.MATERIAL_YOU,
@@ -234,6 +235,7 @@ class SettingsStore(private val context: Context) {
         val OSRM = stringPreferencesKey("osrm_base_url")
         val VALHALLA = stringPreferencesKey("valhalla_base_url")
         val PHOTON = stringPreferencesKey("photon_base_url")
+        val OVERPASS = stringPreferencesKey("overpass_base_url")
         val LEGACY_NOMINATIM = stringPreferencesKey("nominatim_base_url")
         val LANGUAGE = stringPreferencesKey("app_language")
         val APPEARANCE = stringPreferencesKey("appearance")
@@ -304,6 +306,7 @@ class SettingsStore(private val context: Context) {
             osrmBaseUrl = p[K.OSRM] ?: "https://router.project-osrm.org",
             valhallaBaseUrl = p[K.VALHALLA] ?: "https://valhalla1.openstreetmap.de",
             photonBaseUrl = p[K.PHOTON] ?: "https://photon.komoot.io",
+            overpassBaseUrl = p[K.OVERPASS] ?: "https://overpass-api.de/api/interpreter",
             language = AppLanguage.fromId(p[K.LANGUAGE]),
             appearance = AppAppearance.fromId(p[K.APPEARANCE]),
             palette = ColorPalette.fromId(p[K.PALETTE]),
@@ -367,6 +370,7 @@ class SettingsStore(private val context: Context) {
         p[K.OSRM] = sanitizeHttpsBaseUrl(s.osrmBaseUrl, "https://router.project-osrm.org")
         p[K.VALHALLA] = sanitizeHttpsBaseUrl(s.valhallaBaseUrl, "https://valhalla1.openstreetmap.de")
         p[K.PHOTON] = sanitizeHttpsBaseUrl(s.photonBaseUrl, "https://photon.komoot.io")
+        p[K.OVERPASS] = sanitizeHttpsBaseUrl(s.overpassBaseUrl, "https://overpass-api.de/api/interpreter")
         p[K.LANGUAGE] = s.language.id
         p[K.APPEARANCE] = s.appearance.id
         p[K.PALETTE] = s.palette.id

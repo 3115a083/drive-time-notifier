@@ -3,6 +3,7 @@ package de.drivetime.notifier.routing
 import android.content.Context
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
+import de.drivetime.notifier.debug.RequestDebugLog
 import de.drivetime.notifier.security.SecureApiKeyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,6 +11,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.FormBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -102,6 +104,50 @@ class ProviderConnectivityChecker(
             onFailure = { InterfaceCheckResult(InterfaceCheckState.INVALID, it.message ?: "Photon check failed.") }
         )
         store.save(PHOTON_ID, fingerprint, result)
+        result
+    }
+
+    suspend fun checkOverpass(): InterfaceCheckResult = withContext(Dispatchers.IO) {
+        val fingerprint = overpassFingerprint(settings)
+        val started = System.nanoTime()
+        val result = runCatching {
+            val endpoint = settings.overpassBaseUrl.toHttpUrl()
+            require(endpoint.isHttps) { "Overpass endpoint must use HTTPS." }
+            val query = "[out:json][timeout:8];node(52.519,13.403,52.521,13.407)[\"amenity\"=\"charging_station\"];out 1;"
+            val request = Request.Builder()
+                .url(endpoint)
+                .header("User-Agent", context.packageName)
+                .post(FormBody.Builder().add("data", query).build())
+                .build()
+            client(12).newCall(request).execute().use { response ->
+                val responseBody = response.body
+                require(responseBody == null || responseBody.contentLength() <= 65_536L) {
+                    "Overpass test response is too large."
+                }
+                val bytes = responseBody?.source()?.readByteArray(65_537L) ?: ByteArray(0)
+                require(bytes.size <= 65_536) { "Overpass test response is too large." }
+                val body = String(bytes, Charsets.UTF_8)
+                val duration = (System.nanoTime() - started) / 1_000_000L
+                if (!response.isSuccessful) {
+                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", body.take(1_200))
+                    error("Overpass: HTTP ${response.code}")
+                }
+                RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "success", "HTTP ${response.code}, ${body.length} characters")
+            }
+        }.fold(
+            onSuccess = { InterfaceCheckResult(InterfaceCheckState.VALID, "Overpass endpoint reachable.") },
+            onFailure = {
+                RequestDebugLog.add(
+                    "Overpass test",
+                    settings.overpassBaseUrl,
+                    (System.nanoTime() - started) / 1_000_000L,
+                    "failed",
+                    "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
+                )
+                InterfaceCheckResult(InterfaceCheckState.INVALID, it.message ?: "Overpass check failed.")
+            }
+        )
+        store.save(OVERPASS_ID, fingerprint, result)
         result
     }
 
@@ -223,6 +269,7 @@ class ProviderConnectivityChecker(
 
     companion object {
         const val PHOTON_ID = "photon"
+        const val OVERPASS_ID = "overpass"
 
         fun providerFingerprint(provider: RoutingProvider, settings: AppSettings, key: String): String {
             val endpoint = when (provider) {
@@ -238,6 +285,7 @@ class ProviderConnectivityChecker(
         }
 
         fun photonFingerprint(settings: AppSettings): String = sha256("photon|${settings.photonBaseUrl}")
+        fun overpassFingerprint(settings: AppSettings): String = sha256("overpass|${settings.overpassBaseUrl}")
 
         private fun sha256(value: String): String =
             MessageDigest.getInstance("SHA-256")
