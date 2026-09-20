@@ -1,12 +1,14 @@
 name: Release APK
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       version:
         description: "Version without v prefix. Must match app versionName."
         required: true
-        default: "1.0.0"
+        default: "1.2.0"
         type: string
       publish_release:
         description: "Create vX.Y.Z tag and publish a public GitHub Release"
@@ -23,6 +25,7 @@ concurrency:
 
 jobs:
   release:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish release]')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: release
@@ -45,21 +48,21 @@ jobs:
         id: release_meta
         env:
           MANUAL_VERSION: ${{ inputs.version }}
-          MANUAL_PUBLISH: ${{ inputs.publish_release }}
+          MANUAL_PUBLISH: ${{ github.event_name == 'push' && 'true' || inputs.publish_release }}
         shell: bash
         run: |
           set -euo pipefail
 
-          VERSION="$MANUAL_VERSION"
+          APP_VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)"
+          APP_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
+
+          VERSION="${MANUAL_VERSION:-$APP_VERSION}"
           PUBLISH="${MANUAL_PUBLISH:-false}"
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid version: $VERSION" >&2
             exit 1
           fi
-
-          APP_VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)"
-          APP_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)"
 
           test -n "$APP_VERSION"
           test -n "$APP_CODE"
@@ -169,12 +172,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          awk -v version="${TAG#v}" '
+            $0 == "## " version { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          test -s "$RUNNER_TEMP/release-notes.md"
           gh release create "$TAG" \
             "$APK" \
             "$RUNNER_TEMP/SHA256SUMS.txt" \
             "$RUNNER_TEMP/apksigner.txt" \
             --verify-tag \
-            --generate-notes \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             --title "$TAG"
 
       - name: Release summary
