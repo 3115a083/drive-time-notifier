@@ -1,6 +1,7 @@
 package de.drivetime.notifier.routing
 
 import android.content.Context
+import de.drivetime.notifier.network.readBytesLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -41,8 +42,7 @@ class ChargingOperatorCatalog(context: Context) {
                     if (!response.isSuccessful) return@use emptySet<String>()
                     val body = response.body ?: return@use emptySet<String>()
                     if (body.contentLength() > MAX_BYTES) return@use emptySet<String>()
-                    val bytes = body.source().readByteArray(MAX_BYTES + 1L)
-                    if (bytes.size > MAX_BYTES) return@use emptySet<String>()
+                    val bytes = body.readBytesLimited(MAX_BYTES)
                     val root = JSONObject(String(bytes, Charsets.UTF_8))
                     val features = root.optJSONArray("features") ?: return@use emptySet<String>()
                     buildSet {

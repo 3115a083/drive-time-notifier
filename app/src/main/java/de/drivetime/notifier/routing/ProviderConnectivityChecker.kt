@@ -4,6 +4,7 @@ import android.content.Context
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.debug.RequestDebugLog
+import de.drivetime.notifier.network.readBytesLimited
 import de.drivetime.notifier.security.SecureApiKeyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -128,8 +129,7 @@ class ProviderConnectivityChecker(
                 require(responseBody == null || responseBody.contentLength() <= 65_536L) {
                     "Overpass test response is too large."
                 }
-                val bytes = responseBody?.source()?.readByteArray(65_537L) ?: ByteArray(0)
-                require(bytes.size <= 65_536) { "Overpass test response is too large." }
+                val bytes = responseBody?.readBytesLimited(65_536L) ?: ByteArray(0)
                 val body = String(bytes, Charsets.UTF_8)
                 val duration = (System.nanoTime() - started) / 1_000_000L
                 if (!response.isSuccessful) {

@@ -1,5 +1,6 @@
 package de.drivetime.notifier.update
 
+import de.drivetime.notifier.network.readBytesLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -36,8 +37,7 @@ class UpdateChecker(
                 if (!response.isSuccessful) return@use UpdateCheckResult.Error("HTTP ${response.code}")
                 val body = response.body ?: return@use UpdateCheckResult.Error("Empty response")
                 if (body.contentLength() > MAX_BYTES) return@use UpdateCheckResult.Error("Response too large")
-                val bytes = body.source().readByteArray(MAX_BYTES + 1L)
-                if (bytes.size > MAX_BYTES) return@use UpdateCheckResult.Error("Response too large")
+                val bytes = body.readBytesLimited(MAX_BYTES)
                 parseReleaseJson(installedVersion, debugBuild, String(bytes, Charsets.UTF_8))
             }
         }.getOrElse { UpdateCheckResult.Error(it.message?.take(120) ?: "Network error") }

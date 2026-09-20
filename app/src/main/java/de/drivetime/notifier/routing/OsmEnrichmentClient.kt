@@ -2,6 +2,7 @@ package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
+import de.drivetime.notifier.network.readBytesLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
@@ -241,8 +242,7 @@ class OsmEnrichmentClient(
                     }
                     val body = response.body ?: error("Overpass returned no body")
                     check(body.contentLength() <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
-                    val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
-                    check(bytes.size <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
+                    val bytes = body.readBytesLimited(MAX_RESPONSE_BYTES)
                     val array = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
                         ?: error("Overpass response contains no elements array")
                     val elements = buildList {

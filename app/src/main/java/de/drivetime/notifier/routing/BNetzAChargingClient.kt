@@ -2,6 +2,7 @@ package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
+import de.drivetime.notifier.network.readBytesLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -76,11 +77,7 @@ class BNetzAChargingClient(
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response too large: ${body.contentLength()} bytes")
                     error("Bundesnetzagentur response is too large")
                 }
-                val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
-                if (bytes.size > MAX_RESPONSE_BYTES) {
-                    RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response exceeded $MAX_RESPONSE_BYTES bytes")
-                    error("Bundesnetzagentur response is too large")
-                }
+                val bytes = body.readBytesLimited(MAX_RESPONSE_BYTES)
                 val root = JSONObject(String(bytes, Charsets.UTF_8))
                 if (root.has("error")) {
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "API error", root.optJSONObject("error")?.toString().orEmpty())
