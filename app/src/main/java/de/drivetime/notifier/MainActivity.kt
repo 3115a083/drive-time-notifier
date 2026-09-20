@@ -1292,9 +1292,11 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun PoiDetailsDialog(settings: AppSettings, poi: RoutePoi, onDismiss: () -> Unit) {
         val language = settings.language
+        val clipboard = LocalClipboardManager.current
+        val addressLabel = tr(language, "Address", "Adresse")
         val rows = buildList {
             poi.distanceFromDestinationMeters?.let { add(tr(language, "Distance from destination", "Entfernung zum Ziel") to "~$it m") }
-            poi.address?.let { add(tr(language, "Address", "Adresse") to it) }
+            poi.address?.let { add(addressLabel to it) }
             poi.operator?.let { add(tr(language, "Operator", "Betreiber") to it) }
             poi.network?.let { add(tr(language, "Network", "Netzwerk") to it) }
             if (poi.connectorTypes.isNotEmpty()) {
@@ -1344,7 +1346,19 @@ class MainActivity : ComponentActivity() {
                     }
                     rows.forEach { (label, value) ->
                         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(value, style = MaterialTheme.typography.bodyMedium)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            SelectionContainer(Modifier.weight(1f)) {
+                                Text(value, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (label == addressLabel) {
+                                IconButton(onClick = { clipboard.setText(AnnotatedString(value)) }) {
+                                    Icon(
+                                        Icons.Outlined.ContentCopy,
+                                        contentDescription = tr(language, "Copy address", "Adresse kopieren")
+                                    )
+                                }
+                            }
+                        }
                         Spacer(Modifier.height(9.dp))
                     }
                 }

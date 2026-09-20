@@ -129,7 +129,8 @@ class OsmEnrichmentClient(
                             openingHours = clean(tags.optString("opening_hours")),
                             maxStay = clean(tags.optString("maxstay")) ?: clean(tags.optString("parking:maxstay")),
                             capacity = firstInt(tags, "capacity", "capacity:car"),
-                            parkingType = clean(tags.optString("parking")) ?: clean(tags.optString("parking:condition"))
+                            parkingType = clean(tags.optString("parking")) ?: clean(tags.optString("parking:condition")),
+                            address = address(tags)
                         ))
                     }
                     isCharging(tags) && charging != null -> {
@@ -207,7 +208,8 @@ class OsmEnrichmentClient(
     private fun parkingQuery(destination: GeoPoint, requestedRadius: Int): String {
         val box = boundingBox(destination, requestedRadius.coerceIn(100, 10_000))
         return "node($box)[\"amenity\"=\"parking\"];" +
-            "way($box)[\"amenity\"=\"parking\"];"
+            "way($box)[\"amenity\"=\"parking\"];" +
+            "relation($box)[\"amenity\"=\"parking\"];"
     }
 
     private fun chargingQuery(destination: GeoPoint, requestedRadius: Int): String {
