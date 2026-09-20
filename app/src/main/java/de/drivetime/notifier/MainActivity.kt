@@ -1862,7 +1862,7 @@ class MainActivity : ComponentActivity() {
                 if (showChargingSettings) {
                     Dialog(onDismissRequest = { showChargingSettings = false }) {
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        color = MaterialTheme.colorScheme.surface,
                         shape = MaterialTheme.shapes.extraLarge,
                         tonalElevation = 6.dp,
                         modifier = Modifier.fillMaxWidth().heightIn(max = 680.dp)
@@ -3229,8 +3229,6 @@ class MainActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
         var testingId by remember { mutableStateOf<String?>(null) }
         var confirmProvider by remember { mutableStateOf<RoutingProvider?>(null) }
-        var confirmPhoton by remember { mutableStateOf(false) }
-        var confirmOverpass by remember { mutableStateOf(false) }
         var showOverpassConfig by remember { mutableStateOf(false) }
         var overpassEndpointDrafts by remember(settings.overpassEndpoints) {
             mutableStateOf(settings.overpassEndpoints.ifEmpty { listOf(settings.overpassBaseUrl) })
@@ -3266,22 +3264,22 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun runPhotonTest() {
+        fun runPhotonTest(testSettings: AppSettings) {
             if (testingId != null) return
             testingId = ProviderConnectivityChecker.PHOTON_ID
             scope.launch {
-                ProviderConnectivityChecker(context, settings, keyStore, interfaceHealthStore)
+                ProviderConnectivityChecker(context, testSettings, keyStore, interfaceHealthStore)
                     .checkPhoton()
                 onHealthChanged()
                 testingId = null
             }
         }
 
-        fun runOverpassTest() {
+        fun runOverpassTest(testSettings: AppSettings) {
             if (testingId != null) return
             testingId = ProviderConnectivityChecker.OVERPASS_ID
             scope.launch {
-                ProviderConnectivityChecker(context, settings, keyStore, interfaceHealthStore)
+                ProviderConnectivityChecker(context, testSettings, keyStore, interfaceHealthStore)
                     .checkOverpass()
                 onHealthChanged()
                 testingId = null
@@ -3304,6 +3302,27 @@ class MainActivity : ComponentActivity() {
                 ProviderConnectivityChecker.overpassFingerprint(settings)
             )?.state ?: InterfaceCheckState.UNKNOWN
         }
+        val draftEndpoints = remember(overpassEndpointDrafts) {
+            OsmEnrichmentClient.normalizeConfiguredEndpoints(overpassEndpointDrafts)
+        }
+        val photonDraftSettings = settings.copy(photonBaseUrl = photonDraft.trim())
+        val overpassDraftSettings = settings.copy(
+            overpassBaseUrl = draftEndpoints.first(),
+            overpassEndpoints = draftEndpoints,
+            overpassSplitRequests = splitOverpassDraft
+        )
+        val photonDraftStatus = remember(healthRevision, photonDraft) {
+            interfaceHealthStore.read(
+                ProviderConnectivityChecker.PHOTON_ID,
+                ProviderConnectivityChecker.photonFingerprint(photonDraftSettings)
+            )?.state ?: InterfaceCheckState.UNKNOWN
+        }
+        val overpassDraftStatus = remember(healthRevision, draftEndpoints, splitOverpassDraft) {
+            interfaceHealthStore.read(
+                ProviderConnectivityChecker.OVERPASS_ID,
+                ProviderConnectivityChecker.overpassFingerprint(overpassDraftSettings)
+            )?.state ?: InterfaceCheckState.UNKNOWN
+        }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             InterfaceStatusIcon(
@@ -3324,23 +3343,6 @@ class MainActivity : ComponentActivity() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                tr(settings.language, "Endpoint settings are grouped with Overpass below.", "Endpunkt-Einstellungen sind unten mit Overpass zusammengefasst."),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            ProviderTestButton(
-                state = photonStatus,
-                testing = testingId == ProviderConnectivityChecker.PHOTON_ID,
-                language = settings.language,
-                onClick = {
-                    if (photonStatus == InterfaceCheckState.VALID) confirmPhoton = true else runPhotonTest()
-                }
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -3373,20 +3375,11 @@ class MainActivity : ComponentActivity() {
                 overpassEndpointDrafts = settings.overpassEndpoints.ifEmpty { listOf(settings.overpassBaseUrl) }
                 splitOverpassDraft = settings.overpassSplitRequests
                 showOverpassConfig = true
-            }, modifier = Modifier.weight(1f)) {
+            }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Outlined.Tune, null)
                 Spacer(Modifier.width(8.dp))
                 Text(tr(settings.language, "Configure Photon & Overpass", "Photon & Overpass konfigurieren"))
             }
-            Spacer(Modifier.width(8.dp))
-            ProviderTestButton(
-                state = overpassStatus,
-                testing = testingId == ProviderConnectivityChecker.OVERPASS_ID,
-                language = settings.language,
-                onClick = {
-                    if (overpassStatus == InterfaceCheckState.VALID) confirmOverpass = true else runOverpassTest()
-                }
-            )
         }
         Spacer(Modifier.height(10.dp))
 
@@ -3499,58 +3492,6 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        if (confirmPhoton) {
-            AlertDialog(
-                onDismissRequest = { confirmPhoton = false },
-                title = { Text(tr(settings.language, "Test again?", "Erneut testen?")) },
-                text = {
-                    Text(
-                        tr(
-                            settings.language,
-                            "Photon is already reachable. Testing again sends another request to the public endpoint.",
-                            "Photon ist bereits erreichbar. Ein erneuter Test sendet eine weitere Anfrage an den öffentlichen Endpunkt."
-                        )
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        confirmPhoton = false
-                        runPhotonTest()
-                    }) { Text(tr(settings.language, "Test again", "Erneut testen")) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirmPhoton = false }) {
-                        Text(tr(settings.language, "Cancel", "Abbrechen"))
-                    }
-                }
-            )
-        }
-        if (confirmOverpass) {
-            AlertDialog(
-                onDismissRequest = { confirmOverpass = false },
-                title = { Text(tr(settings.language, "Test again?", "Erneut testen?")) },
-                text = {
-                    Text(
-                        tr(
-                            settings.language,
-                            "Overpass is already reachable. Testing again sends another small request to the selected instance.",
-                            "Overpass ist bereits erreichbar. Ein erneuter Test sendet eine weitere kleine Anfrage an die ausgewählte Instanz."
-                        )
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        confirmOverpass = false
-                        runOverpassTest()
-                    }) { Text(tr(settings.language, "Test again", "Erneut testen")) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirmOverpass = false }) {
-                        Text(tr(settings.language, "Cancel", "Abbrechen"))
-                    }
-                }
-            )
-        }
         if (showOverpassConfig) {
             AlertDialog(
                 onDismissRequest = {
@@ -3571,6 +3512,14 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            ProviderTestButton(
+                                state = photonDraftStatus,
+                                testing = testingId == ProviderConnectivityChecker.PHOTON_ID,
+                                language = settings.language,
+                                onClick = { runPhotonTest(photonDraftSettings) }
+                            )
+                        }
                         Text(
                             tr(
                                 settings.language,
@@ -3628,6 +3577,23 @@ class MainActivity : ComponentActivity() {
                                 ) { Icon(Icons.Outlined.DeleteOutline, null) }
                             }
                         }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            ProviderTestButton(
+                                state = overpassDraftStatus,
+                                testing = testingId == ProviderConnectivityChecker.OVERPASS_ID,
+                                language = settings.language,
+                                onClick = { runOverpassTest(overpassDraftSettings) }
+                            )
+                        }
+                        Text(
+                            tr(
+                                settings.language,
+                                "The Overpass test checks endpoint 1. The remaining endpoints are used as ordered fallbacks.",
+                                "Der Overpass-Test prüft Endpunkt 1. Die übrigen Endpunkte werden in der eingestellten Reihenfolge als Fallback verwendet."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         OutlinedButton(
                             enabled = overpassEndpointDrafts.size < 8,
                             onClick = { overpassEndpointDrafts = overpassEndpointDrafts + "" },
@@ -3636,6 +3602,41 @@ class MainActivity : ComponentActivity() {
                             Icon(Icons.Outlined.Add, null)
                             Spacer(Modifier.width(8.dp))
                             Text(tr(settings.language, "Add endpoint", "Endpunkt hinzufügen"))
+                        }
+                        Text(
+                            tr(settings.language, "Keyless global presets", "Schlüssellose globale Voreinstellungen"),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        listOf(
+                            "Main Overpass API" to "https://overpass-api.de/api/interpreter",
+                            "Private.coffee" to "https://overpass.private.coffee/api/interpreter",
+                            "VK Maps" to "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+                        ).forEach { (name, endpoint) ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(name, style = MaterialTheme.typography.labelLarge)
+                                        Text(endpoint, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    TextButton(
+                                        enabled = endpoint !in overpassEndpointDrafts && overpassEndpointDrafts.size < 8,
+                                        onClick = { overpassEndpointDrafts = overpassEndpointDrafts + endpoint }
+                                    ) {
+                                        Text(
+                                            if (endpoint in overpassEndpointDrafts)
+                                                tr(settings.language, "Included", "Enthalten")
+                                            else tr(settings.language, "Add", "Hinzufügen")
+                                        )
+                                    }
+                                }
+                            }
                         }
                         Text(
                             tr(settings.language, "Additional presets (API key required)", "Weitere Voreinstellungen (API-Key erforderlich)"),
@@ -3661,8 +3662,8 @@ class MainActivity : ComponentActivity() {
                         Text(
                             tr(
                                 settings.language,
-                                "Replace YOUR_API_KEY before saving. The three keyless global public instances are already included by default.",
-                                "Ersetze YOUR_API_KEY vor dem Speichern. Die drei schlüssellosen globalen öffentlichen Instanzen sind bereits standardmäßig enthalten."
+                                "Replace YOUR_API_KEY before saving. Keyless presets can be added from the visible list above.",
+                                "Ersetze YOUR_API_KEY vor dem Speichern. Schlüssellose Voreinstellungen können aus der sichtbaren Liste oben hinzugefügt werden."
                             ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
