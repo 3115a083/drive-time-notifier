@@ -13,6 +13,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import org.osmdroid.util.GeoPoint
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.math.*
 
@@ -59,6 +60,8 @@ internal data class PrioritizedOsmQuery(val kind: OsmQueryKind, val query: Strin
 
 class OsmEnrichmentClient(
     preferredEndpoint: String = DEFAULT_OVERPASS_ENDPOINT,
+    configuredEndpoints: List<String> = emptyList(),
+    private val splitRequests: Boolean = false,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
@@ -69,7 +72,11 @@ class OsmEnrichmentClient(
         .protocols(listOf(Protocol.HTTP_1_1))
         .build()
 ) {
-    private val endpoints = endpointOrder(preferredEndpoint)
+    private val endpoints = if (configuredEndpoints.isEmpty()) {
+        endpointOrder(preferredEndpoint)
+    } else {
+        normalizeConfiguredEndpoints(configuredEndpoints)
+    }
     private var lastSuccessfulEndpoint: String? = null
     private val failedEndpoints = mutableSetOf<String>()
 
@@ -153,7 +160,7 @@ class OsmEnrichmentClient(
         val parkingOut = osmResults.filter { it.kind == RoutePoi.Kind.PARKING }
             .distinctBy(::key)
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
-            .take(5)
+            .take(30)
         val chargingOut = if (charging != null) {
             val osmCharging = osmResults.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
                 .distinctBy(::key)
@@ -211,10 +218,14 @@ class OsmEnrichmentClient(
 
     private fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
         val preferred = lastSuccessfulEndpoint
-        val preferredOrder = if (preferred == null || preferred !in endpoints) endpoints else {
+        val splitOrder = requestEndpointOrder(endpoints, kind, splitRequests)
+        val preferredOrder = if (splitRequests || preferred == null || preferred !in splitOrder) splitOrder else {
             listOf(preferred) + endpoints.filterNot { it == preferred }
         }
-        val orderedEndpoints = preferredOrder.filterNot { it in failedEndpoints }
+        val now = System.currentTimeMillis()
+        val orderedEndpoints = preferredOrder.filterNot {
+            it in failedEndpoints || (rateLimitCooldownUntil[it] ?: 0L) > now
+        }
         if (orderedEndpoints.isEmpty()) {
             RequestDebugLog.add(
                 "Overpass",
@@ -227,6 +238,7 @@ class OsmEnrichmentClient(
         }
         for (endpoint in orderedEndpoints) {
             val started = System.nanoTime()
+            var rateLimited = false
             val attempt = runCatching {
                 val request = Request.Builder()
                     .url(endpoint)
@@ -237,6 +249,7 @@ class OsmEnrichmentClient(
                     .build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
+                        rateLimited = response.code == 429
                         val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(1_200)
                         error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
                     }
@@ -267,6 +280,16 @@ class OsmEnrichmentClient(
                 attempt.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
             )
             failedEndpoints += endpoint
+            if (rateLimited) {
+                rateLimitCooldownUntil[endpoint] = System.currentTimeMillis() + RATE_LIMIT_COOLDOWN_MILLIS
+                RequestDebugLog.add(
+                    "Overpass cooldown",
+                    endpoint,
+                    0L,
+                    "active",
+                    "HTTP 429: endpoint paused for ${RATE_LIMIT_COOLDOWN_MILLIS / 1_000L} seconds"
+                )
+            }
         }
         return OverpassBatch(emptyList(), available = false)
     }
@@ -348,6 +371,8 @@ class OsmEnrichmentClient(
     companion object {
         private const val MAX_RESPONSE_BYTES = 4_000_000L
         private const val MAX_REMOTE_TEXT_LENGTH = 240
+        private const val RATE_LIMIT_COOLDOWN_MILLIS = 60_000L
+        private val rateLimitCooldownUntil = ConcurrentHashMap<String, Long>()
         const val DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
         private val FALLBACK_OVERPASS_ENDPOINTS = listOf(
             "https://overpass.private.coffee/api/interpreter",
@@ -358,6 +383,23 @@ class OsmEnrichmentClient(
                 .takeIf { it.startsWith("https://") && it.length <= 240 }
                 ?: DEFAULT_OVERPASS_ENDPOINT
             return (listOf(preferred, DEFAULT_OVERPASS_ENDPOINT) + FALLBACK_OVERPASS_ENDPOINTS).distinct()
+        }
+
+        internal fun normalizeConfiguredEndpoints(endpoints: List<String>): List<String> = endpoints
+            .map { it.trim().removeSuffix("/") }
+            .filter { it.startsWith("https://") && it.length <= 240 }
+            .distinct()
+            .take(8)
+            .ifEmpty { listOf(DEFAULT_OVERPASS_ENDPOINT) }
+
+        internal fun requestEndpointOrder(
+            endpoints: List<String>,
+            kind: OsmQueryKind,
+            splitRequests: Boolean
+        ): List<String> {
+            if (!splitRequests || endpoints.size < 2) return endpoints
+            val startIndex = if (kind == OsmQueryKind.CHARGING) 0 else 1
+            return endpoints.drop(startIndex) + endpoints.take(startIndex)
         }
     }
 }

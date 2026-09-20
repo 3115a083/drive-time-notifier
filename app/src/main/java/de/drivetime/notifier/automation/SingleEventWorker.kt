@@ -103,7 +103,9 @@ class SingleEventWorker(
                     destination,
                     route,
                     pois,
-                    enriched.navigation
+                    enriched.navigation,
+                    DynamicArrivalBuffer.extraMinutes(settings, route.durationSeconds, route.trafficDelaySeconds)
+                        .takeIf { settings.dynamicBufferEnabled }
                 ),
                 identityKey
             )

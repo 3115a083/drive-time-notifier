@@ -129,7 +129,9 @@ class NextDayWorker(
                     event.location,
                     estimate,
                     pois,
-                    enriched.navigation
+                    enriched.navigation,
+                    DynamicArrivalBuffer.extraMinutes(settings, estimate.durationSeconds, estimate.trafficDelaySeconds)
+                        .takeIf { settings.dynamicBufferEnabled }
                 ),
                 identityKey
             )

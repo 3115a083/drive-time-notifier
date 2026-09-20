@@ -192,6 +192,12 @@ data class AppSettings(
     val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
     val overpassBaseUrl: String = "https://overpass-api.de/api/interpreter",
+    val overpassEndpoints: List<String> = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    ),
+    val overpassSplitRequests: Boolean = true,
     val networkDebugVisible: Boolean = false,
     val language: AppLanguage = if (Locale.getDefault().language.equals("de", true)) AppLanguage.GERMAN else AppLanguage.ENGLISH,
     val appearance: AppAppearance = AppAppearance.SYSTEM,
@@ -235,6 +241,8 @@ class SettingsStore(private val context: Context) {
         val VALHALLA = stringPreferencesKey("valhalla_base_url")
         val PHOTON = stringPreferencesKey("photon_base_url")
         val OVERPASS = stringPreferencesKey("overpass_base_url")
+        val OVERPASS_ENDPOINTS = stringPreferencesKey("overpass_endpoints")
+        val OVERPASS_SPLIT = booleanPreferencesKey("overpass_split_requests")
         val NETWORK_DEBUG_VISIBLE = booleanPreferencesKey("network_debug_visible")
         val LEGACY_NOMINATIM = stringPreferencesKey("nominatim_base_url")
         val LANGUAGE = stringPreferencesKey("app_language")
@@ -267,6 +275,19 @@ class SettingsStore(private val context: Context) {
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
         val migratedCaps = (p[K.CAP_DEFAULTS_VERSION] ?: 0) < 2
+        val legacyOverpass = p[K.OVERPASS] ?: "https://overpass-api.de/api/interpreter"
+        val overpassEndpoints = p[K.OVERPASS_ENDPOINTS]
+            ?.lineSequence()
+            ?.map { it.trim() }
+            ?.filter { it.startsWith("https://") }
+            ?.distinct()
+            ?.toList()
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf(
+                legacyOverpass,
+                "https://overpass.private.coffee/api/interpreter",
+                "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+            ).distinct()
         AppSettings(
             homeName = p[K.HOME_NAME]?.takeIf { it.isNotBlank() } ?: "Standard",
             homeAddress = p[K.HOME].orEmpty(),
@@ -305,7 +326,9 @@ class SettingsStore(private val context: Context) {
             osrmBaseUrl = p[K.OSRM] ?: "https://router.project-osrm.org",
             valhallaBaseUrl = p[K.VALHALLA] ?: "https://valhalla1.openstreetmap.de",
             photonBaseUrl = p[K.PHOTON] ?: "https://photon.komoot.io",
-            overpassBaseUrl = p[K.OVERPASS] ?: "https://overpass-api.de/api/interpreter",
+            overpassBaseUrl = overpassEndpoints.first(),
+            overpassEndpoints = overpassEndpoints,
+            overpassSplitRequests = p[K.OVERPASS_SPLIT] ?: true,
             networkDebugVisible = p[K.NETWORK_DEBUG_VISIBLE] ?: false,
             language = AppLanguage.fromId(p[K.LANGUAGE]),
             appearance = AppAppearance.fromId(p[K.APPEARANCE]),
@@ -369,7 +392,10 @@ class SettingsStore(private val context: Context) {
         p[K.OSRM] = sanitizeHttpsBaseUrl(s.osrmBaseUrl, "https://router.project-osrm.org")
         p[K.VALHALLA] = sanitizeHttpsBaseUrl(s.valhallaBaseUrl, "https://valhalla1.openstreetmap.de")
         p[K.PHOTON] = sanitizeHttpsBaseUrl(s.photonBaseUrl, "https://photon.komoot.io")
-        p[K.OVERPASS] = sanitizeHttpsBaseUrl(s.overpassBaseUrl, "https://overpass-api.de/api/interpreter")
+        val overpassEndpoints = sanitizeHttpsEndpointList(s.overpassEndpoints.ifEmpty { listOf(s.overpassBaseUrl) })
+        p[K.OVERPASS] = overpassEndpoints.first()
+        p[K.OVERPASS_ENDPOINTS] = overpassEndpoints.joinToString("\n")
+        p[K.OVERPASS_SPLIT] = s.overpassSplitRequests
         p[K.NETWORK_DEBUG_VISIBLE] = s.networkDebugVisible
         p[K.LANGUAGE] = s.language.id
         p[K.APPEARANCE] = s.appearance.id
@@ -410,4 +436,11 @@ class SettingsStore(private val context: Context) {
         val clean = value.trim().removeSuffix("/")
         return if (clean.startsWith("https://") && clean.length <= 240) clean else fallback
     }
+
+    private fun sanitizeHttpsEndpointList(values: List<String>): List<String> = values
+        .map { it.trim().removeSuffix("/") }
+        .filter { it.startsWith("https://") && it.length <= 240 }
+        .distinct()
+        .take(8)
+        .ifEmpty { listOf("https://overpass-api.de/api/interpreter") }
 }

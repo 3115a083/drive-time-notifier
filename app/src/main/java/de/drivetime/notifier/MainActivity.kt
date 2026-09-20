@@ -92,6 +92,8 @@ private data class PoiLoadStatus(
     val detail: String = ""
 )
 
+private enum class ParkingFeeStatus { FREE, PAID, UNKNOWN }
+
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -322,7 +324,9 @@ class MainActivity : ComponentActivity() {
                             destination,
                             route,
                             pois,
-                            chargingNavigation
+                            chargingNavigation,
+                            DynamicArrivalBuffer.extraMinutes(settings, route.durationSeconds, route.trafficDelaySeconds)
+                                .takeIf { settings.dynamicBufferEnabled }
                         )
                         IcsExporter(context).writeToUri(
                             uri,
@@ -578,7 +582,11 @@ class MainActivity : ComponentActivity() {
         }
                 val calculation = result.getOrNull() ?: return@launch
                 if (generation != calculationGeneration) return@launch
-                val enrichmentClient = OsmEnrichmentClient(settings.overpassBaseUrl)
+                val enrichmentClient = OsmEnrichmentClient(
+                    settings.overpassBaseUrl,
+                    settings.overpassEndpoints,
+                    settings.overpassSplitRequests
+                )
                 if (settings.showChargingStations) {
                     loadChargingData(calculation.route, calculation.request, generation, enrichmentClient)
                 }
@@ -747,7 +755,11 @@ class MainActivity : ComponentActivity() {
                                 originalRoute,
                                 request,
                                 generation,
-                                OsmEnrichmentClient(settings.overpassBaseUrl)
+                                OsmEnrichmentClient(
+                                    settings.overpassBaseUrl,
+                                    settings.overpassEndpoints,
+                                    settings.overpassSplitRequests
+                                )
                             )
                         }
                     },
@@ -758,7 +770,11 @@ class MainActivity : ComponentActivity() {
                             loadParkingData(
                                 originalRoute,
                                 generation,
-                                OsmEnrichmentClient(settings.overpassBaseUrl)
+                                OsmEnrichmentClient(
+                                    settings.overpassBaseUrl,
+                                    settings.overpassEndpoints,
+                                    settings.overpassSplitRequests
+                                )
                             )
                         }
                     }
@@ -794,7 +810,9 @@ class MainActivity : ComponentActivity() {
                                         destination,
                                         route,
                                         pois,
-                                        chargingNavigation
+                                        chargingNavigation,
+                                        DynamicArrivalBuffer.extraMinutes(settings, route.durationSeconds, route.trafficDelaySeconds)
+                                            .takeIf { settings.dynamicBufferEnabled }
                                     )
                                     val uri = IcsExporter(context).create(
                                         origin,
@@ -841,7 +859,9 @@ class MainActivity : ComponentActivity() {
                                         destination,
                                         route,
                                         pois,
-                                        chargingNavigation
+                                        chargingNavigation,
+                                        DynamicArrivalBuffer.extraMinutes(settings, route.durationSeconds, route.trafficDelaySeconds)
+                                            .takeIf { settings.dynamicBufferEnabled }
                                     )
                                     val description = driveIdentityKey.takeIf { it.isNotBlank() }
                                         ?.let { DriveEntryIdentity.attach(rawDescription, it) }
@@ -1131,7 +1151,18 @@ class MainActivity : ComponentActivity() {
             }
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricTile(tr(settings.language, "Possible delay", "Mögliche Verzögerung"), formatDuration(route.trafficDelaySeconds, settings.language), Modifier.weight(1f))
+                val dynamicBufferMinutes = DynamicArrivalBuffer.extraMinutes(
+                    settings,
+                    route.durationSeconds,
+                    route.trafficDelaySeconds
+                )
+                MetricTile(
+                    if (settings.dynamicBufferEnabled) tr(settings.language, "incl. buffer", "inkl. Puffer")
+                    else tr(settings.language, "Possible delay", "Mögliche Verzögerung"),
+                    if (settings.dynamicBufferEnabled) "+${formatDuration(dynamicBufferMinutes * 60L, settings.language)}"
+                    else formatDuration(route.trafficDelaySeconds, settings.language),
+                    Modifier.weight(1f)
+                )
                 MetricTile(tr(settings.language, "Departure", "Abfahrt"), formatClock(departureMillis), Modifier.weight(1f))
             }
             if (settings.showChargingStations) {
@@ -1149,8 +1180,8 @@ class MainActivity : ComponentActivity() {
                 Text(
                     tr(
                         settings.language,
-                        "Nearby parking: ${pois.count { it.kind == RoutePoi.Kind.PARKING }} results, sorted by approximate walking distance.",
-                        "Nahegelegene Parkplätze: ${pois.count { it.kind == RoutePoi.Kind.PARKING }} Treffer, nach ungefährer Laufentfernung sortiert."
+                        "Nearby parking: ${pois.count { it.kind == RoutePoi.Kind.PARKING }} results. Green = free, red = paid, blue = unknown fees.",
+                        "Nahegelegene Parkplätze: ${pois.count { it.kind == RoutePoi.Kind.PARKING }} Treffer. Grün = kostenlos, Rot = kostenpflichtig, Blau = Gebühren unbekannt."
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1177,6 +1208,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun RouteMap(settings: AppSettings, route: RouteEstimate, pois: List<RoutePoi>) {
+        var selectedPoi by remember { mutableStateOf<RoutePoi?>(null) }
         val points = remember(route.encodedPolyline) {
             runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
         }
@@ -1202,17 +1234,32 @@ class MainActivity : ComponentActivity() {
                             map.overlays.add(Marker(map).apply {
                                 position = poi.point
                                 title = when (poi.kind) {
-                                    RoutePoi.Kind.PARKING -> poi.name ?: tr(settings.language, "Parking", "Parkplatz")
+                                    RoutePoi.Kind.PARKING -> {
+                                        val base = poi.name ?: tr(settings.language, "Parking", "Parkplatz")
+                                        when (parkingFeeStatus(poi.fee)) {
+                                            ParkingFeeStatus.FREE -> "$base · ${tr(settings.language, "free", "kostenlos")}"
+                                            ParkingFeeStatus.PAID -> "$base · ${tr(settings.language, "paid", "kostenpflichtig")}"
+                                            ParkingFeeStatus.UNKNOWN -> base
+                                        }
+                                    }
                                     RoutePoi.Kind.CHARGING_STATION -> poi.name ?: tr(settings.language, "Charging station", "Ladestation")
                                 }
                                 icon = ContextCompat.getDrawable(
                                     map.context,
                                     when (poi.kind) {
-                                        RoutePoi.Kind.PARKING -> R.drawable.ic_parking_marker
+                                        RoutePoi.Kind.PARKING -> when (parkingFeeStatus(poi.fee)) {
+                                            ParkingFeeStatus.FREE -> R.drawable.ic_parking_free_marker
+                                            ParkingFeeStatus.PAID -> R.drawable.ic_parking_paid_marker
+                                            ParkingFeeStatus.UNKNOWN -> R.drawable.ic_parking_marker
+                                        }
                                         RoutePoi.Kind.CHARGING_STATION -> R.drawable.ic_charging_marker
                                     }
                                 )
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                setOnMarkerClickListener { _, _ ->
+                                    selectedPoi = poi
+                                    true
+                                }
                             })
                         }
                         map.invalidate()
@@ -1228,6 +1275,84 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             )
+        }
+        selectedPoi?.let { poi ->
+            PoiDetailsDialog(settings, poi) { selectedPoi = null }
+        }
+    }
+
+    @Composable
+    private fun PoiDetailsDialog(settings: AppSettings, poi: RoutePoi, onDismiss: () -> Unit) {
+        val language = settings.language
+        val rows = buildList {
+            poi.distanceFromDestinationMeters?.let { add(tr(language, "Distance from destination", "Entfernung zum Ziel") to "~$it m") }
+            poi.address?.let { add(tr(language, "Address", "Adresse") to it) }
+            poi.operator?.let { add(tr(language, "Operator", "Betreiber") to it) }
+            poi.network?.let { add(tr(language, "Network", "Netzwerk") to it) }
+            if (poi.connectorTypes.isNotEmpty()) {
+                add(tr(language, "Charging technologies", "Ladetechnologien") to poi.connectorTypes.joinToString(", ") {
+                    when (it) {
+                        ChargingConnectorPreference.CCS -> "CCS / Combo 2"
+                        ChargingConnectorPreference.TYPE2 -> tr(language, "Type 2", "Typ 2")
+                        ChargingConnectorPreference.CHADEMO -> "CHAdeMO"
+                        ChargingConnectorPreference.ANY -> tr(language, "Unspecified", "Nicht angegeben")
+                    }
+                })
+            }
+            poi.maxPowerKw?.let { power ->
+                add(tr(language, "Maximum charging power", "Maximale Ladeleistung") to
+                    (if (power % 1.0 == 0.0) "${power.toInt()} kW" else "%.1f kW".format(power)))
+            }
+            poi.capacity?.let { add(tr(language, "Capacity", "Kapazität") to it.toString()) }
+            poi.openingHours?.let { add(tr(language, "Opening hours", "Öffnungszeiten") to it) }
+            poi.access?.let { add(tr(language, "Access", "Zugang") to it) }
+            poi.fee?.let { add(tr(language, "Fees", "Gebühren") to it) }
+            poi.maxStay?.let { add(tr(language, "Maximum stay", "Maximale Standzeit") to it) }
+            poi.parkingType?.let { add(tr(language, "Parking type", "Parkplatztyp") to it) }
+            add(
+                tr(language, "Source", "Quelle") to poi.sources.joinToString(", ") {
+                    when (it) {
+                        RoutePoiSource.OSM -> "OpenStreetMap / Overpass"
+                        RoutePoiSource.BUNDESNETZAGENTUR -> tr(language, "Federal Network Agency", "Bundesnetzagentur")
+                    }
+                }
+            )
+        }
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                Text(poi.name ?: if (poi.kind == RoutePoi.Kind.PARKING) tr(language, "Parking", "Parkplatz") else tr(language, "Charging station", "Ladestation"))
+            },
+            text = {
+                Column(Modifier.fillMaxWidth().heightIn(max = 430.dp).verticalScroll(rememberScrollState())) {
+                    if (poi.kind == RoutePoi.Kind.PARKING) {
+                        val (label, color) = when (parkingFeeStatus(poi.fee)) {
+                            ParkingFeeStatus.FREE -> tr(language, "Free parking", "Kostenloser Parkplatz") to androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                            ParkingFeeStatus.PAID -> tr(language, "Paid parking", "Kostenpflichtiger Parkplatz") to MaterialTheme.colorScheme.error
+                            ParkingFeeStatus.UNKNOWN -> tr(language, "Fees unknown", "Gebühren unbekannt") to MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Text(label, color = color, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    rows.forEach { (label, value) ->
+                        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(value, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(9.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onDismiss) { Text(tr(language, "Close", "Schließen")) }
+            }
+        )
+    }
+
+    private fun parkingFeeStatus(raw: String?): ParkingFeeStatus {
+        val value = raw?.trim()?.lowercase().orEmpty()
+        return when {
+            value in setOf("no", "free", "0", "none", "nein", "kostenlos") -> ParkingFeeStatus.FREE
+            value in setOf("yes", "paid", "fee", "true", "ja", "kostenpflichtig") -> ParkingFeeStatus.PAID
+            else -> ParkingFeeStatus.UNKNOWN
         }
     }
 
@@ -1274,7 +1399,6 @@ class MainActivity : ComponentActivity() {
         var osrmDraft by remember { mutableStateOf(settings.osrmBaseUrl) }
         var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
         var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
-        var overpassDraft by remember { mutableStateOf(settings.overpassBaseUrl) }
         val operatorCatalog = remember { ChargingOperatorCatalog(context) }
         var operatorOptions by remember { mutableStateOf(operatorCatalog.operators()) }
         var operatorRefreshing by remember { mutableStateOf(false) }
@@ -1386,12 +1510,6 @@ class MainActivity : ComponentActivity() {
             delay(600)
             if (photonDraft != latestSettings.photonBaseUrl) {
                 onChange(latestSettings.copy(photonBaseUrl = photonDraft))
-            }
-        }
-        LaunchedEffect(overpassDraft) {
-            delay(600)
-            if (overpassDraft != latestSettings.overpassBaseUrl) {
-                onChange(latestSettings.copy(overpassBaseUrl = overpassDraft))
             }
         }
 
@@ -2005,14 +2123,22 @@ class MainActivity : ComponentActivity() {
                     osrmDraft = osrmDraft,
                     valhallaDraft = valhallaDraft,
                     photonDraft = photonDraft,
-                    overpassDraft = overpassDraft,
                     interfaceHealthStore = interfaceHealthStore,
                     healthRevision = healthRevision,
                     onHealthChanged = { healthRevision++ },
                     onOsrmDraft = { osrmDraft = it },
                     onValhallaDraft = { valhallaDraft = it },
                     onPhotonDraft = { photonDraft = it },
-                    onOverpassDraft = { overpassDraft = it },
+                    onOverpassConfig = { endpoints, split ->
+                        val sanitized = OsmEnrichmentClient.normalizeConfiguredEndpoints(endpoints)
+                        onChange(
+                            settings.copy(
+                                overpassBaseUrl = sanitized.first(),
+                                overpassEndpoints = sanitized,
+                                overpassSplitRequests = split
+                            )
+                        )
+                    },
                     onOpenUrl = { uriHandler.openUri(it) }
                 )
 
@@ -2135,7 +2261,8 @@ class MainActivity : ComponentActivity() {
             if (settings.networkDebugVisible) {
                 val debugText = buildString {
                     appendLine("Version: ${BuildConfig.VERSION_NAME}")
-                    appendLine("Overpass endpoint: ${settings.overpassBaseUrl}")
+                    appendLine("Overpass endpoints: ${settings.overpassEndpoints.joinToString(" -> ")}")
+                    appendLine("Overpass split requests: ${settings.overpassSplitRequests}")
                     appendLine("Charging: ${settings.showChargingStations}, parking: ${settings.showParking}")
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
                     appendLine()
@@ -2399,7 +2526,6 @@ class MainActivity : ComponentActivity() {
                                             osrmDraft = restored.osrmBaseUrl
                                             valhallaDraft = restored.valhallaBaseUrl
                                             photonDraft = restored.photonBaseUrl
-                                            overpassDraft = restored.overpassBaseUrl
                                             pendingImportedSettings = restored
                                             pendingReselectedSourceIds = emptySet()
                                             restoreAutomaticAfterCalendarSelection = imported.settings.automaticEnabled
@@ -2964,14 +3090,13 @@ class MainActivity : ComponentActivity() {
         osrmDraft: String,
         valhallaDraft: String,
         photonDraft: String,
-        overpassDraft: String,
         interfaceHealthStore: InterfaceHealthStore,
         healthRevision: Int,
         onHealthChanged: () -> Unit,
         onOsrmDraft: (String) -> Unit,
         onValhallaDraft: (String) -> Unit,
         onPhotonDraft: (String) -> Unit,
-        onOverpassDraft: (String) -> Unit,
+        onOverpassConfig: (List<String>, Boolean) -> Unit,
         onOpenUrl: (String) -> Unit
     ) {
         val context = LocalContext.current
@@ -2980,6 +3105,13 @@ class MainActivity : ComponentActivity() {
         var confirmProvider by remember { mutableStateOf<RoutingProvider?>(null) }
         var confirmPhoton by remember { mutableStateOf(false) }
         var confirmOverpass by remember { mutableStateOf(false) }
+        var showOverpassConfig by remember { mutableStateOf(false) }
+        var overpassEndpointDrafts by remember(settings.overpassEndpoints) {
+            mutableStateOf(settings.overpassEndpoints.ifEmpty { listOf(settings.overpassBaseUrl) })
+        }
+        var splitOverpassDraft by remember(settings.overpassSplitRequests) {
+            mutableStateOf(settings.overpassSplitRequests)
+        }
 
         fun providerStatus(provider: RoutingProvider): InterfaceCheckState {
             val key = keyStore.read(provider).orEmpty()
@@ -3036,7 +3168,11 @@ class MainActivity : ComponentActivity() {
                 ProviderConnectivityChecker.photonFingerprint(settings)
             )?.state ?: InterfaceCheckState.UNKNOWN
         }
-        val overpassStatus = remember(healthRevision, settings.overpassBaseUrl) {
+        val overpassStatus = remember(
+            healthRevision,
+            settings.overpassEndpoints,
+            settings.overpassSplitRequests
+        ) {
             interfaceHealthStore.read(
                 ProviderConnectivityChecker.OVERPASS_ID,
                 ProviderConnectivityChecker.overpassFingerprint(settings)
@@ -3098,8 +3234,8 @@ class MainActivity : ComponentActivity() {
             Text(
                 tr(
                     settings.language,
-                    "OpenStreetMap additional data: Overpass. The selected instance is tried first; direct fallback instances are used only if it fails.",
-                    "OpenStreetMap-Zusatzdaten: Overpass. Die ausgewählte Instanz wird zuerst verwendet; direkte Ersatzinstanzen folgen nur bei einem Fehler."
+                    "OpenStreetMap additional data: ${settings.overpassEndpoints.size} Overpass endpoints, ${if (settings.overpassSplitRequests) "split requests" else "one server per loading pass"}.",
+                    "OpenStreetMap-Zusatzdaten: ${settings.overpassEndpoints.size} Overpass-Endpunkte, ${if (settings.overpassSplitRequests) "Anfragen verteilt" else "ein Server je Ladevorgang"}."
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -3108,13 +3244,15 @@ class MainActivity : ComponentActivity() {
         }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = overpassDraft,
-                onValueChange = onOverpassDraft,
-                label = { Text("Overpass HTTPS endpoint") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
+            OutlinedButton(onClick = {
+                overpassEndpointDrafts = settings.overpassEndpoints.ifEmpty { listOf(settings.overpassBaseUrl) }
+                splitOverpassDraft = settings.overpassSplitRequests
+                showOverpassConfig = true
+            }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Outlined.Tune, null)
+                Spacer(Modifier.width(8.dp))
+                Text(tr(settings.language, "Configure Overpass", "Overpass konfigurieren"))
+            }
             Spacer(Modifier.width(8.dp))
             ProviderTestButton(
                 state = overpassStatus,
@@ -3283,6 +3421,102 @@ class MainActivity : ComponentActivity() {
                 },
                 dismissButton = {
                     TextButton(onClick = { confirmOverpass = false }) {
+                        Text(tr(settings.language, "Cancel", "Abbrechen"))
+                    }
+                }
+            )
+        }
+        if (showOverpassConfig) {
+            AlertDialog(
+                onDismissRequest = { showOverpassConfig = false },
+                title = { Text(tr(settings.language, "Overpass settings", "Overpass-Einstellungen")) },
+                text = {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            tr(
+                                settings.language,
+                                "Endpoints are tried in this order. HTTP 429 pauses an endpoint for 60 seconds.",
+                                "Endpunkte werden in dieser Reihenfolge versucht. HTTP 429 pausiert einen Endpunkt für 60 Sekunden."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        overpassEndpointDrafts.forEachIndexed { index, endpoint ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = endpoint,
+                                    onValueChange = { value ->
+                                        overpassEndpointDrafts = overpassEndpointDrafts.toMutableList().also { it[index] = value }
+                                    },
+                                    label = { Text("${index + 1}. HTTPS endpoint") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+                                Column {
+                                    IconButton(
+                                        enabled = index > 0,
+                                        onClick = {
+                                            overpassEndpointDrafts = overpassEndpointDrafts.toMutableList().also {
+                                                val item = it.removeAt(index)
+                                                it.add(index - 1, item)
+                                            }
+                                        }
+                                    ) { Icon(Icons.Outlined.KeyboardArrowUp, null) }
+                                    IconButton(
+                                        enabled = index < overpassEndpointDrafts.lastIndex,
+                                        onClick = {
+                                            overpassEndpointDrafts = overpassEndpointDrafts.toMutableList().also {
+                                                val item = it.removeAt(index)
+                                                it.add(index + 1, item)
+                                            }
+                                        }
+                                    ) { Icon(Icons.Outlined.KeyboardArrowDown, null) }
+                                }
+                                IconButton(
+                                    enabled = overpassEndpointDrafts.size > 1,
+                                    onClick = { overpassEndpointDrafts = overpassEndpointDrafts.filterIndexed { i, _ -> i != index } }
+                                ) { Icon(Icons.Outlined.DeleteOutline, null) }
+                            }
+                        }
+                        OutlinedButton(
+                            enabled = overpassEndpointDrafts.size < 8,
+                            onClick = { overpassEndpointDrafts = overpassEndpointDrafts + "" },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Outlined.Add, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(tr(settings.language, "Add endpoint", "Endpunkt hinzufügen"))
+                        }
+                        SettingSwitch(
+                            tr(settings.language, "Split POI requests across endpoints", "POI-Anfragen auf Endpunkte verteilen"),
+                            splitOverpassDraft
+                        ) { splitOverpassDraft = it }
+                        Text(
+                            if (splitOverpassDraft) tr(
+                                settings.language,
+                                "Charging starts with endpoint 1; parking starts with endpoint 2.",
+                                "Ladesäulen beginnen mit Endpunkt 1, Parkplätze mit Endpunkt 2."
+                            ) else tr(
+                                settings.language,
+                                "All POI requests prefer the same successful endpoint.",
+                                "Alle POI-Anfragen bevorzugen denselben erfolgreichen Endpunkt."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        onOverpassConfig(overpassEndpointDrafts, splitOverpassDraft)
+                        showOverpassConfig = false
+                    }) { Text(tr(settings.language, "Save", "Speichern")) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showOverpassConfig = false }) {
                         Text(tr(settings.language, "Cancel", "Abbrechen"))
                     }
                 }

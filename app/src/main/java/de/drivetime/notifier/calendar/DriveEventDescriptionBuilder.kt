@@ -21,7 +21,8 @@ object DriveEventDescriptionBuilder {
         destination: String,
         route: RouteEstimate,
         pois: List<RoutePoi>,
-        chargingNavigation: ChargingNavigation? = null
+        chargingNavigation: ChargingNavigation? = null,
+        dynamicBufferMinutes: Int? = null
     ): String {
         val lat = route.destinationLatitude
         val lon = route.destinationLongitude
@@ -46,7 +47,10 @@ object DriveEventDescriptionBuilder {
             appendLine("${tr(language, "From", "Von")}: $origin")
             appendLine("${tr(language, "To", "Nach")}: $destination")
             appendLine("${tr(language, "Routing provider", "Routingdienst")}: ${provider.displayName}")
-            appendLine("${tr(language, "Estimated drive time", "Geschätzte Fahrzeit")}: ${formatDuration(route.durationSeconds, language)}")
+            val dynamicSuffix = dynamicBufferMinutes?.let {
+                " (${tr(language, "+${formatDuration(it * 60L, language)} dynamic buffer", "+${formatDuration(it * 60L, language)} dynamischer Puffer")})"
+            }.orEmpty()
+            appendLine("${tr(language, "Estimated drive time", "Geschätzte Fahrzeit")}: ${formatDuration(route.durationSeconds, language)}$dynamicSuffix")
             appendLine("${tr(language, "Distance", "Distanz")}: ${"%.1f".format(route.distanceMeters / 1000.0)} km")
             appendLine()
             appendLine("${tr(language, "Start navigation", "Navigation starten")}:")

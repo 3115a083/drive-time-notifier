@@ -56,5 +56,29 @@ class OsmEnrichmentClientTest {
             OsmEnrichmentClient.DEFAULT_OVERPASS_ENDPOINT,
             OsmEnrichmentClient.endpointOrder("http://insecure.example.org").first()
         )
+        assertEquals(
+            listOf("https://two.example/api", "https://one.example/api"),
+            OsmEnrichmentClient.normalizeConfiguredEndpoints(
+                listOf("https://two.example/api/", "invalid", "https://one.example/api")
+            )
+        )
+    }
+
+    @Test
+    fun splitModeStartsParkingAtSecondEndpoint() {
+        val endpoints = listOf("https://one.example/api", "https://two.example/api", "https://three.example/api")
+
+        assertEquals(
+            endpoints,
+            OsmEnrichmentClient.requestEndpointOrder(endpoints, OsmQueryKind.CHARGING, splitRequests = true)
+        )
+        assertEquals(
+            listOf(endpoints[1], endpoints[2], endpoints[0]),
+            OsmEnrichmentClient.requestEndpointOrder(endpoints, OsmQueryKind.PARKING, splitRequests = true)
+        )
+        assertEquals(
+            endpoints,
+            OsmEnrichmentClient.requestEndpointOrder(endpoints, OsmQueryKind.PARKING, splitRequests = false)
+        )
     }
 }

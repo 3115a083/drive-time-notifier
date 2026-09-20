@@ -144,6 +144,8 @@ object PasswordBackup {
         put("valhallaBaseUrl", s.valhallaBaseUrl)
         put("photonBaseUrl", s.photonBaseUrl)
         put("overpassBaseUrl", s.overpassBaseUrl)
+        put("overpassEndpoints", JSONArray(s.overpassEndpoints))
+        put("overpassSplitRequests", s.overpassSplitRequests)
         put("language", s.language.id)
         put("appearance", s.appearance.id)
         put("palette", s.palette.id)
@@ -220,6 +222,11 @@ object PasswordBackup {
             valhallaBaseUrl = j.optString("valhallaBaseUrl", defaults.valhallaBaseUrl),
             photonBaseUrl = j.optString("photonBaseUrl", defaults.photonBaseUrl),
             overpassBaseUrl = j.optString("overpassBaseUrl", defaults.overpassBaseUrl),
+            overpassEndpoints = if (j.has("overpassEndpoints")) {
+                j.stringList("overpassEndpoints").filter { it.startsWith("https://") }.distinct()
+                    .ifEmpty { defaults.overpassEndpoints }
+            } else listOf(j.optString("overpassBaseUrl", defaults.overpassBaseUrl)),
+            overpassSplitRequests = j.optBoolean("overpassSplitRequests", defaults.overpassSplitRequests),
             language = AppLanguage.fromId(j.optString("language", defaults.language.id)),
             appearance = AppAppearance.fromId(j.optString("appearance", defaults.appearance.id)),
             palette = ColorPalette.fromId(j.optString("palette", defaults.palette.id)),

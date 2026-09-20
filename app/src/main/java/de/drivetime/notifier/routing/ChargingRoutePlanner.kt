@@ -38,7 +38,11 @@ object ChargingRoutePlanner {
         val wantsEnrichment = settings.showParking || settings.showChargingStations
         val initialEnrichment = if (wantsEnrichment && initialPoints.size >= 2) {
             runCatching {
-                OsmEnrichmentClient(settings.overpassBaseUrl).query(
+                OsmEnrichmentClient(
+                    settings.overpassBaseUrl,
+                    settings.overpassEndpoints,
+                    settings.overpassSplitRequests
+                ).query(
                     initialPoints,
                     settings.showParking,
                     ChargingSearchOptions.from(settings)

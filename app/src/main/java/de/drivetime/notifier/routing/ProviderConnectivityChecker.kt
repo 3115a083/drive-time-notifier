@@ -289,7 +289,9 @@ class ProviderConnectivityChecker(
         }
 
         fun photonFingerprint(settings: AppSettings): String = sha256("photon|${settings.photonBaseUrl}")
-        fun overpassFingerprint(settings: AppSettings): String = sha256("overpass|${settings.overpassBaseUrl}")
+        fun overpassFingerprint(settings: AppSettings): String = sha256(
+            "overpass|${settings.overpassEndpoints.joinToString("|")}|split=${settings.overpassSplitRequests}"
+        )
 
         private fun sha256(value: String): String =
             MessageDigest.getInstance("SHA-256")
