@@ -119,6 +119,8 @@ class ProviderConnectivityChecker(
             val request = Request.Builder()
                 .url(endpoint)
                 .header("User-Agent", context.packageName)
+                .header("Accept-Encoding", "identity")
+                .header("Connection", "close")
                 .post(FormBody.Builder().add("data", query).build())
                 .build()
             client(12).newCall(request).execute().use { response ->

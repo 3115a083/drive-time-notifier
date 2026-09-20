@@ -3,6 +3,7 @@ package de.drivetime.notifier.routing
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -58,9 +59,9 @@ internal data class PrioritizedOsmQuery(val kind: OsmQueryKind, val query: Strin
 class OsmEnrichmentClient(
     preferredEndpoint: String = DEFAULT_OVERPASS_ENDPOINT,
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .callTimeout(18, TimeUnit.SECONDS)
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(9, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
@@ -69,6 +70,7 @@ class OsmEnrichmentClient(
 ) {
     private val endpoints = endpointOrder(preferredEndpoint)
     private var lastSuccessfulEndpoint: String? = null
+    private val failedEndpoints = mutableSetOf<String>()
 
     suspend fun query(
         points: List<GeoPoint>,
@@ -80,18 +82,14 @@ class OsmEnrichmentClient(
         }
         val destination = points.last()
         // Requests are deliberately sequential. Charging has priority over parking.
+        val registryDeferred = charging?.takeIf { it.useBNetzA }?.let { options ->
+            async { runCatching { BNetzAChargingClient().query(destination, options.maxDistanceMeters) } }
+        }
         val batches = mutableListOf<Pair<OsmQueryKind, OverpassBatch>>()
-        var registryResult: Result<List<RoutePoi>>? = null
         prioritizedQueries(points, parking, charging).forEach { request ->
             batches += request.kind to fetchElements(request.query, request.kind)
-            if (request.kind == OsmQueryKind.CHARGING) {
-                charging?.takeIf { it.useBNetzA }?.let { options ->
-                    registryResult = runCatching {
-                        BNetzAChargingClient().query(destination, options.maxDistanceMeters)
-                    }
-                }
-            }
         }
+        val registryResult = registryDeferred?.await()
         val osmResults = buildList {
             for (e in batches.flatMap { it.second.elements }) {
                 val tags = e.optJSONObject("tags") ?: continue
@@ -180,26 +178,51 @@ class OsmEnrichmentClient(
         if (parking) add(PrioritizedOsmQuery(OsmQueryKind.PARKING, wrapQuery(parkingQuery(points.last()), 100)))
     }
 
-    private fun wrapQuery(body: String, limit: Int) = "[out:json][timeout:12];($body);out center $limit;"
+    private fun wrapQuery(body: String, limit: Int) =
+        "[out:json][timeout:7][maxsize:8388608];($body);out center $limit;"
 
     private fun parkingQuery(destination: GeoPoint): String {
-        val center = "${destination.latitude},${destination.longitude}"
-        return "node(around:1400,$center)[\"amenity\"=\"parking\"];" +
-            "way(around:1400,$center)[\"amenity\"=\"parking\"];"
+        val box = boundingBox(destination, 1_400)
+        return "node($box)[\"amenity\"=\"parking\"];" +
+            "way($box)[\"amenity\"=\"parking\"];"
     }
 
     private fun chargingQuery(destination: GeoPoint, requestedRadius: Int): String {
         val radius = requestedRadius.coerceIn(100, 10_000)
-        val center = "${destination.latitude},${destination.longitude}"
-        return "node(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
-            "way(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
-            "node(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];"
+        val box = boundingBox(destination, radius)
+        return "node($box)[\"amenity\"=\"charging_station\"];" +
+            "way($box)[\"amenity\"=\"charging_station\"];" +
+            "node($box)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];"
+    }
+
+    private fun boundingBox(center: GeoPoint, radiusMeters: Int): String {
+        val latDelta = radiusMeters / 111_320.0
+        val longitudeScale = (111_320.0 * cos(Math.toRadians(center.latitude))).coerceAtLeast(1.0)
+        val lonDelta = radiusMeters / longitudeScale
+        return "%.6f,%.6f,%.6f,%.6f".format(
+            Locale.ROOT,
+            (center.latitude - latDelta).coerceAtLeast(-90.0),
+            (center.longitude - lonDelta).coerceAtLeast(-180.0),
+            (center.latitude + latDelta).coerceAtMost(90.0),
+            (center.longitude + lonDelta).coerceAtMost(180.0)
+        )
     }
 
     private fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
         val preferred = lastSuccessfulEndpoint
-        val orderedEndpoints = if (preferred == null || preferred !in endpoints) endpoints else {
+        val preferredOrder = if (preferred == null || preferred !in endpoints) endpoints else {
             listOf(preferred) + endpoints.filterNot { it == preferred }
+        }
+        val orderedEndpoints = preferredOrder.filterNot { it in failedEndpoints }
+        if (orderedEndpoints.isEmpty()) {
+            RequestDebugLog.add(
+                "Overpass",
+                kind.label,
+                0L,
+                "skipped",
+                "All configured endpoints already failed during this loading pass. Use Retry to start a new pass."
+            )
+            return OverpassBatch(emptyList(), available = false)
         }
         for (endpoint in orderedEndpoints) {
             val started = System.nanoTime()
@@ -207,6 +230,8 @@ class OsmEnrichmentClient(
                 val request = Request.Builder()
                     .url(endpoint)
                     .header("User-Agent", "DriveTimeNotifier/1.1 (+https://github.com/3115a083/drive-time-notifier)")
+                    .header("Accept-Encoding", "identity")
+                    .header("Connection", "close")
                     .post(FormBody.Builder().add("data", query).build())
                     .build()
                 client.newCall(request).execute().use { response ->
@@ -241,6 +266,7 @@ class OsmEnrichmentClient(
                 "failed",
                 attempt.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
             )
+            failedEndpoints += endpoint
         }
         return OverpassBatch(emptyList(), available = false)
     }

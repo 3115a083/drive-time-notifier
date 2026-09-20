@@ -406,7 +406,12 @@ class MainActivity : ComponentActivity() {
             ).joinToString(" ").ifBlank { null }
         }
 
-        suspend fun loadChargingData(route: RouteEstimate, request: RouteRequest, generation: Int) {
+        suspend fun loadChargingData(
+            route: RouteEstimate,
+            request: RouteRequest,
+            generation: Int,
+            enrichmentClient: OsmEnrichmentClient
+        ) {
             if (!settings.showChargingStations) return
             chargingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
             registryLoad = if (settings.chargingUseBNetzA) PoiLoadStatus(PoiLoadPhase.RUNNING) else PoiLoadStatus()
@@ -422,7 +427,7 @@ class MainActivity : ComponentActivity() {
                 return
             }
             val attempt = runCatching {
-                OsmEnrichmentClient(settings.overpassBaseUrl).query(
+                enrichmentClient.query(
                     points = points,
                     parking = false,
                     charging = ChargingSearchOptions.from(settings)
@@ -478,7 +483,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        suspend fun loadParkingData(route: RouteEstimate, generation: Int) {
+        suspend fun loadParkingData(
+            route: RouteEstimate,
+            generation: Int,
+            enrichmentClient: OsmEnrichmentClient
+        ) {
             if (!settings.showParking) return
             parkingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
             val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
@@ -493,7 +502,7 @@ class MainActivity : ComponentActivity() {
                 return
             }
             val attempt = runCatching {
-                OsmEnrichmentClient(settings.overpassBaseUrl).query(points, parking = true, charging = null)
+                enrichmentClient.query(points, parking = true, charging = null)
             }
             if (generation != calculationGeneration) return
             val result = attempt.getOrElse {
@@ -569,8 +578,11 @@ class MainActivity : ComponentActivity() {
         }
                 val calculation = result.getOrNull() ?: return@launch
                 if (generation != calculationGeneration) return@launch
-                if (settings.showChargingStations) loadChargingData(calculation.route, calculation.request, generation)
-                if (settings.showParking) loadParkingData(calculation.route, generation)
+                val enrichmentClient = OsmEnrichmentClient(settings.overpassBaseUrl)
+                if (settings.showChargingStations) {
+                    loadChargingData(calculation.route, calculation.request, generation, enrichmentClient)
+                }
+                if (settings.showParking) loadParkingData(calculation.route, generation, enrichmentClient)
             }
         }
 
@@ -730,12 +742,25 @@ class MainActivity : ComponentActivity() {
                         val originalRoute = baseRoute ?: return@PoiLoadCard
                         val request = activeRequest ?: return@PoiLoadCard
                         val generation = calculationGeneration
-                        scope.launch { loadChargingData(originalRoute, request, generation) }
+                        scope.launch {
+                            loadChargingData(
+                                originalRoute,
+                                request,
+                                generation,
+                                OsmEnrichmentClient(settings.overpassBaseUrl)
+                            )
+                        }
                     },
                     onRetryParking = {
                         val originalRoute = baseRoute ?: return@PoiLoadCard
                         val generation = calculationGeneration
-                        scope.launch { loadParkingData(originalRoute, generation) }
+                        scope.launch {
+                            loadParkingData(
+                                originalRoute,
+                                generation,
+                                OsmEnrichmentClient(settings.overpassBaseUrl)
+                            )
+                        }
                     }
                 )
                 SummaryCard(settings, route, pois, plannedStart, planWarning, planConflict)

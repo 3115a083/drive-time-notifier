@@ -28,7 +28,8 @@ class OsmEnrichmentClientTest {
             queries.map { it.kind }
         )
         assertTrue(queries[0].query.contains("amenity\"=\"charging_station"))
-        assertTrue(queries[0].query.contains("around:2500"))
+        assertTrue(queries[0].query.contains("node(52."))
+        assertTrue(!queries[0].query.contains("around:"))
         assertTrue(queries[1].query.contains("amenity\"=\"parking"))
         assertTrue(queries.all { Regex("\\[out:json]").findAll(it.query).count() == 1 })
     }

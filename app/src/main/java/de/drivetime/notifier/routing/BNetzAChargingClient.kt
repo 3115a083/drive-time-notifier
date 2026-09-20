@@ -53,7 +53,15 @@ class BNetzAChargingClient(
 
         val started = System.nanoTime()
         try {
-            client.newCall(Request.Builder().url(url).header("User-Agent", "DriveTimeNotifier/1.1").get().build())
+            client.newCall(
+                Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "DriveTimeNotifier/1.1")
+                    .header("Accept-Encoding", "identity")
+                    .header("Connection", "close")
+                    .get()
+                    .build()
+            )
                 .execute().use { response ->
                 if (!response.isSuccessful) {
                     val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(1_200)
