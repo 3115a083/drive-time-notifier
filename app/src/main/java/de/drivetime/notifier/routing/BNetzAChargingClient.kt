@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import org.json.JSONObject
 import org.osmdroid.util.GeoPoint
@@ -22,6 +23,7 @@ class BNetzAChargingClient(
         .followRedirects(false)
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
+        .protocols(listOf(Protocol.HTTP_1_1))
         .build()
 ) {
     suspend fun query(destination: GeoPoint, radiusMeters: Int): List<RoutePoi> = withContext(Dispatchers.IO) {
@@ -56,29 +58,29 @@ class BNetzAChargingClient(
                 if (!response.isSuccessful) {
                     val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(1_200)
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "HTTP ${response.code}", detail)
-                    return@withContext emptyList()
+                    error("Bundesnetzagentur HTTP ${response.code}")
                 }
                 val body = response.body ?: run {
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "empty response body")
-                    return@withContext emptyList()
+                    error("Bundesnetzagentur returned an empty response")
                 }
                 if (body.contentLength() > MAX_RESPONSE_BYTES) {
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response too large: ${body.contentLength()} bytes")
-                    return@withContext emptyList()
+                    error("Bundesnetzagentur response is too large")
                 }
                 val bytes = body.source().readByteArray(MAX_RESPONSE_BYTES + 1L)
                 if (bytes.size > MAX_RESPONSE_BYTES) {
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response exceeded $MAX_RESPONSE_BYTES bytes")
-                    return@withContext emptyList()
+                    error("Bundesnetzagentur response is too large")
                 }
                 val root = JSONObject(String(bytes, Charsets.UTF_8))
                 if (root.has("error")) {
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "API error", root.optJSONObject("error")?.toString().orEmpty())
-                    return@withContext emptyList()
+                    error("Bundesnetzagentur returned an API error")
                 }
                 val features = root.optJSONArray("features") ?: run {
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "failed", "response contains no features array")
-                    return@withContext emptyList()
+                    error("Bundesnetzagentur response contains no features")
                 }
                 val results = buildList {
                     for (i in 0 until features.length()) {

@@ -7,7 +7,7 @@ import org.osmdroid.util.GeoPoint
 
 class OsmEnrichmentClientTest {
     @Test
-    fun prioritizesChargingThenParkingThenSpeedCameras() {
+    fun prioritizesChargingThenParking() {
         val options = ChargingSearchOptions(
             connectors = emptySet(),
             maxDistanceMeters = 2_500,
@@ -19,19 +19,17 @@ class OsmEnrichmentClientTest {
 
         val queries = OsmEnrichmentClient().prioritizedQueries(
             points = listOf(GeoPoint(52.50, 13.40), GeoPoint(52.51, 13.41)),
-            cameras = true,
             parking = true,
             charging = options
         )
 
         assertEquals(
-            listOf(OsmQueryKind.CHARGING, OsmQueryKind.PARKING, OsmQueryKind.SPEED_CAMERAS),
+            listOf(OsmQueryKind.CHARGING, OsmQueryKind.PARKING),
             queries.map { it.kind }
         )
         assertTrue(queries[0].query.contains("amenity\"=\"charging_station"))
         assertTrue(queries[0].query.contains("around:2500"))
         assertTrue(queries[1].query.contains("amenity\"=\"parking"))
-        assertTrue(queries[2].query.contains("highway\"=\"speed_camera"))
         assertTrue(queries.all { Regex("\\[out:json]").findAll(it.query).count() == 1 })
     }
 
@@ -39,7 +37,6 @@ class OsmEnrichmentClientTest {
     fun omitsDisabledPoiTypes() {
         val queries = OsmEnrichmentClient().prioritizedQueries(
             points = listOf(GeoPoint(52.50, 13.40), GeoPoint(52.51, 13.41)),
-            cameras = false,
             parking = true,
             charging = null
         )

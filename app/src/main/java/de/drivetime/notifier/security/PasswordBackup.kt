@@ -126,7 +126,6 @@ object PasswordBackup {
         put("autoHour", s.autoHour)
         put("autoMinute", s.autoMinute)
         put("outputIcs", s.outputIcs)
-        put("showSpeedCameras", s.showSpeedCameras)
         put("showParking", s.showParking)
         put("showChargingStations", s.showChargingStations)
         put("chargingConnector", s.chargingConnector.id)
@@ -193,7 +192,6 @@ object PasswordBackup {
             autoHour = j.optInt("autoHour", defaults.autoHour),
             autoMinute = j.optInt("autoMinute", defaults.autoMinute),
             outputIcs = j.optBoolean("outputIcs", defaults.outputIcs),
-            showSpeedCameras = j.optBoolean("showSpeedCameras", defaults.showSpeedCameras),
             showParking = j.optBoolean("showParking", defaults.showParking),
             showChargingStations = j.optBoolean("showChargingStations", defaults.showChargingStations),
             chargingConnector = ChargingConnectorPreference.fromId(j.optString("chargingConnector", defaults.chargingConnector.id)),

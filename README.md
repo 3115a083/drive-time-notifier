@@ -35,7 +35,7 @@ Drive Time Notifier ist eine native Android-App zur manuellen und automatischen 
 - einzelne API-/Endpoint-Selbsttests mit Statusanzeige
 - Verkehrsdaten, soweit vom Provider unterstützt
 - Photon für Adresssuche und Geocoding
-- optionale Parkplätze und Blitzer aus OpenStreetMap/Overpass
+- optionale Parkplätze und Ladesäulen aus OpenStreetMap/Overpass
 - direkte Kalenderausgabe oder ICS speichern/teilen
 - automatische Verarbeitung des nächsten Tages
 - Retry- und Fehlerbenachrichtigungen
@@ -214,4 +214,4 @@ Drittanbieter-Hinweise: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ## Haftungsausschluss
 
-Die App wird **AS IS** bereitgestellt. Es gibt keine Garantie für Routen, Fahrzeiten, Verkehrsdaten, Blitzerinformationen, Parkplätze, Kalenderdaten oder die dauerhafte Verfügbarkeit externer APIs. Nutzer bleiben für Provider-Verträge, API-Nutzung und entstehende Kosten verantwortlich.
+Die App wird **AS IS** bereitgestellt. Es gibt keine Garantie für Routen, Fahrzeiten, Verkehrsdaten, Parkplätze, Ladesäulen, Kalenderdaten oder die dauerhafte Verfügbarkeit externer APIs. Nutzer bleiben für Provider-Verträge, API-Nutzung und entstehende Kosten verantwortlich.

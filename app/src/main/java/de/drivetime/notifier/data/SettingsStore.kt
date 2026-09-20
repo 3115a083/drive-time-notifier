@@ -174,7 +174,6 @@ data class AppSettings(
     val autoHour: Int = 21,
     val autoMinute: Int = 0,
     val outputIcs: Boolean = false,
-    val showSpeedCameras: Boolean = false,
     val showParking: Boolean = false,
     val showChargingStations: Boolean = false,
     val chargingConnector: ChargingConnectorPreference = ChargingConnectorPreference.ANY,
@@ -193,6 +192,7 @@ data class AppSettings(
     val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
     val overpassBaseUrl: String = "https://overpass-api.de/api/interpreter",
+    val networkDebugVisible: Boolean = false,
     val language: AppLanguage = if (Locale.getDefault().language.equals("de", true)) AppLanguage.GERMAN else AppLanguage.ENGLISH,
     val appearance: AppAppearance = AppAppearance.SYSTEM,
     val palette: ColorPalette = ColorPalette.MATERIAL_YOU,
@@ -217,7 +217,6 @@ class SettingsStore(private val context: Context) {
         val HOUR = intPreferencesKey("auto_hour")
         val MINUTE = intPreferencesKey("auto_minute")
         val ICS = booleanPreferencesKey("output_ics")
-        val CAMERAS = booleanPreferencesKey("show_speed_cameras")
         val PARKING = booleanPreferencesKey("show_parking")
         val CHARGING = booleanPreferencesKey("show_charging_stations")
         val CHARGING_CONNECTOR = stringPreferencesKey("charging_connector")
@@ -236,6 +235,7 @@ class SettingsStore(private val context: Context) {
         val VALHALLA = stringPreferencesKey("valhalla_base_url")
         val PHOTON = stringPreferencesKey("photon_base_url")
         val OVERPASS = stringPreferencesKey("overpass_base_url")
+        val NETWORK_DEBUG_VISIBLE = booleanPreferencesKey("network_debug_visible")
         val LEGACY_NOMINATIM = stringPreferencesKey("nominatim_base_url")
         val LANGUAGE = stringPreferencesKey("app_language")
         val APPEARANCE = stringPreferencesKey("appearance")
@@ -281,7 +281,6 @@ class SettingsStore(private val context: Context) {
             autoHour = p[K.HOUR] ?: 21,
             autoMinute = p[K.MINUTE] ?: 0,
             outputIcs = p[K.ICS] ?: false,
-            showSpeedCameras = p[K.CAMERAS] ?: false,
             showParking = p[K.PARKING] ?: false,
             showChargingStations = p[K.CHARGING] ?: false,
             chargingConnector = ChargingConnectorPreference.fromId(p[K.CHARGING_CONNECTOR]),
@@ -307,6 +306,7 @@ class SettingsStore(private val context: Context) {
             valhallaBaseUrl = p[K.VALHALLA] ?: "https://valhalla1.openstreetmap.de",
             photonBaseUrl = p[K.PHOTON] ?: "https://photon.komoot.io",
             overpassBaseUrl = p[K.OVERPASS] ?: "https://overpass-api.de/api/interpreter",
+            networkDebugVisible = p[K.NETWORK_DEBUG_VISIBLE] ?: false,
             language = AppLanguage.fromId(p[K.LANGUAGE]),
             appearance = AppAppearance.fromId(p[K.APPEARANCE]),
             palette = ColorPalette.fromId(p[K.PALETTE]),
@@ -352,7 +352,6 @@ class SettingsStore(private val context: Context) {
         p[K.HOUR] = s.autoHour.coerceIn(0, 23)
         p[K.MINUTE] = s.autoMinute.coerceIn(0, 59)
         p[K.ICS] = s.outputIcs
-        p[K.CAMERAS] = s.showSpeedCameras
         p[K.PARKING] = s.showParking
         p[K.CHARGING] = s.showChargingStations
         p[K.CHARGING_CONNECTOR] = s.chargingConnectors.firstOrNull()?.id ?: ChargingConnectorPreference.ANY.id
@@ -371,6 +370,7 @@ class SettingsStore(private val context: Context) {
         p[K.VALHALLA] = sanitizeHttpsBaseUrl(s.valhallaBaseUrl, "https://valhalla1.openstreetmap.de")
         p[K.PHOTON] = sanitizeHttpsBaseUrl(s.photonBaseUrl, "https://photon.komoot.io")
         p[K.OVERPASS] = sanitizeHttpsBaseUrl(s.overpassBaseUrl, "https://overpass-api.de/api/interpreter")
+        p[K.NETWORK_DEBUG_VISIBLE] = s.networkDebugVisible
         p[K.LANGUAGE] = s.language.id
         p[K.APPEARANCE] = s.appearance.id
         p[K.PALETTE] = s.palette.id

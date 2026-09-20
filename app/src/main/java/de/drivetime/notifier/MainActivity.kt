@@ -56,7 +56,6 @@ import de.drivetime.notifier.data.*
 import de.drivetime.notifier.debug.RequestDebugLog
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.CalendarEventRef
-import de.drivetime.notifier.model.DrivePlan
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
 import de.drivetime.notifier.routing.*
@@ -78,12 +77,19 @@ import org.osmdroid.views.overlay.Polyline
 import java.time.*
 import java.time.format.DateTimeFormatter
 
-private data class ManualRouteCalculation(
-    val enriched: ChargingRouteOutcome,
-    val plan: DrivePlan,
-    val effectiveBufferMinutes: Int,
+private data class InitialRouteCalculation(
+    val route: RouteEstimate,
+    val request: RouteRequest,
     val duplicateExists: Boolean,
     val identityKey: String
+)
+
+private enum class PoiLoadPhase { IDLE, QUEUED, RUNNING, SUCCESS, FAILED }
+
+private data class PoiLoadStatus(
+    val phase: PoiLoadPhase = PoiLoadPhase.IDLE,
+    val count: Int = 0,
+    val detail: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -273,7 +279,13 @@ class MainActivity : ComponentActivity() {
             mutableStateOf(initialIntent.getLongExtra("previous_end_millis", -1L).takeIf { it > 0 })
         }
         var estimate by remember { mutableStateOf<RouteEstimate?>(null) }
+        var baseRoute by remember { mutableStateOf<RouteEstimate?>(null) }
+        var activeRequest by remember { mutableStateOf<RouteRequest?>(null) }
         var pois by remember { mutableStateOf<List<RoutePoi>>(emptyList()) }
+        var chargingLoad by remember { mutableStateOf(PoiLoadStatus()) }
+        var registryLoad by remember { mutableStateOf(PoiLoadStatus()) }
+        var parkingLoad by remember { mutableStateOf(PoiLoadStatus()) }
+        var calculationGeneration by remember { mutableIntStateOf(0) }
         var chargingNavigation by remember { mutableStateOf<ChargingNavigation?>(null) }
         var planWarning by remember { mutableStateOf<String?>(null) }
         var planConflict by remember { mutableStateOf(false) }
@@ -362,13 +374,159 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        fun applyRoutePlan(
+            route: RouteEstimate,
+            effectiveArrivalMillis: Long,
+            walkingDurationSeconds: Long,
+            duplicate: Boolean
+        ) {
+            val effectiveBufferMinutes = DynamicArrivalBuffer.totalMinutes(
+                settings,
+                route.durationSeconds,
+                route.trafficDelaySeconds
+            )
+            val plan = DrivePlanner.plan(
+                effectiveArrivalMillis,
+                route.durationSeconds,
+                effectiveBufferMinutes,
+                previousEndMillis
+            )
+            estimate = route
+            plannedStart = plan.departureMillis
+            plannedEnd = plan.arrivalMillis + walkingDurationSeconds * 1_000L
+            planConflict = previousEndMillis?.let { plan.departureMillis < it } == true
+            planWarning = listOfNotNull(
+                if (duplicate) tr(
+                    settings.language,
+                    "A Drive Time Notifier entry already exists for this destination and appointment time. You can still save another drive if you want to.",
+                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Du kannst die Fahrt auf Wunsch trotzdem erneut speichern."
+                ) else null,
+                planWarningText(settings.language, plan, effectiveBufferMinutes),
+                routeWarningText(settings.language, settings.routingProvider, route.warning)
+            ).joinToString(" ").ifBlank { null }
+        }
+
+        suspend fun loadChargingData(route: RouteEstimate, request: RouteRequest, generation: Int) {
+            if (!settings.showChargingStations) return
+            chargingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
+            registryLoad = if (settings.chargingUseBNetzA) PoiLoadStatus(PoiLoadPhase.RUNNING) else PoiLoadStatus()
+            val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
+            if (points.size < 2) {
+                if (generation != calculationGeneration) return
+                chargingLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = tr(
+                    settings.language,
+                    "The route has no usable geometry.",
+                    "Die Route enthält keine nutzbare Geometrie."
+                ))
+                if (settings.chargingUseBNetzA) registryLoad = chargingLoad
+                return
+            }
+            val attempt = runCatching {
+                OsmEnrichmentClient(settings.overpassBaseUrl).query(
+                    points = points,
+                    parking = false,
+                    charging = ChargingSearchOptions.from(settings)
+                )
+            }
+            if (generation != calculationGeneration) return
+            val result = attempt.getOrElse {
+                chargingLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = it.message.orEmpty())
+                if (settings.chargingUseBNetzA) registryLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = it.message.orEmpty())
+                return
+            }
+            val chargingPois = result.pois.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
+            pois = pois.filterNot { it.kind == RoutePoi.Kind.CHARGING_STATION } + chargingPois
+            chargingLoad = PoiLoadStatus(
+                phase = if (result.unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
+                count = chargingPois.size,
+                detail = if (result.unavailable) tr(
+                    settings.language,
+                    "OpenStreetMap is unavailable or only partial.",
+                    "OpenStreetMap ist nicht erreichbar oder nur teilweise verfügbar."
+                ) else ""
+            )
+            if (settings.chargingUseBNetzA) {
+                registryLoad = PoiLoadStatus(
+                    phase = if (result.registryUnavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
+                    count = chargingPois.count { RoutePoiSource.BUNDESNETZAGENTUR in it.sources },
+                    detail = if (result.registryUnavailable) tr(
+                        settings.language,
+                        "The Federal Network Agency register is unavailable.",
+                        "Das Register der Bundesnetzagentur ist nicht erreichbar."
+                    ) else ""
+                )
+            }
+            val station = chargingPois.firstOrNull()
+            if (settings.chargingNavigateViaStation && station != null) {
+                val rerouted = ChargingRoutePlanner.rerouteViaStation(
+                    context = context,
+                    settings = settings,
+                    request = request,
+                    initialRoute = route,
+                    station = station,
+                    pois = pois,
+                    automated = false
+                )
+                if (generation != calculationGeneration) return
+                chargingNavigation = rerouted.navigation
+                applyRoutePlan(
+                    rerouted.route,
+                    rerouted.effectiveDestinationStartMillis,
+                    rerouted.walkingDurationSeconds,
+                    duplicateExists
+                )
+            }
+        }
+
+        suspend fun loadParkingData(route: RouteEstimate, generation: Int) {
+            if (!settings.showParking) return
+            parkingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
+            val points = runCatching { PolylineDecoder.decode(route.encodedPolyline) }.getOrDefault(emptyList())
+            if (points.size < 2) {
+                if (generation == calculationGeneration) {
+                    parkingLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = tr(
+                        settings.language,
+                        "The route has no usable geometry.",
+                        "Die Route enthält keine nutzbare Geometrie."
+                    ))
+                }
+                return
+            }
+            val attempt = runCatching {
+                OsmEnrichmentClient(settings.overpassBaseUrl).query(points, parking = true, charging = null)
+            }
+            if (generation != calculationGeneration) return
+            val result = attempt.getOrElse {
+                parkingLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = it.message.orEmpty())
+                return
+            }
+            val parkingPois = result.pois.filter { it.kind == RoutePoi.Kind.PARKING }
+            pois = pois.filterNot { it.kind == RoutePoi.Kind.PARKING } + parkingPois
+            parkingLoad = PoiLoadStatus(
+                phase = if (result.unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
+                count = parkingPois.size,
+                detail = if (result.unavailable) tr(
+                    settings.language,
+                    "OpenStreetMap is unavailable or only partial.",
+                    "OpenStreetMap ist nicht erreichbar oder nur teilweise verfügbar."
+                ) else ""
+            )
+        }
+
         fun calculateRoute() {
             if (origin.isBlank() || destination.isBlank() || loading) return
+            calculationGeneration += 1
+            val generation = calculationGeneration
             error = null
             loading = true
             estimate = null
+            baseRoute = null
+            activeRequest = null
             pois = emptyList()
             chargingNavigation = null
+            chargingLoad = if (settings.showChargingStations) PoiLoadStatus(PoiLoadPhase.QUEUED) else PoiLoadStatus()
+            registryLoad = if (settings.showChargingStations && settings.chargingUseBNetzA) PoiLoadStatus(PoiLoadPhase.QUEUED) else PoiLoadStatus()
+            parkingLoad = if (settings.showParking) PoiLoadStatus(PoiLoadPhase.QUEUED) else PoiLoadStatus()
             duplicateExists = false
             driveIdentityKey = ""
             scope.launch {
@@ -388,70 +546,31 @@ class MainActivity : ComponentActivity() {
                     )
                 }.getOrNull()
             } else null
-            val initialRoute = RoutingServiceFactory.create(context, settings).route(request)
-            val enriched = ChargingRoutePlanner.prepare(
-                context = context,
-                settings = settings,
+            val route = RoutingServiceFactory.create(context, settings).route(request)
+            InitialRouteCalculation(
+                route = route,
                 request = request,
-                initialRoute = initialRoute,
-                automated = false
-            )
-            val effectiveBufferMinutes = DynamicArrivalBuffer.totalMinutes(
-                settings,
-                enriched.route.durationSeconds,
-                enriched.route.trafficDelaySeconds
-            )
-            val plan = DrivePlanner.plan(
-                enriched.effectiveDestinationStartMillis,
-                enriched.route.durationSeconds,
-                effectiveBufferMinutes,
-                previousEndMillis
-            )
-            ManualRouteCalculation(
-                enriched = enriched,
-                plan = plan,
-                effectiveBufferMinutes = effectiveBufferMinutes,
                 duplicateExists = existingDrive != null,
                 identityKey = identityKey
             )
         }
         result.onSuccess { calculation ->
-            val enriched = calculation.enriched
-            val plan = calculation.plan
-            val effectiveBufferMinutes = calculation.effectiveBufferMinutes
-            val route = enriched.route
-            estimate = route
-            plannedStart = plan.departureMillis
-            plannedEnd = plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L
-            pois = enriched.pois
-            chargingNavigation = enriched.navigation
+            if (generation != calculationGeneration) return@onSuccess
+            baseRoute = calculation.route
+            activeRequest = calculation.request
             duplicateExists = calculation.duplicateExists
             driveIdentityKey = calculation.identityKey
-            val previousEnd = previousEndMillis
-            planConflict = previousEnd != null && plan.departureMillis < previousEnd
-            planWarning = listOfNotNull(
-                if (calculation.duplicateExists) tr(
-                    settings.language,
-                    "A Drive Time Notifier entry already exists for this destination and appointment time. You can still save another drive if you want to.",
-                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Du kannst die Fahrt auf Wunsch trotzdem erneut speichern."
-                ) else null,
-                if (enriched.enrichmentUnavailable) tr(
-                    settings.language,
-                    "At least one OpenStreetMap additional-data request failed. Available results are still shown. Open Network Debug for details.",
-                    "Mindestens eine OpenStreetMap-Zusatzabfrage ist fehlgeschlagen. Verfügbare Ergebnisse werden weiterhin angezeigt. Details stehen im Netzwerk-Debug."
-                ) else null,
-                if (enriched.chargingRegistryUnavailable) tr(
-                    settings.language,
-                    "The Federal Network Agency charging register is currently unavailable. OpenStreetMap results are still shown.",
-                    "Das Ladesäulenregister der Bundesnetzagentur ist derzeit nicht erreichbar. OpenStreetMap-Ergebnisse werden weiterhin angezeigt."
-                ) else null,
-                planWarningText(settings.language, plan, effectiveBufferMinutes),
-                routeWarningText(settings.language, settings.routingProvider, route.warning)
-            ).joinToString(" ").ifBlank { null }
+            applyRoutePlan(calculation.route, calculation.request.arrivalMillis, 0L, calculation.duplicateExists)
+            loading = false
         }.onFailure {
+            if (generation != calculationGeneration) return@onFailure
             error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
+            loading = false
         }
-                loading = false
+                val calculation = result.getOrNull() ?: return@launch
+                if (generation != calculationGeneration) return@launch
+                if (settings.showChargingStations) loadChargingData(calculation.route, calculation.request, generation)
+                if (settings.showParking) loadParkingData(calculation.route, generation)
             }
         }
 
@@ -602,6 +721,23 @@ class MainActivity : ComponentActivity() {
 
             estimate?.let { route ->
                 RouteMap(settings, route, pois)
+                PoiLoadCard(
+                    settings = settings,
+                    charging = chargingLoad,
+                    registry = registryLoad,
+                    parking = parkingLoad,
+                    onRetryCharging = {
+                        val originalRoute = baseRoute ?: return@PoiLoadCard
+                        val request = activeRequest ?: return@PoiLoadCard
+                        val generation = calculationGeneration
+                        scope.launch { loadChargingData(originalRoute, request, generation) }
+                    },
+                    onRetryParking = {
+                        val originalRoute = baseRoute ?: return@PoiLoadCard
+                        val generation = calculationGeneration
+                        scope.launch { loadParkingData(originalRoute, generation) }
+                    }
+                )
                 SummaryCard(settings, route, pois, plannedStart, planWarning, planConflict)
 
                 if (settings.outputIcs) {
@@ -856,6 +992,99 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun PoiLoadCard(
+        settings: AppSettings,
+        charging: PoiLoadStatus,
+        registry: PoiLoadStatus,
+        parking: PoiLoadStatus,
+        onRetryCharging: () -> Unit,
+        onRetryParking: () -> Unit
+    ) {
+        val rows = buildList {
+            if (settings.showChargingStations) add(
+                Triple(
+                    tr(settings.language, "Charging stations (OpenStreetMap)", "Ladesäulen (OpenStreetMap)"),
+                    charging,
+                    onRetryCharging
+                )
+            )
+            if (settings.showChargingStations && settings.chargingUseBNetzA) add(
+                Triple(
+                    tr(settings.language, "Federal Network Agency register", "Bundesnetzagentur-Register"),
+                    registry,
+                    onRetryCharging
+                )
+            )
+            if (settings.showParking) add(
+                Triple(
+                    tr(settings.language, "Parking (OpenStreetMap)", "Parkplätze (OpenStreetMap)"),
+                    parking,
+                    onRetryParking
+                )
+            )
+        }
+        if (rows.isEmpty()) return
+        val hasFailure = rows.any { it.second.phase == PoiLoadPhase.FAILED }
+        val isLoading = rows.any { it.second.phase == PoiLoadPhase.RUNNING || it.second.phase == PoiLoadPhase.QUEUED }
+        AppCard {
+            SectionHeader(
+                Icons.Outlined.CloudSync,
+                tr(settings.language, "Additional data", "Zusatzdaten"),
+                tr(settings.language, "Loaded after the route", "Werden nach der Route geladen")
+            )
+            Spacer(Modifier.height(10.dp))
+            rows.forEachIndexed { index, (label, status, retry) ->
+                if (index > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    when (status.phase) {
+                        PoiLoadPhase.RUNNING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        PoiLoadPhase.SUCCESS -> Icon(Icons.Outlined.CheckCircle, null, tint = androidx.compose.ui.graphics.Color(0xFF2E7D32))
+                        PoiLoadPhase.FAILED -> Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
+                        PoiLoadPhase.QUEUED -> Icon(Icons.Outlined.Schedule, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        PoiLoadPhase.IDLE -> Icon(Icons.Outlined.Remove, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(label, fontWeight = FontWeight.Medium)
+                        Text(
+                            when (status.phase) {
+                                PoiLoadPhase.RUNNING -> tr(settings.language, "Request is running…", "Abfrage läuft…")
+                                PoiLoadPhase.SUCCESS -> tr(settings.language, "Successful: ${status.count} results", "Erfolgreich: ${status.count} Treffer")
+                                PoiLoadPhase.FAILED -> status.detail.ifBlank { tr(settings.language, "Request failed.", "Abfrage fehlgeschlagen.") }
+                                PoiLoadPhase.QUEUED -> tr(settings.language, "Waiting…", "Wartet…")
+                                PoiLoadPhase.IDLE -> tr(settings.language, "Not requested", "Nicht angefragt")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (status.phase == PoiLoadPhase.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (status.phase == PoiLoadPhase.FAILED) {
+                        TextButton(onClick = retry) {
+                            Text(tr(settings.language, "Retry", "Wiederholen"))
+                        }
+                    }
+                }
+            }
+            if (hasFailure || isLoading) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (hasFailure) tr(
+                        settings.language,
+                        "Some additional data is missing. You can still save the drive.",
+                        "Einige Zusatzdaten fehlen. Du kannst die Fahrt trotzdem speichern."
+                    ) else tr(
+                        settings.language,
+                        "The route is ready and can already be saved.",
+                        "Die Route ist fertig und kann bereits gespeichert werden."
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+
+    @Composable
     private fun SummaryCard(
         settings: AppSettings,
         route: RouteEstimate,
@@ -879,18 +1108,6 @@ class MainActivity : ComponentActivity() {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MetricTile(tr(settings.language, "Possible delay", "Mögliche Verzögerung"), formatDuration(route.trafficDelaySeconds, settings.language), Modifier.weight(1f))
                 MetricTile(tr(settings.language, "Departure", "Abfahrt"), formatClock(departureMillis), Modifier.weight(1f))
-            }
-            if (settings.showSpeedCameras) {
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    tr(
-                        settings.language,
-                        "Speed cameras on the selected route: ${pois.count { it.kind == RoutePoi.Kind.SPEED_CAMERA }}. Source: OpenStreetMap highway=speed_camera via Overpass.",
-                        "Blitzer auf der gewählten Strecke: ${pois.count { it.kind == RoutePoi.Kind.SPEED_CAMERA }}. Quelle: OpenStreetMap highway=speed_camera über Overpass."
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
             if (settings.showChargingStations) {
                 Text(
@@ -960,14 +1177,12 @@ class MainActivity : ComponentActivity() {
                             map.overlays.add(Marker(map).apply {
                                 position = poi.point
                                 title = when (poi.kind) {
-                                    RoutePoi.Kind.SPEED_CAMERA -> tr(settings.language, "Speed camera", "Blitzer")
                                     RoutePoi.Kind.PARKING -> poi.name ?: tr(settings.language, "Parking", "Parkplatz")
                                     RoutePoi.Kind.CHARGING_STATION -> poi.name ?: tr(settings.language, "Charging station", "Ladestation")
                                 }
                                 icon = ContextCompat.getDrawable(
                                     map.context,
                                     when (poi.kind) {
-                                        RoutePoi.Kind.SPEED_CAMERA -> R.drawable.ic_speed_camera_marker
                                         RoutePoi.Kind.PARKING -> R.drawable.ic_parking_marker
                                         RoutePoi.Kind.CHARGING_STATION -> R.drawable.ic_charging_marker
                                     }
@@ -1041,7 +1256,6 @@ class MainActivity : ComponentActivity() {
         var showOperatorPicker by remember { mutableStateOf(false) }
         var updateChecking by remember { mutableStateOf(false) }
         var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
-        var debugVisible by rememberSaveable { mutableStateOf(false) }
         var debugTapCount by remember { mutableIntStateOf(0) }
         var lastDebugTap by remember { mutableLongStateOf(0L) }
         val debugEntries by RequestDebugLog.entries.collectAsState()
@@ -1462,15 +1676,6 @@ class MainActivity : ComponentActivity() {
                 )
 
                 SettingSwitch(
-                    tr(settings.language, "Show speed cameras on selected route", "Blitzer auf der gewählten Strecke anzeigen"),
-                    settings.showSpeedCameras
-                ) { onChange(settings.copy(showSpeedCameras = it)) }
-                Text(
-                    tr(settings.language, "Source: OpenStreetMap highway=speed_camera via Overpass. Only points close to the calculated route are kept.", "Quelle: OpenStreetMap highway=speed_camera über Overpass. Es werden nur Punkte nahe der berechneten Strecke übernommen."),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                SettingSwitch(
                     tr(settings.language, "Find parking near destination", "Parkplätze am Ziel suchen"),
                     settings.showParking
                 ) { onChange(settings.copy(showParking = it)) }
@@ -1478,12 +1683,12 @@ class MainActivity : ComponentActivity() {
                     tr(settings.language, "Find charging stations near destination", "Ladesäulen am Ziel suchen"),
                     settings.showChargingStations
                 ) { onChange(settings.copy(showChargingStations = it)) }
-                if (listOf(settings.showChargingStations, settings.showParking, settings.showSpeedCameras).count { it } > 1) {
+                if (settings.showChargingStations && settings.showParking) {
                     Text(
                         tr(
                             settings.language,
-                            "Several OpenStreetMap data types are enabled. They are requested one after another to avoid server overload: charging stations first, parking second, speed cameras last. The calculation can therefore take longer.",
-                            "Mehrere OpenStreetMap-Zusatzdaten sind aktiv. Sie werden zum Schutz vor Serverüberlastung nacheinander abgefragt: zuerst Ladesäulen, danach Parkplätze und zuletzt Blitzer. Die Berechnung kann dadurch länger dauern."
+                            "Charging stations and parking are requested separately: charging stations first, parking second. The route remains usable while these requests are running.",
+                            "Ladesäulen und Parkplätze werden getrennt abgefragt: zuerst Ladesäulen, danach Parkplätze. Die Route bleibt währenddessen nutzbar."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.tertiary
@@ -1902,11 +2107,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            if (debugVisible) {
+            if (settings.networkDebugVisible) {
                 val debugText = buildString {
                     appendLine("Version: ${BuildConfig.VERSION_NAME}")
                     appendLine("Overpass endpoint: ${settings.overpassBaseUrl}")
-                    appendLine("Charging: ${settings.showChargingStations}, parking: ${settings.showParking}, cameras: ${settings.showSpeedCameras}")
+                    appendLine("Charging: ${settings.showChargingStations}, parking: ${settings.showParking}")
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
                     appendLine()
                     append(RequestDebugLog.format(debugEntries))
@@ -1936,7 +2141,7 @@ class MainActivity : ComponentActivity() {
                             Text(tr(settings.language, "Clear", "Leeren"))
                         }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { debugVisible = false }) {
+                        TextButton(onClick = { onChange(settings.copy(networkDebugVisible = false)) }) {
                             Icon(Icons.Outlined.Close, null)
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Close", "Schließen"))
@@ -1971,7 +2176,7 @@ class MainActivity : ComponentActivity() {
                         debugTapCount = if (now - lastDebugTap <= 2_500L) debugTapCount + 1 else 1
                         lastDebugTap = now
                         if (debugTapCount >= 5) {
-                            debugVisible = true
+                            onChange(settings.copy(networkDebugVisible = true))
                             debugTapCount = 0
                             Toast.makeText(
                                 context,

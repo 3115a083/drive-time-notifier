@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import org.json.JSONObject
 import org.osmdroid.util.GeoPoint
@@ -33,7 +34,7 @@ data class RoutePoi(
     val address: String? = null,
     val sources: Set<RoutePoiSource> = setOf(RoutePoiSource.OSM)
 ) {
-    enum class Kind { SPEED_CAMERA, PARKING, CHARGING_STATION }
+    enum class Kind { PARKING, CHARGING_STATION }
 }
 
 data class OsmEnrichmentResult(
@@ -49,8 +50,7 @@ private data class OverpassBatch(
 
 internal enum class OsmQueryKind(val label: String) {
     CHARGING("charging stations"),
-    PARKING("parking"),
-    SPEED_CAMERAS("speed cameras")
+    PARKING("parking")
 }
 
 internal data class PrioritizedOsmQuery(val kind: OsmQueryKind, val query: String)
@@ -64,6 +64,7 @@ class OsmEnrichmentClient(
         .followRedirects(false)
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
+        .protocols(listOf(Protocol.HTTP_1_1))
         .build()
 ) {
     private val endpoints = endpointOrder(preferredEndpoint)
@@ -71,19 +72,17 @@ class OsmEnrichmentClient(
 
     suspend fun query(
         points: List<GeoPoint>,
-        cameras: Boolean,
         parking: Boolean,
         charging: ChargingSearchOptions? = null
     ): OsmEnrichmentResult = withContext(Dispatchers.IO) {
-        if (points.isEmpty() || (!cameras && !parking && charging == null)) {
+        if (points.isEmpty() || (!parking && charging == null)) {
             return@withContext OsmEnrichmentResult(emptyList(), unavailable = false)
         }
         val destination = points.last()
-        // Requests are deliberately sequential. Charging has priority, then parking,
-        // while the potentially expensive route-wide camera query runs last.
+        // Requests are deliberately sequential. Charging has priority over parking.
         val batches = mutableListOf<Pair<OsmQueryKind, OverpassBatch>>()
         var registryResult: Result<List<RoutePoi>>? = null
-        prioritizedQueries(points, cameras, parking, charging).forEach { request ->
+        prioritizedQueries(points, parking, charging).forEach { request ->
             batches += request.kind to fetchElements(request.query, request.kind)
             if (request.kind == OsmQueryKind.CHARGING) {
                 charging?.takeIf { it.useBNetzA }?.let { options ->
@@ -102,11 +101,6 @@ class OsmEnrichmentClient(
                 if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) continue
                 val point = GeoPoint(lat, lon)
                 when {
-                    tags.optString("highway") == "speed_camera" -> {
-                        if (distanceToRouteMeters(point, points) <= 120.0) {
-                            add(RoutePoi(point, RoutePoi.Kind.SPEED_CAMERA, clean(tags.optString("name"))))
-                        }
-                    }
                     tags.optString("amenity") == "parking" -> {
                         add(RoutePoi(
                             point = point,
@@ -157,8 +151,6 @@ class OsmEnrichmentClient(
             }
         }
 
-        val camerasOut = osmResults.filter { it.kind == RoutePoi.Kind.SPEED_CAMERA }
-            .distinctBy(::key)
         val parkingOut = osmResults.filter { it.kind == RoutePoi.Kind.PARKING }
             .distinctBy(::key)
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
@@ -171,7 +163,7 @@ class OsmEnrichmentClient(
         } else emptyList()
 
         OsmEnrichmentResult(
-            pois = camerasOut + chargingOut + parkingOut,
+            pois = chargingOut + parkingOut,
             unavailable = batches.any { !it.second.available },
             registryUnavailable = registryResult?.isFailure == true
         )
@@ -179,55 +171,29 @@ class OsmEnrichmentClient(
 
     internal fun prioritizedQueries(
         points: List<GeoPoint>,
-        cameras: Boolean,
         parking: Boolean,
         charging: ChargingSearchOptions?
     ): List<PrioritizedOsmQuery> = buildList {
         charging?.let {
-            add(PrioritizedOsmQuery(OsmQueryKind.CHARGING, wrapQuery(chargingQuery(points.last(), it.maxDistanceMeters))))
+            add(PrioritizedOsmQuery(OsmQueryKind.CHARGING, wrapQuery(chargingQuery(points.last(), it.maxDistanceMeters), 200)))
         }
-        if (parking) add(PrioritizedOsmQuery(OsmQueryKind.PARKING, wrapQuery(parkingQuery(points.last()))))
-        if (cameras) add(PrioritizedOsmQuery(OsmQueryKind.SPEED_CAMERAS, wrapQuery(cameraQuery(points))))
+        if (parking) add(PrioritizedOsmQuery(OsmQueryKind.PARKING, wrapQuery(parkingQuery(points.last()), 100)))
     }
 
-    private fun wrapQuery(body: String) = "[out:json][timeout:15];($body);out center;"
-
-    private fun cameraQuery(points: List<GeoPoint>): String {
-        val sampled = sampleRoute(points, 80)
-        val line = sampled.joinToString(",") {
-            "%.6f,%.6f".format(Locale.ROOT, it.latitude, it.longitude)
-        }
-        return "node(around:160,$line)[\"highway\"=\"speed_camera\"];"
-    }
+    private fun wrapQuery(body: String, limit: Int) = "[out:json][timeout:12];($body);out center $limit;"
 
     private fun parkingQuery(destination: GeoPoint): String {
         val center = "${destination.latitude},${destination.longitude}"
-        return "(" +
-            "node(around:1400,$center)[\"amenity\"=\"parking\"];" +
-            "way(around:1400,$center)[\"amenity\"=\"parking\"];" +
-            "relation(around:1400,$center)[\"amenity\"=\"parking\"];" +
-            ");"
+        return "node(around:1400,$center)[\"amenity\"=\"parking\"];" +
+            "way(around:1400,$center)[\"amenity\"=\"parking\"];"
     }
 
     private fun chargingQuery(destination: GeoPoint, requestedRadius: Int): String {
         val radius = requestedRadius.coerceIn(100, 10_000)
         val center = "${destination.latitude},${destination.longitude}"
-        return "(" +
-            "node(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
+        return "node(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
             "way(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
-            "relation(around:$radius,$center)[\"amenity\"=\"charging_station\"];" +
-            "node(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
-            "way(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
-            "relation(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];" +
-            ");"
-    }
-
-    private fun sampleRoute(points: List<GeoPoint>, maximum: Int): List<GeoPoint> {
-        if (points.size <= maximum) return points
-        val lastIndex = points.lastIndex
-        return (0 until maximum).map { index ->
-            points[(index.toLong() * lastIndex / (maximum - 1)).toInt()]
-        }.distinctBy { "%.6f,%.6f".format(Locale.ROOT, it.latitude, it.longitude) }
+            "node(around:$radius,$center)[\"amenity\"=\"fuel\"][\"fuel:electricity\"=\"yes\"];"
     }
 
     private fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
@@ -349,19 +315,6 @@ class OsmEnrichmentClient(
         ?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }
 
     private fun key(poi: RoutePoi) = "%.5f,%.5f".format(Locale.ROOT, poi.point.latitude, poi.point.longitude)
-
-    private fun distanceToRouteMeters(point: GeoPoint, route: List<GeoPoint>): Double {
-        if (route.isEmpty()) return Double.MAX_VALUE
-        var best = Double.MAX_VALUE
-        val step = max(1, route.size / 1200)
-        var i = 0
-        while (i < route.size) {
-            best = min(best, haversineMeters(point, route[i]))
-            i += step
-        }
-        best = min(best, haversineMeters(point, route.last()))
-        return best
-    }
 
     private fun haversineMeters(a: GeoPoint, b: GeoPoint): Double =
         ChargingStationSelector.haversineMeters(a, b)

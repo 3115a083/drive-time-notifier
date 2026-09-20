@@ -36,7 +36,6 @@ object DriveEventDescriptionBuilder {
             "https://www.google.com/maps/dir/?api=1&destination=$encodedDestination&travelmode=driving"
         }
         val geo = if (navLat != null && navLon != null) "geo:$navLat,$navLon?q=$navLat,$navLon" else "geo:0,0?q=$encodedDestination"
-        val cameras = pois.filter { it.kind == RoutePoi.Kind.SPEED_CAMERA }
         val parking = pois.filter { it.kind == RoutePoi.Kind.PARKING }
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
             .take(5)
@@ -113,14 +112,6 @@ object DriveEventDescriptionBuilder {
                 }
             }
 
-            if (cameras.isNotEmpty()) {
-                appendLine()
-                appendLine("${tr(language, "Speed cameras on the selected route", "Blitzer auf der gewählten Strecke")}: ${cameras.size}")
-                cameras.forEachIndexed { index, poi ->
-                    appendLine("${index + 1}. ${"%.5f".format(poi.point.latitude)}, ${"%.5f".format(poi.point.longitude)}")
-                }
-                appendLine(tr(language, "Source: OpenStreetMap highway=speed_camera via Overpass. Community data may be incomplete.", "Quelle: OpenStreetMap highway=speed_camera über Overpass. Community-Daten können unvollständig sein."))
-            }
         }.trim()
     }
 

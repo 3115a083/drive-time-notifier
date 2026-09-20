@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.FormBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -67,6 +68,7 @@ class ProviderConnectivityChecker(
             .connectTimeout(minOf(timeout, 8L), TimeUnit.SECONDS)
             .readTimeout(timeout, TimeUnit.SECONDS)
             .callTimeout(timeout, TimeUnit.SECONDS)
+            .protocols(listOf(Protocol.HTTP_1_1))
             .build()
     }
 
