@@ -1,15 +1,12 @@
 package de.drivetime.notifier.routing
 
 import android.content.Context
-import de.drivetime.notifier.calendar.CalendarRepository
-import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
 import de.drivetime.notifier.security.SecureApiKeyStore
-import de.drivetime.notifier.ui.tr
 
 interface RoutingService {
     suspend fun route(request: RouteRequest): RouteEstimate
@@ -39,27 +36,6 @@ private class FallbackRoutingService(
     private var activeService: UnifiedRoutingService? = null
 
     override suspend fun route(request: RouteRequest): RouteEstimate {
-        if (!automated && !settings.outputIcs && settings.targetCalendarId >= 0) {
-            val identityKey = DriveEntryIdentity.key(request.destination, request.arrivalMillis)
-            val duplicate = runCatching {
-                CalendarRepository(context).findExistingDrive(
-                    settings.targetCalendarId,
-                    request.destination,
-                    request.arrivalMillis,
-                    identityKey
-                )
-            }.getOrNull()
-            if (duplicate != null) {
-                error(
-                    tr(
-                        settings.language,
-                        "A Drive Time Notifier entry for this destination and appointment time already exists. Delete the existing drive or change the appointment time before calculating it again.",
-                        "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Lösche die vorhandene Fahrt oder ändere die Terminzeit, bevor du sie erneut berechnest."
-                    )
-                )
-            }
-        }
-
         val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName)
         val origin = geocoder.geocode(request.origin)
         val destination = geocoder.geocode(request.destination)

@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.0
+
+Parking, EV charging and network reliability release.
+
+- Shows the calculated route and map immediately, then enriches the result with parking and charging data in independent background steps.
+- Shows loading, success and failure states for supplementary requests, supports individual retries and permits saving a drive when optional POI data is unavailable.
+- Removes speed-camera lookup and its request load from the app.
+- Adds configurable parking search with a default of 10 results, destination radius, free-only filtering, OpenStreetMap relation support and fee-aware marker colors.
+- Adds configurable public charging search with a default of 5 results, destination radius, minimum power, operator and multi-connector filters.
+- Adds optional charging-station enrichment and deduplication with the German Federal Network Agency register.
+- Supports routing through a selected charger and links the remaining distance to the destination as a walking route.
+- Expands parking and charging details with available address, operator, network, connector, power, opening-hours, fee, access, capacity, source and distance data.
+- Makes POI detail values selectable and adds a dedicated address copy action.
+- Moves Photon and Overpass configuration into one compact dialog with tests placed below their respective endpoint fields.
+- Supports multiple ordered Overpass HTTPS endpoints, visible presets, individual enablement and tests, split-server mode or a shared fallback chain.
+- Handles HTTP 429, HTTP 5xx, timeouts and short-lived DNS failures with bounded failover, cooldowns and diagnostic reporting.
+- Moves parking, charging and fallback-routing options into focused settings dialogs.
+- Adds a persistent, closable and copyable network-debug panel unlocked by five taps on `Vibecoded with ❤️`.
+- Displays the applied dynamic buffer in the route result and in generated calendar entries.
+- Fixes stale duplicate detection after deleting an existing drive entry and keeps an explicit Save anyway action when a conflict remains.
+- Adds a GitHub release update check styled consistently with the repository link.
+- Extends encrypted backup and restore to the new routing, Photon, Overpass, parking and charging settings.
+- Keeps network input HTTPS-only, bounds remote response processing and treats downloaded POI data strictly as data.
+
 ## 1.1.0
 
 Feature and reliability release.

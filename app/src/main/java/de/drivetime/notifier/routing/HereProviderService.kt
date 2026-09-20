@@ -5,6 +5,7 @@ import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -42,7 +43,7 @@ class HereProviderService(
             .build()
         val http = Request.Builder().url(url).get().build()
         client.newCall(http).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("HERE Routing: HTTP ${response.code}")
             val routes = JSONObject(body).optJSONArray("routes")
             if (routes == null || routes.length() == 0) error("HERE returned no route.")
@@ -88,7 +89,7 @@ class HereProviderService(
             .build()
         client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
             if (!response.isSuccessful) return@withContext emptyList()
-            val items = JSONObject(response.body?.string().orEmpty()).optJSONArray("items") ?: return@withContext emptyList()
+            val items = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("items") ?: return@withContext emptyList()
             buildList {
                 for (i in 0 until items.length()) {
                     val item = items.getJSONObject(i)
@@ -109,7 +110,7 @@ class HereProviderService(
             .addQueryParameter("apiKey", apiKey)
             .build()
         client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("HERE Geocoding: HTTP ${response.code}")
             val items = JSONObject(body).optJSONArray("items")
             if (items == null || items.length() == 0) error("Address not found: $address")

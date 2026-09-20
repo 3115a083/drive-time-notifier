@@ -3,6 +3,7 @@ package de.drivetime.notifier.security
 import de.drivetime.notifier.data.*
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom
@@ -21,6 +22,7 @@ object PasswordBackup {
     private val MAGIC = byteArrayOf(0x44, 0x54, 0x4E, 0x42, 0x01) // DTNB + v1
     private const val ITERATIONS = 210_000
     private const val KEY_BITS = 256
+    private const val MAX_BACKUP_BYTES = 4 * 1024 * 1024
 
     fun export(
         output: OutputStream,
@@ -70,7 +72,7 @@ object PasswordBackup {
 
     fun import(input: InputStream, password: CharArray): BackupImportResult {
         require(password.size >= 8) { "Password must contain at least 8 characters." }
-        val bytes = input.buffered().use { it.readBytes() }
+        val bytes = input.buffered().use { readLimited(it) }
         require(bytes.size > MAGIC.size + 16 + 12 + 16) { "Backup file is incomplete." }
         require(bytes.copyOfRange(0, MAGIC.size).contentEquals(MAGIC)) { "Not a Drive Time Notifier backup." }
 
@@ -117,13 +119,27 @@ object PasswordBackup {
         put("calendarStartLocations", JSONArray(s.calendarStartLocations.toList()))
         put("exclusionRules", JSONArray(s.exclusionRules.toList()))
         put("bufferMinutes", s.bufferMinutes)
+        put("dynamicBufferEnabled", s.dynamicBufferEnabled)
+        put("dynamicBufferLevel", s.dynamicBufferLevel.id)
         put("reminderLeadMinutes", s.reminderLeadMinutes)
         put("automaticEnabled", s.automaticEnabled)
         put("autoHour", s.autoHour)
         put("autoMinute", s.autoMinute)
         put("outputIcs", s.outputIcs)
-        put("showSpeedCameras", s.showSpeedCameras)
         put("showParking", s.showParking)
+        put("parkingResultLimit", s.parkingResultLimit)
+        put("parkingMaxDistanceMeters", s.parkingMaxDistanceMeters)
+        put("parkingFreeOnly", s.parkingFreeOnly)
+        put("showChargingStations", s.showChargingStations)
+        put("chargingResultLimit", s.chargingResultLimit)
+        put("chargingConnector", s.chargingConnector.id)
+        put("chargingConnectors", JSONArray(s.chargingConnectors.map { it.id }))
+        put("chargingMaxDistanceMeters", s.chargingMaxDistanceMeters)
+        put("chargingSpeedPreference", s.chargingSpeedPreference.id)
+        put("chargingPreferredOperator", s.chargingPreferredOperator)
+        put("chargingShowOtherOperators", s.chargingShowOtherOperators)
+        put("chargingUseBNetzA", s.chargingUseBNetzA)
+        put("chargingNavigateViaStation", s.chargingNavigateViaStation)
         put("targetCalendarId", s.targetCalendarId)
         put("sourceCalendarIds", JSONArray(s.sourceCalendarIds.toList()))
         put("calendarEventTitle", s.calendarEventTitle)
@@ -131,6 +147,9 @@ object PasswordBackup {
         put("osrmBaseUrl", s.osrmBaseUrl)
         put("valhallaBaseUrl", s.valhallaBaseUrl)
         put("photonBaseUrl", s.photonBaseUrl)
+        put("overpassBaseUrl", s.overpassBaseUrl)
+        put("overpassEndpoints", JSONArray(s.overpassEndpoints))
+        put("overpassSplitRequests", s.overpassSplitRequests)
         put("language", s.language.id)
         put("appearance", s.appearance.id)
         put("palette", s.palette.id)
@@ -172,13 +191,37 @@ object PasswordBackup {
             calendarStartLocations = j.stringSet("calendarStartLocations"),
             exclusionRules = j.stringSet("exclusionRules"),
             bufferMinutes = j.optInt("bufferMinutes", defaults.bufferMinutes),
+            dynamicBufferEnabled = j.optBoolean("dynamicBufferEnabled", defaults.dynamicBufferEnabled),
+            dynamicBufferLevel = DynamicBufferLevel.fromId(j.optString("dynamicBufferLevel", defaults.dynamicBufferLevel.id)),
             reminderLeadMinutes = j.optInt("reminderLeadMinutes", defaults.reminderLeadMinutes),
             automaticEnabled = j.optBoolean("automaticEnabled", defaults.automaticEnabled),
             autoHour = j.optInt("autoHour", defaults.autoHour),
             autoMinute = j.optInt("autoMinute", defaults.autoMinute),
             outputIcs = j.optBoolean("outputIcs", defaults.outputIcs),
-            showSpeedCameras = j.optBoolean("showSpeedCameras", defaults.showSpeedCameras),
             showParking = j.optBoolean("showParking", defaults.showParking),
+            parkingResultLimit = j.optInt("parkingResultLimit", defaults.parkingResultLimit).coerceIn(1, 50),
+            parkingMaxDistanceMeters = j.optInt("parkingMaxDistanceMeters", defaults.parkingMaxDistanceMeters).coerceIn(100, 10_000),
+            parkingFreeOnly = j.optBoolean("parkingFreeOnly", defaults.parkingFreeOnly),
+            showChargingStations = j.optBoolean("showChargingStations", defaults.showChargingStations),
+            chargingResultLimit = j.optInt("chargingResultLimit", defaults.chargingResultLimit).coerceIn(1, 50),
+            chargingConnector = ChargingConnectorPreference.fromId(j.optString("chargingConnector", defaults.chargingConnector.id)),
+            chargingConnectors = if (j.has("chargingConnectors")) {
+                j.stringList("chargingConnectors")
+                    .map { ChargingConnectorPreference.fromId(it) }
+                    .filterNot { it == ChargingConnectorPreference.ANY }
+                    .toSet()
+            } else {
+                ChargingConnectorPreference.fromId(j.optString("chargingConnector", defaults.chargingConnector.id))
+                    .takeUnless { it == ChargingConnectorPreference.ANY }
+                    ?.let(::setOf)
+                    .orEmpty()
+            },
+            chargingMaxDistanceMeters = j.optInt("chargingMaxDistanceMeters", defaults.chargingMaxDistanceMeters).coerceIn(100, 10_000),
+            chargingSpeedPreference = ChargingSpeedPreference.fromId(j.optString("chargingSpeedPreference", defaults.chargingSpeedPreference.id)),
+            chargingPreferredOperator = j.optString("chargingPreferredOperator", defaults.chargingPreferredOperator),
+            chargingShowOtherOperators = j.optBoolean("chargingShowOtherOperators", defaults.chargingShowOtherOperators),
+            chargingUseBNetzA = j.optBoolean("chargingUseBNetzA", defaults.chargingUseBNetzA),
+            chargingNavigateViaStation = j.optBoolean("chargingNavigateViaStation", defaults.chargingNavigateViaStation),
             targetCalendarId = j.optLong("targetCalendarId", defaults.targetCalendarId),
             sourceCalendarIds = j.stringSet("sourceCalendarIds"),
             calendarEventTitle = j.optString("calendarEventTitle", defaults.calendarEventTitle),
@@ -186,6 +229,12 @@ object PasswordBackup {
             osrmBaseUrl = j.optString("osrmBaseUrl", defaults.osrmBaseUrl),
             valhallaBaseUrl = j.optString("valhallaBaseUrl", defaults.valhallaBaseUrl),
             photonBaseUrl = j.optString("photonBaseUrl", defaults.photonBaseUrl),
+            overpassBaseUrl = j.optString("overpassBaseUrl", defaults.overpassBaseUrl),
+            overpassEndpoints = if (j.has("overpassEndpoints")) {
+                j.stringList("overpassEndpoints").filter { it.startsWith("https://") }.distinct()
+                    .ifEmpty { defaults.overpassEndpoints }
+            } else listOf(j.optString("overpassBaseUrl", defaults.overpassBaseUrl)),
+            overpassSplitRequests = j.optBoolean("overpassSplitRequests", defaults.overpassSplitRequests),
             language = AppLanguage.fromId(j.optString("language", defaults.language.id)),
             appearance = AppAppearance.fromId(j.optString("appearance", defaults.appearance.id)),
             palette = ColorPalette.fromId(j.optString("palette", defaults.palette.id)),
@@ -196,6 +245,20 @@ object PasswordBackup {
                 .filter { id -> RoutingProvider.entries.any { it.id == id } }
                 .distinct()
         )
+    }
+
+    private fun readLimited(input: InputStream): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            require(total <= MAX_BACKUP_BYTES) { "Backup file is too large." }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
     }
 
     private fun JSONObject.stringSet(name: String): Set<String> =

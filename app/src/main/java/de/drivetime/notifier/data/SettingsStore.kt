@@ -167,13 +167,27 @@ data class AppSettings(
     val calendarStartLocations: Set<String> = emptySet(),
     val exclusionRules: Set<String> = emptySet(),
     val bufferMinutes: Int = 15,
+    val dynamicBufferEnabled: Boolean = false,
+    val dynamicBufferLevel: DynamicBufferLevel = DynamicBufferLevel.BALANCED,
     val reminderLeadMinutes: Int = 0,
     val automaticEnabled: Boolean = false,
     val autoHour: Int = 21,
     val autoMinute: Int = 0,
     val outputIcs: Boolean = false,
-    val showSpeedCameras: Boolean = false,
     val showParking: Boolean = false,
+    val parkingResultLimit: Int = 10,
+    val parkingMaxDistanceMeters: Int = 1_500,
+    val parkingFreeOnly: Boolean = false,
+    val showChargingStations: Boolean = false,
+    val chargingResultLimit: Int = 5,
+    val chargingConnector: ChargingConnectorPreference = ChargingConnectorPreference.ANY,
+    val chargingConnectors: Set<ChargingConnectorPreference> = emptySet(),
+    val chargingMaxDistanceMeters: Int = 1_500,
+    val chargingSpeedPreference: ChargingSpeedPreference = ChargingSpeedPreference.ANY,
+    val chargingPreferredOperator: String = "",
+    val chargingShowOtherOperators: Boolean = true,
+    val chargingUseBNetzA: Boolean = false,
+    val chargingNavigateViaStation: Boolean = false,
     val targetCalendarId: Long = -1L,
     val sourceCalendarIds: Set<String> = emptySet(),
     val calendarEventTitle: String = "",
@@ -181,6 +195,14 @@ data class AppSettings(
     val osrmBaseUrl: String = "https://router.project-osrm.org",
     val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
+    val overpassBaseUrl: String = "https://overpass-api.de/api/interpreter",
+    val overpassEndpoints: List<String> = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    ),
+    val overpassSplitRequests: Boolean = true,
+    val networkDebugVisible: Boolean = false,
     val language: AppLanguage = if (Locale.getDefault().language.equals("de", true)) AppLanguage.GERMAN else AppLanguage.ENGLISH,
     val appearance: AppAppearance = AppAppearance.SYSTEM,
     val palette: ColorPalette = ColorPalette.MATERIAL_YOU,
@@ -198,13 +220,27 @@ class SettingsStore(private val context: Context) {
         val CALENDAR_START_LOCATIONS = stringSetPreferencesKey("calendar_start_locations")
         val EXCLUSION_RULES = stringSetPreferencesKey("exclusion_rules")
         val BUFFER = intPreferencesKey("buffer_minutes")
+        val DYNAMIC_BUFFER = booleanPreferencesKey("dynamic_buffer_enabled")
+        val DYNAMIC_BUFFER_LEVEL = stringPreferencesKey("dynamic_buffer_level")
         val REMINDER = intPreferencesKey("reminder_lead")
         val AUTO = booleanPreferencesKey("automatic_enabled")
         val HOUR = intPreferencesKey("auto_hour")
         val MINUTE = intPreferencesKey("auto_minute")
         val ICS = booleanPreferencesKey("output_ics")
-        val CAMERAS = booleanPreferencesKey("show_speed_cameras")
         val PARKING = booleanPreferencesKey("show_parking")
+        val PARKING_RESULT_LIMIT = intPreferencesKey("parking_result_limit")
+        val PARKING_MAX_DISTANCE = intPreferencesKey("parking_max_distance_meters")
+        val PARKING_FREE_ONLY = booleanPreferencesKey("parking_free_only")
+        val CHARGING = booleanPreferencesKey("show_charging_stations")
+        val CHARGING_RESULT_LIMIT = intPreferencesKey("charging_result_limit")
+        val CHARGING_CONNECTOR = stringPreferencesKey("charging_connector")
+        val CHARGING_CONNECTORS = stringSetPreferencesKey("charging_connectors")
+        val CHARGING_MAX_DISTANCE = intPreferencesKey("charging_max_distance_meters")
+        val CHARGING_SPEED = stringPreferencesKey("charging_speed_preference")
+        val CHARGING_OPERATOR = stringPreferencesKey("charging_preferred_operator")
+        val CHARGING_OTHER_OPERATORS = booleanPreferencesKey("charging_show_other_operators")
+        val CHARGING_BNETZA = booleanPreferencesKey("charging_use_bnetza")
+        val CHARGING_NAVIGATE = booleanPreferencesKey("charging_navigate_via_station")
         val TARGET = longPreferencesKey("target_calendar_id")
         val SOURCES = stringSetPreferencesKey("source_calendar_ids")
         val EVENT_TITLE = stringPreferencesKey("calendar_event_title")
@@ -212,6 +248,10 @@ class SettingsStore(private val context: Context) {
         val OSRM = stringPreferencesKey("osrm_base_url")
         val VALHALLA = stringPreferencesKey("valhalla_base_url")
         val PHOTON = stringPreferencesKey("photon_base_url")
+        val OVERPASS = stringPreferencesKey("overpass_base_url")
+        val OVERPASS_ENDPOINTS = stringPreferencesKey("overpass_endpoints")
+        val OVERPASS_SPLIT = booleanPreferencesKey("overpass_split_requests")
+        val NETWORK_DEBUG_VISIBLE = booleanPreferencesKey("network_debug_visible")
         val LEGACY_NOMINATIM = stringPreferencesKey("nominatim_base_url")
         val LANGUAGE = stringPreferencesKey("app_language")
         val APPEARANCE = stringPreferencesKey("appearance")
@@ -243,6 +283,19 @@ class SettingsStore(private val context: Context) {
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
         val migratedCaps = (p[K.CAP_DEFAULTS_VERSION] ?: 0) < 2
+        val legacyOverpass = p[K.OVERPASS] ?: "https://overpass-api.de/api/interpreter"
+        val overpassEndpoints = p[K.OVERPASS_ENDPOINTS]
+            ?.lineSequence()
+            ?.map { it.trim() }
+            ?.filter { it.startsWith("https://") }
+            ?.distinct()
+            ?.toList()
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf(
+                legacyOverpass,
+                "https://overpass.private.coffee/api/interpreter",
+                "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+            ).distinct()
         AppSettings(
             homeName = p[K.HOME_NAME]?.takeIf { it.isNotBlank() } ?: "Standard",
             homeAddress = p[K.HOME].orEmpty(),
@@ -250,13 +303,34 @@ class SettingsStore(private val context: Context) {
             calendarStartLocations = p[K.CALENDAR_START_LOCATIONS] ?: emptySet(),
             exclusionRules = p[K.EXCLUSION_RULES] ?: emptySet(),
             bufferMinutes = p[K.BUFFER] ?: 15,
+            dynamicBufferEnabled = p[K.DYNAMIC_BUFFER] ?: false,
+            dynamicBufferLevel = DynamicBufferLevel.fromId(p[K.DYNAMIC_BUFFER_LEVEL]),
             reminderLeadMinutes = p[K.REMINDER] ?: 0,
             automaticEnabled = p[K.AUTO] ?: false,
             autoHour = p[K.HOUR] ?: 21,
             autoMinute = p[K.MINUTE] ?: 0,
             outputIcs = p[K.ICS] ?: false,
-            showSpeedCameras = p[K.CAMERAS] ?: false,
             showParking = p[K.PARKING] ?: false,
+            parkingResultLimit = (p[K.PARKING_RESULT_LIMIT] ?: 10).coerceIn(1, 50),
+            parkingMaxDistanceMeters = (p[K.PARKING_MAX_DISTANCE] ?: 1_500).coerceIn(100, 10_000),
+            parkingFreeOnly = p[K.PARKING_FREE_ONLY] ?: false,
+            showChargingStations = p[K.CHARGING] ?: false,
+            chargingResultLimit = (p[K.CHARGING_RESULT_LIMIT] ?: 5).coerceIn(1, 50),
+            chargingConnector = ChargingConnectorPreference.fromId(p[K.CHARGING_CONNECTOR]),
+            chargingConnectors = p[K.CHARGING_CONNECTORS]
+                ?.map { ChargingConnectorPreference.fromId(it) }
+                ?.filterNot { it == ChargingConnectorPreference.ANY }
+                ?.toSet()
+                ?: ChargingConnectorPreference.fromId(p[K.CHARGING_CONNECTOR])
+                    .takeUnless { it == ChargingConnectorPreference.ANY }
+                    ?.let(::setOf)
+                    .orEmpty(),
+            chargingMaxDistanceMeters = (p[K.CHARGING_MAX_DISTANCE] ?: 1_500).coerceIn(100, 10_000),
+            chargingSpeedPreference = ChargingSpeedPreference.fromId(p[K.CHARGING_SPEED]),
+            chargingPreferredOperator = p[K.CHARGING_OPERATOR].orEmpty(),
+            chargingShowOtherOperators = p[K.CHARGING_OTHER_OPERATORS] ?: true,
+            chargingUseBNetzA = p[K.CHARGING_BNETZA] ?: false,
+            chargingNavigateViaStation = p[K.CHARGING_NAVIGATE] ?: false,
             targetCalendarId = p[K.TARGET] ?: -1L,
             sourceCalendarIds = p[K.SOURCES] ?: emptySet(),
             calendarEventTitle = p[K.EVENT_TITLE].orEmpty(),
@@ -264,6 +338,10 @@ class SettingsStore(private val context: Context) {
             osrmBaseUrl = p[K.OSRM] ?: "https://router.project-osrm.org",
             valhallaBaseUrl = p[K.VALHALLA] ?: "https://valhalla1.openstreetmap.de",
             photonBaseUrl = p[K.PHOTON] ?: "https://photon.komoot.io",
+            overpassBaseUrl = overpassEndpoints.first(),
+            overpassEndpoints = overpassEndpoints,
+            overpassSplitRequests = p[K.OVERPASS_SPLIT] ?: true,
+            networkDebugVisible = p[K.NETWORK_DEBUG_VISIBLE] ?: false,
             language = AppLanguage.fromId(p[K.LANGUAGE]),
             appearance = AppAppearance.fromId(p[K.APPEARANCE]),
             palette = ColorPalette.fromId(p[K.PALETTE]),
@@ -302,13 +380,27 @@ class SettingsStore(private val context: Context) {
         p[K.CALENDAR_START_LOCATIONS] = s.calendarStartLocations
         p[K.EXCLUSION_RULES] = s.exclusionRules
         p[K.BUFFER] = s.bufferMinutes.coerceIn(0, 180)
+        p[K.DYNAMIC_BUFFER] = s.dynamicBufferEnabled
+        p[K.DYNAMIC_BUFFER_LEVEL] = s.dynamicBufferLevel.id
         p[K.REMINDER] = s.reminderLeadMinutes.coerceIn(0, 180)
         p[K.AUTO] = s.automaticEnabled
         p[K.HOUR] = s.autoHour.coerceIn(0, 23)
         p[K.MINUTE] = s.autoMinute.coerceIn(0, 59)
         p[K.ICS] = s.outputIcs
-        p[K.CAMERAS] = s.showSpeedCameras
         p[K.PARKING] = s.showParking
+        p[K.PARKING_RESULT_LIMIT] = s.parkingResultLimit.coerceIn(1, 50)
+        p[K.PARKING_MAX_DISTANCE] = s.parkingMaxDistanceMeters.coerceIn(100, 10_000)
+        p[K.PARKING_FREE_ONLY] = s.parkingFreeOnly
+        p[K.CHARGING] = s.showChargingStations
+        p[K.CHARGING_RESULT_LIMIT] = s.chargingResultLimit.coerceIn(1, 50)
+        p[K.CHARGING_CONNECTOR] = s.chargingConnectors.firstOrNull()?.id ?: ChargingConnectorPreference.ANY.id
+        p[K.CHARGING_CONNECTORS] = s.chargingConnectors.filterNot { it == ChargingConnectorPreference.ANY }.map { it.id }.toSet()
+        p[K.CHARGING_MAX_DISTANCE] = s.chargingMaxDistanceMeters.coerceIn(100, 10_000)
+        p[K.CHARGING_SPEED] = s.chargingSpeedPreference.id
+        p[K.CHARGING_OPERATOR] = s.chargingPreferredOperator.trim().take(80)
+        p[K.CHARGING_OTHER_OPERATORS] = s.chargingShowOtherOperators
+        p[K.CHARGING_BNETZA] = s.chargingUseBNetzA
+        p[K.CHARGING_NAVIGATE] = s.chargingNavigateViaStation
         p[K.TARGET] = s.targetCalendarId
         p[K.SOURCES] = s.sourceCalendarIds
         p[K.EVENT_TITLE] = s.calendarEventTitle.trim().take(120)
@@ -316,6 +408,11 @@ class SettingsStore(private val context: Context) {
         p[K.OSRM] = sanitizeHttpsBaseUrl(s.osrmBaseUrl, "https://router.project-osrm.org")
         p[K.VALHALLA] = sanitizeHttpsBaseUrl(s.valhallaBaseUrl, "https://valhalla1.openstreetmap.de")
         p[K.PHOTON] = sanitizeHttpsBaseUrl(s.photonBaseUrl, "https://photon.komoot.io")
+        val overpassEndpoints = sanitizeHttpsEndpointList(s.overpassEndpoints.ifEmpty { listOf(s.overpassBaseUrl) })
+        p[K.OVERPASS] = overpassEndpoints.first()
+        p[K.OVERPASS_ENDPOINTS] = overpassEndpoints.joinToString("\n")
+        p[K.OVERPASS_SPLIT] = s.overpassSplitRequests
+        p[K.NETWORK_DEBUG_VISIBLE] = s.networkDebugVisible
         p[K.LANGUAGE] = s.language.id
         p[K.APPEARANCE] = s.appearance.id
         p[K.PALETTE] = s.palette.id
@@ -355,4 +452,11 @@ class SettingsStore(private val context: Context) {
         val clean = value.trim().removeSuffix("/")
         return if (clean.startsWith("https://") && clean.length <= 240) clean else fallback
     }
+
+    private fun sanitizeHttpsEndpointList(values: List<String>): List<String> = values
+        .map { it.trim().removeSuffix("/") }
+        .filter { it.startsWith("https://") && it.length <= 240 }
+        .distinct()
+        .take(8)
+        .ifEmpty { listOf("https://overpass-api.de/api/interpreter") }
 }

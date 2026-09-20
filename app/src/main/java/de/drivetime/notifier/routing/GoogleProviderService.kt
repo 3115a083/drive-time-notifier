@@ -5,6 +5,7 @@ import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -46,7 +47,7 @@ class GoogleProviderService(
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@withContext emptyList()
-            val suggestions = JSONObject(response.body?.string().orEmpty()).optJSONArray("suggestions")
+            val suggestions = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("suggestions")
                 ?: return@withContext emptyList()
             buildList {
                 for (i in 0 until suggestions.length()) {

@@ -27,14 +27,19 @@ Drive Time Notifier is a native Android app for manually and automatically plann
 - named default start location
 - additional saved start locations
 - per-calendar start locations for automatic processing
-- configurable arrival buffer and reminder
+- configurable arrival buffer, dynamic extra buffer and reminder
+- conflict checks and controlled saving despite a duplicate warning
 - TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes and HERE Routing v8
 - ordered fallback routing providers
 - local daily, weekly and monthly request caps
 - individual API and endpoint self-tests with status indicators
 - traffic data where supported by the provider
 - Photon address search and geocoding
-- optional OpenStreetMap/Overpass parking and speed-camera data
+- progressive map enrichment after the route calculation
+- configurable parking and public charging stations from OpenStreetMap/Overpass
+- optional charging-station enrichment from the German Federal Network Agency register
+- parking and charging details with copyable addresses
+- multiple ordered Overpass endpoints and distributable POI requests
 - direct calendar output or ICS save/share
 - automatic next-day processing
 - retry and error notifications
@@ -42,6 +47,8 @@ Drive Time Notifier is a native Android app for manually and automatically plann
 - Tasker, MacroDroid and external broadcast triggers
 - launcher shortcuts
 - encrypted password-protected settings/API-key backup for device migration
+- integrated update check through GitHub Releases
+- copyable network diagnostics for support and troubleshooting
 - English and German
 - light, dark and system appearance
 - Material You and multiple color palettes
@@ -125,7 +132,7 @@ Status:
 - red exclamation mark: check failed
 - green check mark: endpoint reachable and credentials accepted
 
-If the status is already green, the app asks for confirmation before sending another test request.
+If the status is already green, the app asks for confirmation before sending another test request. Photon and Overpass are tested directly inside their shared network settings dialog.
 
 Every provider test that actually sends a request increments the local request counter by one and may also count against the provider's online quota. A missing API key or already reached local cap causes no external request.
 
@@ -150,6 +157,32 @@ All limits and periods remain editable. Local caps are a safety mechanism, not a
 An ordered fallback list can be configured below the primary provider. Providers missing a required API key are skipped. The primary provider is not duplicated in the fallback list.
 
 The overview uses compact monochrome provider marks where a suitable asset is available, otherwise it falls back to the generic routing icon.
+
+## Dynamic buffer
+
+In addition to the fixed arrival buffer, the app can apply a dynamic extra buffer based on the calculated drive duration. The result shows the included buffer directly. Calendar entries display it in parentheses next to the drive duration.
+
+## Parking and charging stations
+
+The calculated route and map appear first. Selected supplementary data loads independently afterwards. The result screen shows each request's state, offers an individual retry and allows the drive to be saved without supplementary data.
+
+Parking search supports a configurable result count, 10 by default, a destination radius and a free-only filter. Markers distinguish known free, paid and unknown-fee parking. Search includes OpenStreetMap nodes, areas and relations.
+
+Charging search supports a configurable result count, 5 by default, a destination radius, minimum charging power, operator filtering and multiple desired connector types. The app can optionally merge public register data from Germany's Federal Network Agency. A selected charger can become a route waypoint, with the remaining distance linked as a walking route.
+
+Detail views expose available OpenStreetMap and register fields, including address, operator, network, connectors, charging power, opening hours, fees, capacity, access, source and distance. Addresses and other values are selectable. Addresses also have a dedicated copy action. The app does not claim guaranteed live availability.
+
+## Photon and Overpass
+
+Photon and Overpass settings share one dialog. Photon accepts a custom HTTPS endpoint. Multiple Overpass HTTPS endpoints can be entered, ordered, enabled and tested individually. Presets include openly accessible global instances and clearly marked services that may require credentials or a contract.
+
+POI requests can be distributed across active Overpass instances or sent through the same ordered fallback chain. The app handles overloads, timeouts and HTTP 429 responses with bounded attempts, endpoint switching and cooldowns. Search radius, result count, runtime and response size are limited. Downloaded data is parsed only as structured POI data and is never executed as code.
+
+## Diagnostics and updates
+
+Five taps on `Vibecoded with ❤️` open network diagnostics below the automation interfaces. The open state persists while navigating away from Settings. The scrollable, copyable report contains only diagnostic configuration, services, response times, outcomes and truncated error responses. The panel can be closed again.
+
+The integrated update check compares the installed version with public GitHub Releases. Updates are never installed without user approval.
 
 ## Device migration and backup
 
@@ -213,4 +246,4 @@ Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ## Disclaimer
 
-The app is provided **AS IS**. There is no warranty for routes, travel times, traffic information, speed-camera data, parking data, calendar data or long-term availability of external APIs. Users remain responsible for provider contracts, API usage and charges.
+The app is provided **AS IS**. There is no warranty for routes, travel times, traffic information, parking data, charging-station or register data, calendar data or long-term availability of external APIs. Users remain responsible for provider contracts, API usage and charges.

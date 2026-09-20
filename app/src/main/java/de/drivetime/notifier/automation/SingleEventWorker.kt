@@ -7,10 +7,13 @@ import de.drivetime.notifier.calendar.CalendarRepository
 import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.calendar.DriveEventDescriptionBuilder
 import de.drivetime.notifier.core.DrivePlanner
+import de.drivetime.notifier.core.DynamicArrivalBuffer
 import de.drivetime.notifier.data.SettingsStore
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.routing.ChargingRoutePlanner
+import de.drivetime.notifier.routing.ChargingSearchOptions
 import de.drivetime.notifier.routing.OsmEnrichmentClient
 import de.drivetime.notifier.routing.PolylineDecoder
 import de.drivetime.notifier.routing.RoutingService
@@ -62,8 +65,9 @@ class SingleEventWorker(
         }
 
         val routes = RoutingServiceFactory.create(applicationContext, settings, automated = true)
-        val route = routeWithRetry(routes, RouteRequest(origin, destination, arrival))
-        if (route == null) {
+        val request = RouteRequest(origin, destination, arrival)
+        val initialRoute = routeWithRetry(routes, request)
+        if (initialRoute == null) {
             AutomationNotifier.notifyRoutingFailure(
                 applicationContext,
                 settings.language,
@@ -76,13 +80,21 @@ class SingleEventWorker(
         }
 
         return runCatching {
-            val plan = DrivePlanner.plan(arrival, route.durationSeconds, settings.bufferMinutes, previousEnd)
-            val pois = if (settings.showSpeedCameras || settings.showParking) {
-                val points = PolylineDecoder.decode(route.encodedPolyline)
-                runCatching {
-                    OsmEnrichmentClient().query(points, settings.showSpeedCameras, settings.showParking)
-                }.getOrDefault(emptyList())
-            } else emptyList()
+            val enriched = ChargingRoutePlanner.prepare(
+                context = applicationContext,
+                settings = settings,
+                request = request,
+                initialRoute = initialRoute,
+                automated = true
+            )
+            val route = enriched.route
+            val plan = DrivePlanner.plan(
+                enriched.effectiveDestinationStartMillis,
+                route.durationSeconds,
+                DynamicArrivalBuffer.totalMinutes(settings, route.durationSeconds, route.trafficDelaySeconds),
+                previousEnd
+            )
+            val pois = enriched.pois
             val description = DriveEntryIdentity.attach(
                 DriveEventDescriptionBuilder.build(
                     settings.language,
@@ -90,7 +102,10 @@ class SingleEventWorker(
                     origin,
                     destination,
                     route,
-                    pois
+                    pois,
+                    enriched.navigation,
+                    DynamicArrivalBuffer.extraMinutes(settings, route.durationSeconds, route.trafficDelaySeconds)
+                        .takeIf { settings.dynamicBufferEnabled }
                 ),
                 identityKey
             )
@@ -101,7 +116,7 @@ class SingleEventWorker(
                     origin,
                     destination,
                     plan.departureMillis,
-                    plan.arrivalMillis,
+                    plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                     title,
                     description
                 )
@@ -111,7 +126,7 @@ class SingleEventWorker(
                     origin,
                     destination,
                     plan.departureMillis,
-                    plan.arrivalMillis,
+                    plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                     settings.reminderLeadMinutes,
                     title,
                     description

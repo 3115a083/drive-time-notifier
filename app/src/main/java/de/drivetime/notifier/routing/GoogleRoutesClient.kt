@@ -2,6 +2,7 @@ package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -59,7 +60,7 @@ class GoogleRoutesClient(
             .build()
 
         client.newCall(http).execute().use { response ->
-            val text = response.body?.string().orEmpty()
+            val text = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("Routingdienst: HTTP ${response.code}")
             val routes = JSONObject(text).optJSONArray("routes")
             if (routes == null || routes.length() == 0) error("Keine befahrbare Route gefunden.")
@@ -86,7 +87,7 @@ class GoogleRoutesClient(
             .build()
         val request = Request.Builder().url(url).get().build()
         client.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("Geocoding: HTTP ${response.code}")
             val results = JSONObject(body).getJSONArray("results")
             if (results.length() == 0) error("Adresse nicht gefunden: $address")

@@ -28,14 +28,19 @@ Drive Time Notifier ist eine native Android-App zur manuellen und automatischen 
 - benannter Standard-Startort
 - zusätzliche gespeicherte Startorte
 - kalenderabhängige Startorte für automatische Verarbeitung
-- frei konfigurierbarer Ankunftspuffer und Erinnerung
+- frei konfigurierbarer Ankunftspuffer, dynamischer Zusatzpuffer und Erinnerung
+- Konfliktprüfung mit vorherigen Terminen und kontrolliertes Speichern trotz Duplikatwarnung
 - TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes und HERE Routing v8
 - geordnete Fallback-Routinganbieter
 - lokale tägliche, wöchentliche und monatliche Request-Caps
 - einzelne API-/Endpoint-Selbsttests mit Statusanzeige
 - Verkehrsdaten, soweit vom Provider unterstützt
 - Photon für Adresssuche und Geocoding
-- optionale Parkplätze und Blitzer aus OpenStreetMap/Overpass
+- progressive Kartenanreicherung nach der eigentlichen Routenberechnung
+- konfigurierbare Parkplätze und öffentliche Ladesäulen aus OpenStreetMap/Overpass
+- optionale Anreicherung von Ladesäulen mit dem Bundesnetzagentur-Register
+- Detailansichten für Parkplätze und Ladesäulen mit kopierbaren Adressen
+- mehrere geordnete Overpass-Endpunkte und verteilbare POI-Abfragen
 - direkte Kalenderausgabe oder ICS speichern/teilen
 - automatische Verarbeitung des nächsten Tages
 - Retry- und Fehlerbenachrichtigungen
@@ -43,6 +48,8 @@ Drive Time Notifier ist eine native Android-App zur manuellen und automatischen 
 - Tasker-, MacroDroid- und externe Broadcast-Trigger
 - App-Shortcuts
 - verschlüsselter, passwortgeschützter Gerätewechsel-Export/-Import
+- integrierte Update-Prüfung über GitHub Releases
+- kopierbare Netzwerkdiagnose für Support und Fehlersuche
 - Deutsch und Englisch
 - Light, Dark und System
 - Material You und mehrere Farbpaletten
@@ -126,7 +133,7 @@ Status:
 - rotes Ausrufezeichen: Prüfung fehlgeschlagen
 - grüner Haken: Endpoint erreichbar und Zugangsdaten akzeptiert
 
-Bei einem bereits grünen Status fragt die App vor einer erneuten Prüfung nach Bestätigung.
+Bei einem bereits grünen Status fragt die App vor einer erneuten Prüfung nach Bestätigung. Photon und Overpass werden direkt im gemeinsamen Netzwerk-Einstellungsdialog geprüft.
 
 Jeder Test, der tatsächlich eine Provider-Anfrage sendet, erhöht den lokalen Request-Counter um eine Anfrage und kann zusätzlich beim Online-Kontingent des Providers zählen. Fehlender API-Key oder bereits erreichtes lokales Cap erzeugen keine externe Anfrage.
 
@@ -151,6 +158,32 @@ Alle Werte und Zeiträume bleiben editierbar. Lokale Caps sind ein Schutzmechani
 Unter dem primären Provider kann eine geordnete Fallback-Liste konfiguriert werden. Provider ohne erforderlichen API-Key werden übersprungen. Der primäre Provider wird nicht zusätzlich in der Fallback-Liste geführt.
 
 Die Übersicht verwendet kompakte monochrome Provider-Marken, soweit ein passendes Asset vorliegt. Sonst wird das allgemeine Routing-Symbol verwendet.
+
+## Dynamischer Puffer
+
+Zusätzlich zum festen Ankunftspuffer kann die App abhängig von der berechneten Fahrtdauer einen dynamischen Zusatzpuffer anwenden. Das Ergebnis zeigt den enthaltenen Puffer direkt an. Im Kalendereintrag steht er neben der Fahrtdauer in Klammern.
+
+## Parkplätze und Ladesäulen
+
+Die berechnete Route und Karte erscheinen zuerst. Gewählte Zusatzdaten werden danach unabhängig geladen. Die Ergebnisansicht zeigt den Status jeder Abfrage, erlaubt einen gezielten neuen Versuch und lässt sich auch ohne Zusatzdaten speichern.
+
+Die Parkplatzsuche unterstützt eine einstellbare Trefferzahl, standardmäßig 10, einen Zielradius und einen Filter für kostenlose Parkplätze. Marker unterscheiden bekannte kostenlose, kostenpflichtige und nicht eindeutig ausgezeichnete Parkplätze. Die Suche berücksichtigt Knoten, Flächen und Relationen aus OpenStreetMap.
+
+Die Ladesäulensuche unterstützt eine einstellbare Trefferzahl, standardmäßig 5, Zielradius, Mindestladeleistung, Betreiberfilter und mehrere gewünschte Steckertypen. Optional ergänzt die App öffentliche Registerdaten der Bundesnetzagentur. Eine gefundene Säule kann als Zwischenziel in die Route übernommen werden. Die verbleibende Strecke zum Ziel wird als Fußweg verlinkt.
+
+Detailansichten zeigen verfügbare OpenStreetMap- und Registerangaben, darunter Adresse, Betreiber, Netzwerk, Steckertypen, Ladeleistung, Öffnungszeiten, Gebühren, Kapazität, Zugang, Quelle und Entfernung. Adressen und weitere Werte können markiert werden. Adressen besitzen zusätzlich eine Kopieraktion. Die App zeigt keine garantierte Echtzeitbelegung an.
+
+## Photon und Overpass
+
+Photon- und Overpass-Einstellungen liegen in einem gemeinsamen Dialog. Photon unterstützt einen frei konfigurierbaren HTTPS-Endpunkt. Für Overpass können mehrere HTTPS-Endpunkte eingetragen, sortiert, aktiviert und einzeln getestet werden. Die Voreinstellungen enthalten frei zugängliche globale Instanzen sowie klar gekennzeichnete Angebote, die eigene Zugangsdaten oder einen Vertrag voraussetzen können.
+
+POI-Abfragen können auf verschiedene aktive Overpass-Instanzen verteilt oder nacheinander über dieselbe Fallback-Reihenfolge gesendet werden. Die App behandelt Überlastung, Zeitüberschreitungen und HTTP 429 mit begrenzten Versuchen, Endpunktwechsel und einer Abkühlzeit. Suchradius, Trefferzahl, Laufzeit und Antwortgröße sind begrenzt. Geladene Daten werden nur als strukturierte POI-Daten verarbeitet und nicht als Code ausgeführt.
+
+## Diagnose und Updates
+
+Fünf Berührungen auf `Vibecoded with ❤️` öffnen die Netzwerkdiagnose unter den Automatisierungs-Schnittstellen. Der Zustand bleibt beim Wechseln der Einstellungsseite erhalten. Die scrollbare und kopierbare Ausgabe enthält nur diagnosebezogene Einstellungen, Dienste, Laufzeiten, Ergebnisse und gekürzte Fehlerantworten. Der Bereich kann wieder geschlossen werden.
+
+Die integrierte Update-Prüfung vergleicht die installierte Version mit öffentlichen GitHub-Releases. Updates werden nicht ohne Zustimmung installiert.
 
 ## Gerätewechsel und Backup
 
@@ -214,4 +247,4 @@ Drittanbieter-Hinweise: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ## Haftungsausschluss
 
-Die App wird **AS IS** bereitgestellt. Es gibt keine Garantie für Routen, Fahrzeiten, Verkehrsdaten, Blitzerinformationen, Parkplätze, Kalenderdaten oder die dauerhafte Verfügbarkeit externer APIs. Nutzer bleiben für Provider-Verträge, API-Nutzung und entstehende Kosten verantwortlich.
+Die App wird **AS IS** bereitgestellt. Es gibt keine Garantie für Routen, Fahrzeiten, Verkehrsdaten, Parkplätze, Ladesäulen, Kalenderdaten oder die dauerhafte Verfügbarkeit externer APIs. Nutzer bleiben für Provider-Verträge, API-Nutzung und entstehende Kosten verantwortlich.
