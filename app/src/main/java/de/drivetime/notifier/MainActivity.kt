@@ -433,7 +433,7 @@ class MainActivity : ComponentActivity() {
             val attempt = runCatching {
                 enrichmentClient.query(
                     points = points,
-                    parking = false,
+                    parking = null,
                     charging = ChargingSearchOptions.from(settings)
                 )
             }
@@ -506,7 +506,15 @@ class MainActivity : ComponentActivity() {
                 return
             }
             val attempt = runCatching {
-                enrichmentClient.query(points, parking = true, charging = null)
+                enrichmentClient.query(
+                    points,
+                    parking = ParkingSearchOptions(
+                        resultLimit = settings.parkingResultLimit,
+                        maxDistanceMeters = settings.parkingMaxDistanceMeters,
+                        freeOnly = settings.parkingFreeOnly
+                    ),
+                    charging = null
+                )
             }
             if (generation != calculationGeneration) return
             val result = attempt.getOrElse {
@@ -1379,6 +1387,9 @@ class MainActivity : ComponentActivity() {
         var showAddPlace by remember { mutableStateOf(false) }
         var calendarPlaceAssignmentRaw by remember { mutableStateOf<String?>(null) }
         var showAddExclusion by remember { mutableStateOf(false) }
+        var showParkingSettings by remember { mutableStateOf(false) }
+        var showChargingSettings by remember { mutableStateOf(false) }
+        var showFallbackSettings by remember { mutableStateOf(false) }
         var showFallbackPicker by remember { mutableStateOf(false) }
         var showTokenRotateConfirm by remember { mutableStateOf(false) }
         var backupPasswordMode by remember { mutableStateOf<String?>(null) }
@@ -1506,13 +1517,6 @@ class MainActivity : ComponentActivity() {
                 onChange(latestSettings.copy(valhallaBaseUrl = valhallaDraft))
             }
         }
-        LaunchedEffect(photonDraft) {
-            delay(600)
-            if (photonDraft != latestSettings.photonBaseUrl) {
-                onChange(latestSettings.copy(photonBaseUrl = photonDraft))
-            }
-        }
-
         Column(
             modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -1822,10 +1826,28 @@ class MainActivity : ComponentActivity() {
                     tr(settings.language, "Find parking near destination", "Parkplätze am Ziel suchen"),
                     settings.showParking
                 ) { onChange(settings.copy(showParking = it)) }
+                OutlinedButton(
+                    onClick = { showParkingSettings = true },
+                    enabled = settings.showParking,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Outlined.Tune, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(tr(settings.language, "Parking search settings", "Parkplatz-Sucheinstellungen"))
+                }
                 SettingSwitch(
                     tr(settings.language, "Find charging stations near destination", "Ladesäulen am Ziel suchen"),
                     settings.showChargingStations
                 ) { onChange(settings.copy(showChargingStations = it)) }
+                OutlinedButton(
+                    onClick = { showChargingSettings = true },
+                    enabled = settings.showChargingStations,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Outlined.Tune, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(tr(settings.language, "Charging-station search settings", "Ladesäulen-Sucheinstellungen"))
+                }
                 if (settings.showChargingStations && settings.showParking) {
                     Text(
                         tr(
@@ -1837,19 +1859,26 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.tertiary
                     )
                 }
-                if (settings.showChargingStations) {
+                if (showChargingSettings) {
+                    Dialog(onDismissRequest = { showChargingSettings = false }) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth()
+                        shape = MaterialTheme.shapes.extraLarge,
+                        tonalElevation = 6.dp,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 680.dp)
                     ) {
                         Column(
-                            Modifier.padding(12.dp),
+                            Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Text(
                                 tr(settings.language, "Charging-station search", "Ladesäulensuche"),
                                 fontWeight = FontWeight.SemiBold
+                            )
+                            NumberDraftField(
+                                initialValue = settings.chargingResultLimit,
+                                label = tr(settings.language, "Number of charging stations (1–50)", "Anzahl der Ladesäulen (1–50)"),
+                                onValid = { onChange(settings.copy(chargingResultLimit = it.coerceIn(1, 50))) }
                             )
                             Text(
                                 tr(
@@ -1991,7 +2020,12 @@ class MainActivity : ComponentActivity() {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Button(
+                                onClick = { showChargingSettings = false },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text(tr(settings.language, "Done", "Fertig")) }
                         }
+                    }
                     }
                 }
                 SettingSwitch(
@@ -2058,9 +2092,36 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(10.dp))
                 }
 
+                OutlinedButton(
+                    onClick = { showFallbackSettings = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Outlined.AltRoute, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (settings.fallbackProviderIds.isEmpty())
+                            tr(settings.language, "Configure fallback routing", "Fallback-Routing konfigurieren")
+                        else tr(
+                            settings.language,
+                            "Fallback routing (${settings.fallbackProviderIds.size})",
+                            "Fallback-Routing (${settings.fallbackProviderIds.size})"
+                        )
+                    )
+                }
+                if (showFallbackSettings) {
+                    Dialog(onDismissRequest = { showFallbackSettings = false }) {
+                    Surface(
+                        shape = MaterialTheme.shapes.extraLarge,
+                        tonalElevation = 6.dp,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)
+                    ) {
+                    Column(
+                        Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                 Text(
                     tr(settings.language, "Fallback routing", "Fallback-Routing"),
-                    style = MaterialTheme.typography.labelLarge
+                    style = MaterialTheme.typography.titleLarge
                 )
                 Text(
                     tr(
@@ -2115,6 +2176,13 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.width(8.dp))
                     Text(tr(settings.language, "Add fallback provider", "Fallback-Dienst hinzufügen"))
                 }
+                Button(onClick = { showFallbackSettings = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text(tr(settings.language, "Done", "Fertig"))
+                }
+                    }
+                    }
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
 
                 ProviderKeyAndEndpoints(
@@ -2129,10 +2197,11 @@ class MainActivity : ComponentActivity() {
                     onOsrmDraft = { osrmDraft = it },
                     onValhallaDraft = { valhallaDraft = it },
                     onPhotonDraft = { photonDraft = it },
-                    onOverpassConfig = { endpoints, split ->
+                    onNetworkDataConfig = { photon, endpoints, split ->
                         val sanitized = OsmEnrichmentClient.normalizeConfiguredEndpoints(endpoints)
                         onChange(
                             settings.copy(
+                                photonBaseUrl = photon,
                                 overpassBaseUrl = sanitized.first(),
                                 overpassEndpoints = sanitized,
                                 overpassSplitRequests = split
@@ -2685,6 +2754,63 @@ class MainActivity : ComponentActivity() {
                 }
             )
         }
+        if (showParkingSettings) {
+            AlertDialog(
+                onDismissRequest = { showParkingSettings = false },
+                title = { Text(tr(settings.language, "Parking search", "Parkplatzsuche")) },
+                text = {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        NumberDraftField(
+                            initialValue = settings.parkingResultLimit,
+                            label = tr(settings.language, "Number of parking spaces (1–50)", "Anzahl der Parkplätze (1–50)"),
+                            onValid = { onChange(settings.copy(parkingResultLimit = it.coerceIn(1, 50))) }
+                        )
+                        Text(
+                            tr(settings.language, "Maximum straight-line distance from destination", "Maximale Luftlinien-Entfernung vom Ziel"),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(250, 500, 750, 1000, 1500, 2000, 3000).forEach { meters ->
+                                FilterChip(
+                                    selected = settings.parkingMaxDistanceMeters == meters,
+                                    onClick = { onChange(settings.copy(parkingMaxDistanceMeters = meters)) },
+                                    label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
+                                )
+                            }
+                        }
+                        NumberDraftField(
+                            initialValue = settings.parkingMaxDistanceMeters,
+                            label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
+                            onValid = { onChange(settings.copy(parkingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
+                        )
+                        SettingSwitch(
+                            tr(settings.language, "Only explicitly free parking", "Nur eindeutig kostenlose Parkplätze"),
+                            settings.parkingFreeOnly
+                        ) { onChange(settings.copy(parkingFreeOnly = it)) }
+                        Text(
+                            tr(
+                                settings.language,
+                                "If enabled, parking without clear fee information is hidden.",
+                                "Wenn aktiviert, werden Parkplätze ohne eindeutige Gebührenangabe ausgeblendet."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showParkingSettings = false }) {
+                        Text(tr(settings.language, "Done", "Fertig"))
+                    }
+                }
+            )
+        }
         if (showFallbackPicker) {
             FallbackProviderPicker(
                 settings = settings,
@@ -3096,7 +3222,7 @@ class MainActivity : ComponentActivity() {
         onOsrmDraft: (String) -> Unit,
         onValhallaDraft: (String) -> Unit,
         onPhotonDraft: (String) -> Unit,
-        onOverpassConfig: (List<String>, Boolean) -> Unit,
+        onNetworkDataConfig: (String, List<String>, Boolean) -> Unit,
         onOpenUrl: (String) -> Unit
     ) {
         val context = LocalContext.current
@@ -3202,14 +3328,12 @@ class MainActivity : ComponentActivity() {
         }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = photonDraft,
-                onValueChange = onPhotonDraft,
-                label = { Text("Photon HTTPS endpoint") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
+            Text(
+                tr(settings.language, "Endpoint settings are grouped with Overpass below.", "Endpunkt-Einstellungen sind unten mit Overpass zusammengefasst."),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
             )
-            Spacer(Modifier.width(8.dp))
             ProviderTestButton(
                 state = photonStatus,
                 testing = testingId == ProviderConnectivityChecker.PHOTON_ID,
@@ -3245,13 +3369,14 @@ class MainActivity : ComponentActivity() {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = {
+                onPhotonDraft(settings.photonBaseUrl)
                 overpassEndpointDrafts = settings.overpassEndpoints.ifEmpty { listOf(settings.overpassBaseUrl) }
                 splitOverpassDraft = settings.overpassSplitRequests
                 showOverpassConfig = true
             }, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Outlined.Tune, null)
                 Spacer(Modifier.width(8.dp))
-                Text(tr(settings.language, "Configure Overpass", "Overpass konfigurieren"))
+                Text(tr(settings.language, "Configure Photon & Overpass", "Photon & Overpass konfigurieren"))
             }
             Spacer(Modifier.width(8.dp))
             ProviderTestButton(
@@ -3428,13 +3553,35 @@ class MainActivity : ComponentActivity() {
         }
         if (showOverpassConfig) {
             AlertDialog(
-                onDismissRequest = { showOverpassConfig = false },
-                title = { Text(tr(settings.language, "Overpass settings", "Overpass-Einstellungen")) },
+                onDismissRequest = {
+                    onPhotonDraft(settings.photonBaseUrl)
+                    showOverpassConfig = false
+                },
+                title = { Text(tr(settings.language, "Photon & Overpass", "Photon & Overpass")) },
                 text = {
                     Column(
                         Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        Text("Photon", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(
+                            value = photonDraft,
+                            onValueChange = onPhotonDraft,
+                            label = { Text("Photon HTTPS endpoint") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Text(
+                            tr(
+                                settings.language,
+                                "Photon is used for address search and is independent from the routing provider.",
+                                "Photon wird für die Adresssuche verwendet und ist vom Routingdienst unabhängig."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HorizontalDivider()
+                        Text("Overpass", style = MaterialTheme.typography.titleMedium)
                         Text(
                             tr(
                                 settings.language,
@@ -3490,6 +3637,36 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.width(8.dp))
                             Text(tr(settings.language, "Add endpoint", "Endpunkt hinzufügen"))
                         }
+                        Text(
+                            tr(settings.language, "Additional presets (API key required)", "Weitere Voreinstellungen (API-Key erforderlich)"),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        listOf(
+                            "Geofabrik" to "https://overpass.geofabrik.de/YOUR_API_KEY/api/interpreter",
+                            "FairwayMapper" to "https://api.fairwaymapper.com/k/YOUR_API_KEY/api/interpreter",
+                            "Tracestrack" to "https://api.tracestrack.com/overpass/YOUR_API_KEY/interpreter",
+                            "Overspan" to "https://api.overspan.dev/YOUR_API_KEY/api/interpreter",
+                            "NextGIS" to "https://overpass.nextgis.com/YOUR_API_KEY/api/interpreter"
+                        ).forEach { (name, endpoint) ->
+                            TextButton(
+                                enabled = overpassEndpointDrafts.size < 8 && endpoint !in overpassEndpointDrafts,
+                                onClick = { overpassEndpointDrafts = overpassEndpointDrafts + endpoint },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Outlined.AddLink, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(name, modifier = Modifier.weight(1f))
+                            }
+                        }
+                        Text(
+                            tr(
+                                settings.language,
+                                "Replace YOUR_API_KEY before saving. The three keyless global public instances are already included by default.",
+                                "Ersetze YOUR_API_KEY vor dem Speichern. Die drei schlüssellosen globalen öffentlichen Instanzen sind bereits standardmäßig enthalten."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         SettingSwitch(
                             tr(settings.language, "Split POI requests across endpoints", "POI-Anfragen auf Endpunkte verteilen"),
                             splitOverpassDraft
@@ -3511,12 +3688,19 @@ class MainActivity : ComponentActivity() {
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        onOverpassConfig(overpassEndpointDrafts, splitOverpassDraft)
+                        onNetworkDataConfig(photonDraft, overpassEndpointDrafts, splitOverpassDraft)
                         showOverpassConfig = false
-                    }) { Text(tr(settings.language, "Save", "Speichern")) }
+                    }, enabled = photonDraft.trim().startsWith("https://") &&
+                        overpassEndpointDrafts.any { it.trim().startsWith("https://") } &&
+                        overpassEndpointDrafts.none { "YOUR_API_KEY" in it }) {
+                        Text(tr(settings.language, "Save", "Speichern"))
+                    }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showOverpassConfig = false }) {
+                    TextButton(onClick = {
+                        onPhotonDraft(settings.photonBaseUrl)
+                        showOverpassConfig = false
+                    }) {
                         Text(tr(settings.language, "Cancel", "Abbrechen"))
                     }
                 }

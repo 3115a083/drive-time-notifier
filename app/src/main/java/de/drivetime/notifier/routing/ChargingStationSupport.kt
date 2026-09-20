@@ -13,6 +13,7 @@ import kotlin.math.sqrt
 
 data class ChargingSearchOptions(
     val connectors: Set<ChargingConnectorPreference>,
+    val resultLimit: Int,
     val maxDistanceMeters: Int,
     val speedPreference: ChargingSpeedPreference,
     val preferredOperator: String,
@@ -33,6 +34,7 @@ data class ChargingSearchOptions(
                 }
             return ChargingSearchOptions(
                 connectors = selected,
+                resultLimit = settings.chargingResultLimit.coerceIn(1, 50),
                 maxDistanceMeters = settings.chargingMaxDistanceMeters.coerceIn(100, 10_000),
                 speedPreference = settings.chargingSpeedPreference,
                 preferredOperator = settings.chargingPreferredOperator.trim(),
@@ -96,7 +98,7 @@ internal object ChargingStationSelector {
                     .thenBy { station -> parkingPenalty(station) }
                     .thenBy { station -> station.distanceFromDestinationMeters ?: Int.MAX_VALUE }
             )
-            .take(5)
+            .take(options.resultLimit)
             .toList()
     }
 

@@ -5,6 +5,7 @@ import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -39,7 +40,7 @@ class GraphHopperProviderService(
             .addQueryParameter("key", apiKey)
             .build()
         client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("GraphHopper: HTTP ${response.code}")
             val paths = JSONObject(body).optJSONArray("paths")
             if (paths == null || paths.length() == 0) error("GraphHopper returned no route.")
@@ -80,7 +81,7 @@ class GraphHopperProviderService(
             .addQueryParameter("key", apiKey)
             .build()
         client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("GraphHopper Geocoding: HTTP ${response.code}")
             val hits = JSONObject(body).optJSONArray("hits") ?: return emptyList()
             return buildList {

@@ -1,6 +1,7 @@
 package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.model.AddressSuggestion
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -66,7 +67,7 @@ class PhotonSearchService(
 
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return emptyList()
-            val features = JSONObject(response.body?.string().orEmpty()).optJSONArray("features") ?: return emptyList()
+            val features = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("features") ?: return emptyList()
             return buildList {
                 for (i in 0 until features.length()) {
                     val feature = features.getJSONObject(i)

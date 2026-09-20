@@ -127,7 +127,11 @@ object PasswordBackup {
         put("autoMinute", s.autoMinute)
         put("outputIcs", s.outputIcs)
         put("showParking", s.showParking)
+        put("parkingResultLimit", s.parkingResultLimit)
+        put("parkingMaxDistanceMeters", s.parkingMaxDistanceMeters)
+        put("parkingFreeOnly", s.parkingFreeOnly)
         put("showChargingStations", s.showChargingStations)
+        put("chargingResultLimit", s.chargingResultLimit)
         put("chargingConnector", s.chargingConnector.id)
         put("chargingConnectors", JSONArray(s.chargingConnectors.map { it.id }))
         put("chargingMaxDistanceMeters", s.chargingMaxDistanceMeters)
@@ -195,7 +199,11 @@ object PasswordBackup {
             autoMinute = j.optInt("autoMinute", defaults.autoMinute),
             outputIcs = j.optBoolean("outputIcs", defaults.outputIcs),
             showParking = j.optBoolean("showParking", defaults.showParking),
+            parkingResultLimit = j.optInt("parkingResultLimit", defaults.parkingResultLimit).coerceIn(1, 50),
+            parkingMaxDistanceMeters = j.optInt("parkingMaxDistanceMeters", defaults.parkingMaxDistanceMeters).coerceIn(100, 10_000),
+            parkingFreeOnly = j.optBoolean("parkingFreeOnly", defaults.parkingFreeOnly),
             showChargingStations = j.optBoolean("showChargingStations", defaults.showChargingStations),
+            chargingResultLimit = j.optInt("chargingResultLimit", defaults.chargingResultLimit).coerceIn(1, 50),
             chargingConnector = ChargingConnectorPreference.fromId(j.optString("chargingConnector", defaults.chargingConnector.id)),
             chargingConnectors = if (j.has("chargingConnectors")) {
                 j.stringList("chargingConnectors")

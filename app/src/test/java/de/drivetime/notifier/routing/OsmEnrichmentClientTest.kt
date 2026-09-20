@@ -10,6 +10,7 @@ class OsmEnrichmentClientTest {
     fun prioritizesChargingThenParking() {
         val options = ChargingSearchOptions(
             connectors = emptySet(),
+            resultLimit = 5,
             maxDistanceMeters = 2_500,
             speedPreference = de.drivetime.notifier.data.ChargingSpeedPreference.ANY,
             preferredOperator = "",
@@ -19,7 +20,7 @@ class OsmEnrichmentClientTest {
 
         val queries = OsmEnrichmentClient().prioritizedQueries(
             points = listOf(GeoPoint(52.50, 13.40), GeoPoint(52.51, 13.41)),
-            parking = true,
+            parking = ParkingSearchOptions(),
             charging = options
         )
 
@@ -38,7 +39,7 @@ class OsmEnrichmentClientTest {
     fun omitsDisabledPoiTypes() {
         val queries = OsmEnrichmentClient().prioritizedQueries(
             points = listOf(GeoPoint(52.50, 13.40), GeoPoint(52.51, 13.41)),
-            parking = true,
+            parking = ParkingSearchOptions(),
             charging = null
         )
 

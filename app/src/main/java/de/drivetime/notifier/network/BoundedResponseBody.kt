@@ -20,3 +20,7 @@ internal fun ResponseBody.readBytesLimited(maxBytes: Long): ByteArray {
     check(buffer.size <= maxBytes) { "Response too large" }
     return buffer.readByteArray()
 }
+
+/** Prevents an endpoint from exhausting app memory with an unexpectedly large text response. */
+internal fun ResponseBody.readStringLimited(maxBytes: Long = 4L * 1024L * 1024L): String =
+    String(readBytesLimited(maxBytes), Charsets.UTF_8)

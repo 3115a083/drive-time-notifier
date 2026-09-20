@@ -2,6 +2,7 @@ package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -38,7 +39,7 @@ class OsrmRoutingService(
 
         val http = Request.Builder().url(url).header("User-Agent", userAgent).get().build()
         client.newCall(http).execute().use { response ->
-            val text = response.body?.string().orEmpty()
+            val text = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("OSRM: HTTP ${response.code}")
             val root = JSONObject(text)
             if (root.optString("code") != "Ok") error("OSRM konnte keine Route berechnen.")
@@ -70,7 +71,7 @@ class OsrmRoutingService(
             .get()
             .build()
         client.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("Nominatim: HTTP ${response.code}")
             val results = JSONArray(body)
             if (results.length() == 0) error("Adresse nicht gefunden: $address")

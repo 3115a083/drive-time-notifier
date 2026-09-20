@@ -3,6 +3,7 @@ package de.drivetime.notifier.routing
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
 import de.drivetime.notifier.network.readBytesLimited
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -65,7 +66,7 @@ class BNetzAChargingClient(
             )
                 .execute().use { response ->
                 if (!response.isSuccessful) {
-                    val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(1_200)
+                    val detail = response.body?.readStringLimited(65_536L).orEmpty().replace(Regex("\\s+"), " ").take(1_200)
                     RequestDebugLog.add("Bundesnetzagentur", "charging register", elapsedMillis(started), "HTTP ${response.code}", detail)
                     error("Bundesnetzagentur HTTP ${response.code}")
                 }

@@ -5,6 +5,7 @@ import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -41,7 +42,7 @@ class OsrmPhotonProviderService(
             .addQueryParameter("steps", "false")
             .build()
         client.newCall(Request.Builder().url(url).header("User-Agent", userAgent).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("OSRM: HTTP ${response.code}")
             val root = JSONObject(body)
             if (root.optString("code") != "Ok") error("OSRM could not calculate a route.")
@@ -82,7 +83,7 @@ class OsrmPhotonProviderService(
             .addQueryParameter("lang", language)
             .build()
         client.newCall(Request.Builder().url(url).header("User-Agent", userAgent).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("Photon: HTTP ${response.code}")
             val features = JSONObject(body).optJSONArray("features") ?: return emptyList()
             return buildList {

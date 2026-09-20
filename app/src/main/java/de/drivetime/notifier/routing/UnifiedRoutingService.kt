@@ -5,6 +5,7 @@ import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
+import de.drivetime.notifier.network.readStringLimited
 import de.drivetime.notifier.security.SecureApiKeyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -97,7 +98,7 @@ class UnifiedRoutingService(
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
         return client.newCall(request).execute().use { response ->
-            val text = response.body?.string().orEmpty()
+            val text = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("Valhalla: HTTP ${response.code}")
             val trip = JSONObject(text).getJSONObject("trip")
             val summary = trip.getJSONObject("summary")
@@ -136,7 +137,7 @@ class UnifiedRoutingService(
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
         return client.newCall(request).execute().use { response ->
-            val text = response.body?.string().orEmpty()
+            val text = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("openrouteservice: HTTP ${response.code}")
             val feature = JSONObject(text).getJSONArray("features").getJSONObject(0)
             val summary = feature.getJSONObject("properties").getJSONObject("summary")
@@ -167,7 +168,7 @@ class UnifiedRoutingService(
             .addQueryParameter("geometries", "polyline")
             .build()
         return client.newCall(Request.Builder().url(url).header("User-Agent", context.packageName).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("OSRM: HTTP ${response.code}")
             val root = JSONObject(body)
             if (root.optString("code") != "Ok") error("OSRM could not calculate a route.")
@@ -197,7 +198,7 @@ class UnifiedRoutingService(
             .addQueryParameter("key", key)
             .build()
         return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("GraphHopper: HTTP ${response.code}")
             val route = JSONObject(body).getJSONArray("paths").getJSONObject(0)
             val duration = route.getLong("time") / 1000L
@@ -234,7 +235,7 @@ class UnifiedRoutingService(
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             return client.newCall(request).execute().use { response ->
-                val text = response.body?.string().orEmpty()
+                val text = response.body?.readStringLimited().orEmpty()
                 if (!response.isSuccessful) error("Google Routes: HTTP ${response.code}")
                 val route = JSONObject(text).getJSONArray("routes").getJSONObject(0)
                 val duration = seconds(route.getString("duration"))
@@ -267,7 +268,7 @@ class UnifiedRoutingService(
             .addQueryParameter("apiKey", key)
             .build()
         return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("HERE Routing: HTTP ${response.code}")
             val sections = JSONObject(body).getJSONArray("routes").getJSONObject(0).getJSONArray("sections")
             var duration = 0L
@@ -308,7 +309,7 @@ class UnifiedRoutingService(
             .addQueryParameter("routeRepresentation", "polyline")
             .build()
         return client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("TomTom Routing: HTTP ${response.code}")
             val route = JSONObject(body).getJSONArray("routes").getJSONObject(0)
             val summary = route.getJSONObject("summary")

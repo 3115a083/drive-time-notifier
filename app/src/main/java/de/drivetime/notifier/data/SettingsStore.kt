@@ -175,7 +175,11 @@ data class AppSettings(
     val autoMinute: Int = 0,
     val outputIcs: Boolean = false,
     val showParking: Boolean = false,
+    val parkingResultLimit: Int = 10,
+    val parkingMaxDistanceMeters: Int = 1_500,
+    val parkingFreeOnly: Boolean = false,
     val showChargingStations: Boolean = false,
+    val chargingResultLimit: Int = 5,
     val chargingConnector: ChargingConnectorPreference = ChargingConnectorPreference.ANY,
     val chargingConnectors: Set<ChargingConnectorPreference> = emptySet(),
     val chargingMaxDistanceMeters: Int = 1_500,
@@ -224,7 +228,11 @@ class SettingsStore(private val context: Context) {
         val MINUTE = intPreferencesKey("auto_minute")
         val ICS = booleanPreferencesKey("output_ics")
         val PARKING = booleanPreferencesKey("show_parking")
+        val PARKING_RESULT_LIMIT = intPreferencesKey("parking_result_limit")
+        val PARKING_MAX_DISTANCE = intPreferencesKey("parking_max_distance_meters")
+        val PARKING_FREE_ONLY = booleanPreferencesKey("parking_free_only")
         val CHARGING = booleanPreferencesKey("show_charging_stations")
+        val CHARGING_RESULT_LIMIT = intPreferencesKey("charging_result_limit")
         val CHARGING_CONNECTOR = stringPreferencesKey("charging_connector")
         val CHARGING_CONNECTORS = stringSetPreferencesKey("charging_connectors")
         val CHARGING_MAX_DISTANCE = intPreferencesKey("charging_max_distance_meters")
@@ -303,7 +311,11 @@ class SettingsStore(private val context: Context) {
             autoMinute = p[K.MINUTE] ?: 0,
             outputIcs = p[K.ICS] ?: false,
             showParking = p[K.PARKING] ?: false,
+            parkingResultLimit = (p[K.PARKING_RESULT_LIMIT] ?: 10).coerceIn(1, 50),
+            parkingMaxDistanceMeters = (p[K.PARKING_MAX_DISTANCE] ?: 1_500).coerceIn(100, 10_000),
+            parkingFreeOnly = p[K.PARKING_FREE_ONLY] ?: false,
             showChargingStations = p[K.CHARGING] ?: false,
+            chargingResultLimit = (p[K.CHARGING_RESULT_LIMIT] ?: 5).coerceIn(1, 50),
             chargingConnector = ChargingConnectorPreference.fromId(p[K.CHARGING_CONNECTOR]),
             chargingConnectors = p[K.CHARGING_CONNECTORS]
                 ?.map { ChargingConnectorPreference.fromId(it) }
@@ -376,7 +388,11 @@ class SettingsStore(private val context: Context) {
         p[K.MINUTE] = s.autoMinute.coerceIn(0, 59)
         p[K.ICS] = s.outputIcs
         p[K.PARKING] = s.showParking
+        p[K.PARKING_RESULT_LIMIT] = s.parkingResultLimit.coerceIn(1, 50)
+        p[K.PARKING_MAX_DISTANCE] = s.parkingMaxDistanceMeters.coerceIn(100, 10_000)
+        p[K.PARKING_FREE_ONLY] = s.parkingFreeOnly
         p[K.CHARGING] = s.showChargingStations
+        p[K.CHARGING_RESULT_LIMIT] = s.chargingResultLimit.coerceIn(1, 50)
         p[K.CHARGING_CONNECTOR] = s.chargingConnectors.firstOrNull()?.id ?: ChargingConnectorPreference.ANY.id
         p[K.CHARGING_CONNECTORS] = s.chargingConnectors.filterNot { it == ChargingConnectorPreference.ANY }.map { it.id }.toSet()
         p[K.CHARGING_MAX_DISTANCE] = s.chargingMaxDistanceMeters.coerceIn(100, 10_000)

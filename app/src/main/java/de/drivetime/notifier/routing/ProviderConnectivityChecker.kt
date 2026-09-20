@@ -5,6 +5,7 @@ import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.debug.RequestDebugLog
 import de.drivetime.notifier.network.readBytesLimited
+import de.drivetime.notifier.network.readStringLimited
 import de.drivetime.notifier.security.SecureApiKeyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -265,7 +266,7 @@ class ProviderConnectivityChecker(
     private fun execute(request: Request, label: String, timeoutSeconds: Int = 12) {
         client(timeoutSeconds).newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(120)
+                val detail = response.body?.readStringLimited(65_536L).orEmpty().replace(Regex("\\s+"), " ").take(120)
                 error("$label: HTTP ${response.code}${if (detail.isBlank()) "" else " · $detail"}")
             }
         }

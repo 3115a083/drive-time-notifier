@@ -3,6 +3,7 @@ package de.drivetime.notifier.routing
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
 import de.drivetime.notifier.network.readBytesLimited
+import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
@@ -46,6 +47,12 @@ data class OsmEnrichmentResult(
     val registryUnavailable: Boolean = false
 )
 
+data class ParkingSearchOptions(
+    val resultLimit: Int = 10,
+    val maxDistanceMeters: Int = 1_500,
+    val freeOnly: Boolean = false
+)
+
 private data class OverpassBatch(
     val elements: List<JSONObject>,
     val available: Boolean
@@ -82,10 +89,10 @@ class OsmEnrichmentClient(
 
     suspend fun query(
         points: List<GeoPoint>,
-        parking: Boolean,
+        parking: ParkingSearchOptions? = null,
         charging: ChargingSearchOptions? = null
     ): OsmEnrichmentResult = withContext(Dispatchers.IO) {
-        if (points.isEmpty() || (!parking && charging == null)) {
+        if (points.isEmpty() || (parking == null && charging == null)) {
             return@withContext OsmEnrichmentResult(emptyList(), unavailable = false)
         }
         val destination = points.last()
@@ -108,13 +115,17 @@ class OsmEnrichmentClient(
                 val point = GeoPoint(lat, lon)
                 when {
                     tags.optString("amenity") == "parking" -> {
+                        val distance = haversineMeters(point, destination).roundToInt()
+                        if (parking == null || distance > parking.maxDistanceMeters) continue
+                        val fee = clean(tags.optString("fee"))
+                        if (parking.freeOnly && !isExplicitlyFree(fee)) continue
                         add(RoutePoi(
                             point = point,
                             kind = RoutePoi.Kind.PARKING,
                             name = clean(tags.optString("name")) ?: "Parking",
-                            distanceFromDestinationMeters = haversineMeters(point, destination).roundToInt(),
+                            distanceFromDestinationMeters = distance,
                             access = clean(tags.optString("access")),
-                            fee = clean(tags.optString("fee")),
+                            fee = fee,
                             openingHours = clean(tags.optString("opening_hours")),
                             maxStay = clean(tags.optString("maxstay")) ?: clean(tags.optString("parking:maxstay")),
                             capacity = firstInt(tags, "capacity", "capacity:car"),
@@ -160,7 +171,7 @@ class OsmEnrichmentClient(
         val parkingOut = osmResults.filter { it.kind == RoutePoi.Kind.PARKING }
             .distinctBy(::key)
             .sortedBy { it.distanceFromDestinationMeters ?: Int.MAX_VALUE }
-            .take(30)
+            .take(parking?.resultLimit?.coerceIn(1, 50) ?: 0)
         val chargingOut = if (charging != null) {
             val osmCharging = osmResults.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
                 .distinctBy(::key)
@@ -177,20 +188,24 @@ class OsmEnrichmentClient(
 
     internal fun prioritizedQueries(
         points: List<GeoPoint>,
-        parking: Boolean,
+        parking: ParkingSearchOptions?,
         charging: ChargingSearchOptions?
     ): List<PrioritizedOsmQuery> = buildList {
         charging?.let {
-            add(PrioritizedOsmQuery(OsmQueryKind.CHARGING, wrapQuery(chargingQuery(points.last(), it.maxDistanceMeters), 200)))
+            val limit = (it.resultLimit.coerceIn(1, 50) * 8).coerceIn(40, 200)
+            add(PrioritizedOsmQuery(OsmQueryKind.CHARGING, wrapQuery(chargingQuery(points.last(), it.maxDistanceMeters), limit)))
         }
-        if (parking) add(PrioritizedOsmQuery(OsmQueryKind.PARKING, wrapQuery(parkingQuery(points.last()), 100)))
+        parking?.let {
+            val limit = (it.resultLimit.coerceIn(1, 50) * if (it.freeOnly) 8 else 4).coerceIn(30, 200)
+            add(PrioritizedOsmQuery(OsmQueryKind.PARKING, wrapQuery(parkingQuery(points.last(), it.maxDistanceMeters), limit)))
+        }
     }
 
     private fun wrapQuery(body: String, limit: Int) =
         "[out:json][timeout:7][maxsize:8388608];($body);out center $limit;"
 
-    private fun parkingQuery(destination: GeoPoint): String {
-        val box = boundingBox(destination, 1_400)
+    private fun parkingQuery(destination: GeoPoint, requestedRadius: Int): String {
+        val box = boundingBox(destination, requestedRadius.coerceIn(100, 10_000))
         return "node($box)[\"amenity\"=\"parking\"];" +
             "way($box)[\"amenity\"=\"parking\"];"
     }
@@ -250,7 +265,7 @@ class OsmEnrichmentClient(
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         rateLimited = response.code == 429
-                        val detail = response.body?.string().orEmpty().replace(Regex("\\s+"), " ").take(1_200)
+                        val detail = response.body?.readStringLimited(65_536L).orEmpty().replace(Regex("\\s+"), " ").take(1_200)
                         error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
                     }
                     val body = response.body ?: error("Overpass returned no body")
@@ -297,6 +312,9 @@ class OsmEnrichmentClient(
     private fun isCharging(tags: JSONObject): Boolean =
         tags.optString("amenity") == "charging_station" ||
             (tags.optString("amenity") == "fuel" && tags.optString("fuel:electricity").equals("yes", true))
+
+    private fun isExplicitlyFree(raw: String?): Boolean = raw?.trim()?.lowercase() in
+        setOf("no", "free", "0", "none", "nein", "kostenlos")
 
     private fun isUsablePublicAccess(access: String?): Boolean {
         // "customers" remains usable for public fuel/retail charging. Truly private,

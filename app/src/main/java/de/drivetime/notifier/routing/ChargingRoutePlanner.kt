@@ -44,7 +44,13 @@ object ChargingRoutePlanner {
                     settings.overpassSplitRequests
                 ).query(
                     initialPoints,
-                    settings.showParking,
+                    settings.takeIf { it.showParking }?.let {
+                        ParkingSearchOptions(
+                            resultLimit = it.parkingResultLimit,
+                            maxDistanceMeters = it.parkingMaxDistanceMeters,
+                            freeOnly = it.parkingFreeOnly
+                        )
+                    },
                     ChargingSearchOptions.from(settings)
                 )
             }.getOrElse { OsmEnrichmentResult(emptyList(), unavailable = true) }
