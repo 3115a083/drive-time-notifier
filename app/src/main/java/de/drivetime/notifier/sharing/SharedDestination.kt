@@ -20,7 +20,7 @@ object SharedDestination {
             .find(text)?.value
         if (link == null) return text.takeIf { it.length <= 2048 && !it.contains("://") && !it.contains('\u0000') }
         val uri = runCatching { URI(link) }.getOrNull() ?: return null
-        val query = uri.rawQuery ?: uri.rawSchemeSpecificPart.substringAfter('?', "")
+        val query = uri.rawQuery ?: if (uri.scheme.equals("google.navigation", true)) uri.rawSchemeSpecificPart else uri.rawSchemeSpecificPart.substringAfter('?', "")
         val params = query.split('&').mapNotNull {
             val key = it.substringBefore('=')
             val value = runCatching { URLDecoder.decode(it.substringAfter('=', ""), "UTF-8") }.getOrNull()
@@ -47,7 +47,7 @@ object SharedDestination {
             if (parts?.size == 3) return "${parts[1]},${parts[2]}".takeIf { coordinates(it) != null }
         }
         valid(params["ll"])?.let { if (coordinates(it) != null) return it }
-        val path = URLDecoder.decode(uri.rawPath.orEmpty(), "UTF-8")
+        val path = runCatching { URLDecoder.decode(uri.rawPath.orEmpty(), "UTF-8") }.getOrNull() ?: return null
         Regex("!3d(-?[0-9.]+)!4d(-?[0-9.]+)").find(path)?.let {
             val point = "${it.groupValues[1]},${it.groupValues[2]}"
             if (coordinates(point) != null) return point

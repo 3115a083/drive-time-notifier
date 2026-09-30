@@ -27,7 +27,18 @@ jobs:
           gradle-version: "9.6.0"
 
       - name: Clean, test, lint and build
-        run: gradle clean test lint assembleDebug assembleRelease --stacktrace
+        run: gradle clean dependencyInventory test lint assembleDebug assembleRelease --stacktrace
+
+      - name: Upload dependency inventory and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-reports
+          path: |
+            app/build/reports/dependency-inventory.tsv
+            app/build/reports/tests/
+            app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
 
       - name: Upload debug APK
         if: success()

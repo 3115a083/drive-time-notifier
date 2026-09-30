@@ -15,6 +15,8 @@ class PhotonSearchService(
     private val baseUrl: String,
     private val userAgent: String,
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(7, TimeUnit.SECONDS)
         .callTimeout(8, TimeUnit.SECONDS)

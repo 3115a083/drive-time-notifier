@@ -22,6 +22,8 @@ class OsrmPhotonProviderService(
     private val dailyCap: Int,
     private val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(9, TimeUnit.SECONDS)
         .callTimeout(12, TimeUnit.SECONDS)

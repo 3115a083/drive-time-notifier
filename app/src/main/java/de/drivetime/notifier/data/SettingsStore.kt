@@ -453,13 +453,11 @@ class SettingsStore(private val context: Context) {
     private fun sanitizeTimeout(value: Int) = value.coerceIn(1, 300)
 
     private fun sanitizeHttpsBaseUrl(value: String, fallback: String): String {
-        val clean = value.trim().removeSuffix("/")
-        return if (clean.startsWith("https://") && clean.length <= 240) clean else fallback
+        return de.drivetime.notifier.network.HttpsEndpoint.normalize(value) ?: fallback
     }
 
     private fun sanitizeHttpsEndpointList(values: List<String>): List<String> = values
-        .map { it.trim().removeSuffix("/") }
-        .filter { it.startsWith("https://") && it.length <= 240 }
+        .mapNotNull(de.drivetime.notifier.network.HttpsEndpoint::normalize)
         .distinct()
         .take(8)
         .ifEmpty { listOf("https://overpass-api.de/api/interpreter") }

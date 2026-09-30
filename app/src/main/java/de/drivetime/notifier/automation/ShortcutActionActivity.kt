@@ -7,9 +7,8 @@ import de.drivetime.notifier.MainActivity
 class ShortcutActionActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        when (intent?.action) {
-            AutomationReceiver.ACTION_PROCESS_NEXT_DAY -> AutomationScheduler.runNow(this)
-            MainActivity.ACTION_NEXT_DRIVE -> AutomationScheduler.runNextDriveNow(this)
+        if (intent?.action == AutomationReceiver.ACTION_PROCESS_NEXT_DAY || intent?.action == MainActivity.ACTION_NEXT_DRIVE) {
+            startActivity(android.content.Intent(this, MainActivity::class.java).setAction(intent.action))
         }
         finish()
     }

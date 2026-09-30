@@ -98,17 +98,22 @@ private enum class ParkingFeeStatus { FREE, PAID, UNKNOWN }
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        when (intent.action) {
-            AutomationReceiver.ACTION_PROCESS_NEXT_DAY -> {
-                AutomationScheduler.runNow(this)
-                finish()
-                return
-            }
-            ACTION_NEXT_DRIVE -> {
-                AutomationScheduler.runNextDriveNow(this)
-                finish()
-                return
-            }
+        if (intent.action == AutomationReceiver.ACTION_PROCESS_NEXT_DAY || intent.action == ACTION_NEXT_DRIVE) {
+            // Exported activities cannot authenticate an external caller. Require a user gesture
+            // before launching work which can write calendar entries or consume API quota.
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Drive Time Notifier")
+                .setMessage(if (java.util.Locale.getDefault().language == "de")
+                    "Kalender-Fahrten jetzt verarbeiten?" else "Process calendar drives now?")
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    if (intent.action == ACTION_NEXT_DRIVE) AutomationScheduler.runNextDriveNow(this)
+                    else AutomationScheduler.runNow(this)
+                    finish()
+                }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
+                .setOnCancelListener { finish() }
+                .show()
+            return
         }
         enableEdgeToEdge()
         Configuration.getInstance().userAgentValue = packageName
@@ -2351,7 +2356,7 @@ class MainActivity : ComponentActivity() {
             if (settings.networkDebugVisible) {
                 val debugText = buildString {
                     appendLine("Version: ${BuildConfig.VERSION_NAME}")
-                    appendLine("Overpass endpoints: ${settings.overpassEndpoints.joinToString(" -> ")}")
+                    appendLine("Overpass endpoints: ${settings.overpassEndpoints.joinToString(" -> ") { RequestDebugLog.redact(it) }}")
                     appendLine("Overpass split requests: ${settings.overpassSplitRequests}")
                     appendLine("Charging: ${settings.showChargingStations}, parking: ${settings.showParking}")
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")

@@ -21,6 +21,8 @@ class HereProviderService(
     private val dailyCap: Int,
     private val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(16, TimeUnit.SECONDS)

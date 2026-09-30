@@ -93,3 +93,16 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+// Inventory the actual resolved runtime graph, including transitive Maven dependencies.
+tasks.register("dependencyInventory") {
+    doLast {
+        val entries = configurations.getByName("debugRuntimeClasspath")
+            .resolvedConfiguration.resolvedArtifacts
+            .map { "${it.moduleVersion.id.group}:${it.moduleVersion.id.name}\t${it.moduleVersion.id.version}" }
+            .distinct().sorted()
+        val output = layout.buildDirectory.file("reports/dependency-inventory.tsv").get().asFile
+        output.parentFile.mkdirs()
+        output.writeText(entries.joinToString("\n", postfix = "\n"))
+    }
+}

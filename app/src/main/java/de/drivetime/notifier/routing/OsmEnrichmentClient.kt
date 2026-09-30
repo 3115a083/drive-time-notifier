@@ -399,15 +399,13 @@ class OsmEnrichmentClient(
             "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
         )
         internal fun endpointOrder(preferredEndpoint: String): List<String> {
-            val preferred = preferredEndpoint.trim().removeSuffix("/")
-                .takeIf { it.startsWith("https://") && it.length <= 240 }
+            val preferred = de.drivetime.notifier.network.HttpsEndpoint.normalize(preferredEndpoint)
                 ?: DEFAULT_OVERPASS_ENDPOINT
             return (listOf(preferred, DEFAULT_OVERPASS_ENDPOINT) + FALLBACK_OVERPASS_ENDPOINTS).distinct()
         }
 
         internal fun normalizeConfiguredEndpoints(endpoints: List<String>): List<String> = endpoints
-            .map { it.trim().removeSuffix("/") }
-            .filter { it.startsWith("https://") && it.length <= 240 }
+            .mapNotNull(de.drivetime.notifier.network.HttpsEndpoint::normalize)
             .distinct()
             .take(8)
             .ifEmpty { listOf(DEFAULT_OVERPASS_ENDPOINT) }

@@ -15,6 +15,8 @@ import java.util.concurrent.TimeUnit
 
 class GoogleRoutesClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(20, TimeUnit.SECONDS)

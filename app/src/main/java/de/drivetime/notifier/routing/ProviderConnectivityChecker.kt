@@ -67,6 +67,8 @@ class ProviderConnectivityChecker(
     private fun client(timeoutSeconds: Int): OkHttpClient {
         val timeout = timeoutSeconds.coerceIn(1, 300).toLong()
         return OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
             .connectTimeout(minOf(timeout, 8L), TimeUnit.SECONDS)
             .readTimeout(timeout, TimeUnit.SECONDS)
             .callTimeout(timeout, TimeUnit.SECONDS)
