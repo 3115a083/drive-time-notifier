@@ -102,6 +102,7 @@ class HereProviderService(
     }
 
     private fun geocode(address: String): Pair<Double, Double> {
+        de.drivetime.notifier.sharing.SharedDestination.coordinates(address)?.let { return it }
         val url = okhttp3.HttpUrl.Builder()
             .scheme("https").host("geocode.search.hereapi.com")
             .addPathSegments("v1/geocode")

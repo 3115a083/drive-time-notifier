@@ -79,6 +79,7 @@ class GoogleRoutesClient(
     }
 
     private fun geocode(address: String, apiKey: String): Pair<Double, Double> {
+        de.drivetime.notifier.sharing.SharedDestination.coordinates(address)?.let { return it }
         val url = okhttp3.HttpUrl.Builder()
             .scheme("https").host("maps.googleapis.com")
             .addPathSegments("maps/api/geocode/json")

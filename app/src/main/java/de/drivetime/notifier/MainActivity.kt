@@ -238,7 +238,10 @@ class MainActivity : ComponentActivity() {
             } else {
                 PlannerScreen(
                     modifier = Modifier.padding(padding),
-                    settings = settings,
+                    settings = if (initialIntent.hasExtra("share_buffer_minutes")) settings.copy(
+                        bufferMinutes = initialIntent.getIntExtra("share_buffer_minutes", settings.bufferMinutes).coerceIn(0, 180),
+                        dynamicBufferEnabled = false
+                    ) else settings,
                     keyStore = keyStore,
                     calendarRepo = calendarRepo,
                     initialIntent = initialIntent,
@@ -667,7 +670,7 @@ class MainActivity : ComponentActivity() {
                     leadingIcon = { Icon(Icons.Outlined.MyLocation, null) }
                 )
 
-                if (settings.homeAddress.isNotBlank() || settings.savedPlaces.isNotEmpty()) {
+                run {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
@@ -695,7 +698,7 @@ class MainActivity : ComponentActivity() {
                     leadingIcon = { Icon(Icons.Outlined.LocationOn, null) }
                 )
 
-                if (settings.homeAddress.isNotBlank() || settings.savedPlaces.isNotEmpty()) {
+                run {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
@@ -1790,6 +1793,10 @@ class MainActivity : ComponentActivity() {
                 title = tr(settings.language, "Planning", "Planung"),
                 icon = Icons.Outlined.Tune
             ) {
+                SettingSwitch(
+                    tr(settings.language, "Show planning popup for shared destinations", "Planungs-Popup für geteilte Ziele anzeigen"),
+                    settings.sharePopupEnabled
+                ) { onChange(settings.copy(sharePopupEnabled = it)) }
                 NumberDraftField(
                     initialValue = settings.bufferMinutes,
                     label = tr(settings.language, "Arrival buffer (minutes)", "Ankunftspuffer (Minuten)"),
@@ -4147,6 +4154,7 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            CurrentLocationChip(settings.language, onSelect)
             if (settings.homeAddress.isNotBlank()) {
                 AssistChip(
                     onClick = { onSelect(settings.homeAddress) },

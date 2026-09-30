@@ -56,6 +56,7 @@ class OsrmRoutingService(
     }
 
     private fun geocode(address: String): Pair<Double, Double> {
+        de.drivetime.notifier.sharing.SharedDestination.coordinates(address)?.let { return it }
         val base = nominatimBaseUrl.toHttpUrl()
         require(base.isHttps) { "Nominatim-Endpunkt muss HTTPS verwenden." }
         val url = base.newBuilder()

@@ -24,7 +24,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
+          gradle-version: "9.6.0"
 
       - name: Clean, test, lint and build
         run: gradle clean test lint assembleDebug assembleRelease --stacktrace
