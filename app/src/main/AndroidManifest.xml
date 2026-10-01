@@ -33,7 +33,7 @@
             android:theme="@android:style/Theme.NoDisplay" />
 
         <activity android:name=".sharing.SharedTargetActivity"
-            android:exported="true" android:excludeFromRecents="true"
+            android:exported="true" android:excludeFromRecents="true" android:taskAffinity=""
             android:theme="@style/Theme.DriveTimeNotifier.Share">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -83,7 +83,7 @@
                 android:value="User-initiated shared destination planning overlay, only while its window is open" />
         </service>
         <activity android:name=".sharing.OverlayLocationPermissionActivity" android:exported="false"
-            android:excludeFromRecents="true" android:theme="@style/Theme.DriveTimeNotifier.Share" />
+            android:excludeFromRecents="true" android:taskAffinity="" android:theme="@style/Theme.DriveTimeNotifier.Share" />
 
         <activity android:name=".MainActivity" android:exported="true">
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
