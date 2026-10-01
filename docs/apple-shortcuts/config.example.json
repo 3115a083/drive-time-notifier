@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "provider": "osrm",
+  "osrm_base_url": "https://router.project-osrm.org",
+  "google_api_key": "",
+  "tomtom_api_key": "",
+  "here_api_key": "",
+  "fixed_buffer_minutes": 10,
+  "dynamic_buffer_enabled": true,
+  "dynamic_buffer_level": "balanced",
+  "reminder_lead_minutes": 5,
+  "default_origin_latitude": "",
+  "default_origin_longitude": "",
+  "show_confirmation": true
+}

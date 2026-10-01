@@ -8,6 +8,10 @@
 
 Drive Time Notifier ist eine native Android-App zur manuellen und automatischen Planung von Autofahrten zu Kalenderterminen. Die App berechnet eine passende Abfahrtszeit, berücksichtigt Puffer und vorherige Termine und kann die Fahrt direkt in einen Android-Kalender eintragen oder als ICS-Datei exportieren.
 
+## Apple Kurzbefehle
+
+Für iPhone und iPad steht eine [Bauanleitung für Apple Kurzbefehle](docs/apple-shortcuts/README.md) mit [Beispielkonfiguration](docs/apple-shortcuts/config.example.json) zur Verfügung. Sie beschreibt OSRM, Google, TomTom und HERE, feste und dynamische Puffer sowie Kalendertermine mit Erinnerung. Ein signierter, auf Apple-Geräten geprüfter Shortcut-Download ist noch nicht verfügbar.
+
 ## Screenshots
 
 <p align="center">

@@ -8,6 +8,10 @@
 
 Drive Time Notifier is a native Android app for manually and automatically planning drives to calendar appointments. It calculates a suitable departure time, considers buffers and previous appointments, and can save the drive directly to an Android calendar or export it as an ICS file.
 
+## Apple Shortcuts
+
+An [Apple Shortcuts construction guide](docs/apple-shortcuts/README_EN.md) and [example configuration](docs/apple-shortcuts/config.example.json) cover OSRM, Google, TomTom and HERE routing, fixed and dynamic buffers, and calendar events with alerts. A signed, Apple-device-tested Shortcut download is not available yet.
+
 ## Screenshots
 
 <p align="center">
