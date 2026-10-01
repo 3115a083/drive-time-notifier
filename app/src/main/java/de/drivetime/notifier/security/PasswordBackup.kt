@@ -119,7 +119,7 @@ object PasswordBackup {
         put("calendarStartLocations", JSONArray(s.calendarStartLocations.toList()))
         put("exclusionRules", JSONArray(s.exclusionRules.toList()))
         put("bufferMinutes", s.bufferMinutes)
-        put("sharePopupEnabled", s.sharePopupEnabled)
+        put("shareOverlayEnabled", s.sharePopupEnabled)
         put("dynamicBufferEnabled", s.dynamicBufferEnabled)
         put("dynamicBufferLevel", s.dynamicBufferLevel.id)
         put("reminderLeadMinutes", s.reminderLeadMinutes)
@@ -192,7 +192,7 @@ object PasswordBackup {
             calendarStartLocations = j.stringSet("calendarStartLocations"),
             exclusionRules = j.stringSet("exclusionRules"),
             bufferMinutes = j.optInt("bufferMinutes", defaults.bufferMinutes),
-            sharePopupEnabled = j.optBoolean("sharePopupEnabled", defaults.sharePopupEnabled),
+            sharePopupEnabled = j.optBoolean("shareOverlayEnabled", defaults.sharePopupEnabled),
             dynamicBufferEnabled = j.optBoolean("dynamicBufferEnabled", defaults.dynamicBufferEnabled),
             dynamicBufferLevel = DynamicBufferLevel.fromId(j.optString("dynamicBufferLevel", defaults.dynamicBufferLevel.id)),
             reminderLeadMinutes = j.optInt("reminderLeadMinutes", defaults.reminderLeadMinutes),

@@ -1,18 +1,12 @@
 package de.drivetime.notifier.sharing
 
-import android.Manifest
 import android.app.*
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.PixelFormat
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.os.*
 import android.provider.Settings
 import android.view.*
 import android.widget.*
-import androidx.core.content.ContextCompat
 import de.drivetime.notifier.MainActivity
 import de.drivetime.notifier.data.*
 import de.drivetime.notifier.ui.tr
@@ -27,8 +21,6 @@ class PlanningOverlayService : Service() {
     private lateinit var manager: WindowManager
     private var panel: View? = null
     private var picker: Dialog? = null
-    private var locationListener: LocationListener? = null
-    private var locationTimeout: Job? = null
     private var pendingLocationField: EditText? = null
     private var language = AppLanguage.GERMAN
     private val handler = Handler(Looper.getMainLooper())
@@ -53,6 +45,7 @@ class PlanningOverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "close") { stopSelf(); return START_NOT_STICKY }
         if (intent?.action == "location") {
+            if (panel == null) { stopSelf(); return START_NOT_STICKY }
             intent.getStringExtra("coordinates")?.takeIf { it.length <= 100 }?.let { value -> pendingLocationField?.setText(value) }
             return START_NOT_STICKY
         }
@@ -165,14 +158,8 @@ class PlanningOverlayService : Service() {
         startActivity(Intent(this, OverlayLocationPermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    private fun cancelLocation() {
-        locationTimeout?.cancel(); locationTimeout = null
-        locationListener?.let { getSystemService(LocationManager::class.java).removeUpdates(it) }
-        locationListener = null
-    }
     private fun removePanel() {
         picker?.dismiss(); picker = null
-        cancelLocation()
         panel?.let { manager.removeView(it) }; panel = null
         pendingLocationField = null
     }

@@ -220,7 +220,7 @@ class SettingsStore(private val context: Context) {
         val PLACES = stringSetPreferencesKey("saved_places")
         val CALENDAR_START_LOCATIONS = stringSetPreferencesKey("calendar_start_locations")
         val EXCLUSION_RULES = stringSetPreferencesKey("exclusion_rules")
-        val SHARE_POPUP = booleanPreferencesKey("share_popup_enabled")
+        val SHARE_POPUP = booleanPreferencesKey("share_overlay_enabled")
         val BUFFER = intPreferencesKey("buffer_minutes")
         val DYNAMIC_BUFFER = booleanPreferencesKey("dynamic_buffer_enabled")
         val DYNAMIC_BUFFER_LEVEL = stringPreferencesKey("dynamic_buffer_level")
