@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <application
         android:name=".DriveTimeApp"
         android:allowBackup="false"
@@ -73,6 +76,14 @@
                 <data android:scheme="https" android:host="goo.gl" android:pathPrefix="/maps" />
             </intent-filter>
         </activity>
+
+        <service android:name=".sharing.PlanningOverlayService" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated shared destination planning overlay, only while its window is open" />
+        </service>
+        <activity android:name=".sharing.OverlayLocationPermissionActivity" android:exported="false"
+            android:excludeFromRecents="true" android:theme="@style/Theme.DriveTimeNotifier.Share" />
 
         <activity android:name=".MainActivity" android:exported="true">
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />

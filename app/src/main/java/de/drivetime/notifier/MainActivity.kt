@@ -1442,6 +1442,12 @@ class MainActivity : ComponentActivity() {
         var lastDebugTap by remember { mutableLongStateOf(0L) }
         val debugEntries by RequestDebugLog.entries.collectAsState()
         val latestSettings by rememberUpdatedState(settings)
+        val overlayPermissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) {
+            onChange(latestSettings.copy(sharePopupEnabled = android.provider.Settings.canDrawOverlays(context)))
+        }
+
 
         fun cancelCalendarReselection() {
             showCalendarReselectionPrompt = false
@@ -1798,10 +1804,6 @@ class MainActivity : ComponentActivity() {
                 title = tr(settings.language, "Planning", "Planung"),
                 icon = Icons.Outlined.Tune
             ) {
-                SettingSwitch(
-                    tr(settings.language, "Show planning popup for shared destinations", "Planungs-Popup für geteilte Ziele anzeigen"),
-                    settings.sharePopupEnabled
-                ) { onChange(settings.copy(sharePopupEnabled = it)) }
                 NumberDraftField(
                     initialValue = settings.bufferMinutes,
                     label = tr(settings.language, "Arrival buffer (minutes)", "Ankunftspuffer (Minuten)"),
@@ -2058,6 +2060,20 @@ class MainActivity : ComponentActivity() {
                     tr(settings.language, "Export ICS instead of calendar event", "ICS statt Kalendereintrag erzeugen"),
                     settings.outputIcs
                 ) { onChange(settings.copy(outputIcs = it)) }
+                SettingSwitch(
+                    tr(settings.language, "Planning popup over other apps", "Planungs-Popup über anderen Apps"),
+                    settings.sharePopupEnabled && android.provider.Settings.canDrawOverlays(context)
+                ) { enabled ->
+                    if (!enabled || android.provider.Settings.canDrawOverlays(context)) {
+                        onChange(settings.copy(sharePopupEnabled = enabled))
+                    } else {
+                        overlayPermissionLauncher.launch(Intent(
+                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:${context.packageName}")
+                        ))
+                    }
+                }
+
             }
 
             SettingsCard(

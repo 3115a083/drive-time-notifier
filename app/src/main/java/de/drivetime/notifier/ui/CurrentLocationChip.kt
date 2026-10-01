@@ -64,7 +64,7 @@ fun CurrentLocationChip(language: AppLanguage, onSelect: (String) -> Unit) {
 }
 
 @SuppressLint("MissingPermission")
-private suspend fun currentLocation(context: Context): Location = suspendCancellableCoroutine { continuation ->
+internal suspend fun currentLocation(context: Context): Location = suspendCancellableCoroutine { continuation ->
     val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     val listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
