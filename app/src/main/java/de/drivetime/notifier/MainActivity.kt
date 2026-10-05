@@ -313,6 +313,7 @@ class MainActivity : ComponentActivity() {
         var pickingStart by remember { mutableStateOf(false) }
         var events by remember { mutableStateOf<List<CalendarEventRef>>(emptyList()) }
         var calendarNames by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
+        var eventPickerRefreshing by remember { mutableStateOf(false) }
         var nextDriveShortcutHandled by rememberSaveable { mutableStateOf(false) }
         var shortcutCalculatePending by remember { mutableStateOf(false) }
 
@@ -363,7 +364,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun loadEvents(forStart: Boolean) {
+        fun loadEvents(forStart: Boolean, refreshing: Boolean = false) {
             if (!hasCalendarPermission) {
                 onRequestCalendarPermission()
                 return
@@ -374,15 +375,29 @@ class MainActivity : ComponentActivity() {
                 return
             }
             pickingStart = forStart
+            if (refreshing) eventPickerRefreshing = true
             scope.launch {
-                val now = System.currentTimeMillis()
-                calendarNames = calendarRepo.calendars().associate { it.id to it.name }
-                events = calendarRepo.events(
-                    now - 24L * 60 * 60 * 1000,
-                    now + 21L * 24 * 60 * 60 * 1000,
-                    selected
-                )
-                showEventPicker = true
+                runCatching {
+                    val now = System.currentTimeMillis()
+                    val refreshedNames = calendarRepo.calendars().associate { it.id to it.name }
+                    val refreshedEvents = calendarRepo.events(
+                        now - 24L * 60 * 60 * 1000,
+                        now + 21L * 24 * 60 * 60 * 1000,
+                        selected
+                    )
+                    refreshedNames to refreshedEvents
+                }.onSuccess { (refreshedNames, refreshedEvents) ->
+                    calendarNames = refreshedNames
+                    events = refreshedEvents
+                    showEventPicker = true
+                }.onFailure {
+                    error = it.message ?: tr(
+                        settings.language,
+                        "Calendar appointments could not be refreshed.",
+                        "Kalendertermine konnten nicht aktualisiert werden."
+                    )
+                }
+                eventPickerRefreshing = false
             }
         }
 
@@ -975,6 +990,8 @@ class MainActivity : ComponentActivity() {
                 events = events,
                 calendarNames = calendarNames,
                 pickingStart = pickingStart,
+                refreshing = eventPickerRefreshing,
+                onRefresh = { loadEvents(pickingStart, refreshing = true) },
                 onDismiss = { showEventPicker = false },
                 onSelect = { event ->
                     if (pickingStart) {
@@ -3832,6 +3849,8 @@ class MainActivity : ComponentActivity() {
         events: List<CalendarEventRef>,
         calendarNames: Map<Long, String>,
         pickingStart: Boolean,
+        refreshing: Boolean,
+        onRefresh: () -> Unit,
         onDismiss: () -> Unit,
         onSelect: (CalendarEventRef) -> Unit
     ) {
@@ -3842,11 +3861,37 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxWidth(0.92f).heightIn(max = 650.dp)
             ) {
                 Column(Modifier.padding(20.dp)) {
-                    Text(
-                        if (pickingStart) tr(settings.language, "Choose previous appointment", "Vorherigen Termin wählen")
-                        else tr(settings.language, "Choose appointment", "Termin wählen"),
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (pickingStart) tr(settings.language, "Choose previous appointment", "Vorherigen Termin wählen")
+                            else tr(settings.language, "Choose appointment", "Termin wählen"),
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onRefresh,
+                            enabled = !refreshing
+                        ) {
+                            if (refreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Outlined.Refresh,
+                                    contentDescription = tr(
+                                        settings.language,
+                                        "Refresh appointments",
+                                        "Termine aktualisieren"
+                                    )
+                                )
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text(
                         tr(settings.language, "Only selected source calendars are shown.", "Es werden nur ausgewählte Quellkalender angezeigt."),
