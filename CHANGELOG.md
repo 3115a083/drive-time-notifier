@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0
+
+Map sharing, on-demand location and cross-platform automation release.
+
+- Adds Android share targets for street addresses, `geo:` targets, OpenStreetMap markers and supported Google Maps links so destinations can be handed directly to Drive Time Notifier.
+- Adds on-demand current-location actions for start and destination. Location is requested only after an explicit user action and is not collected in the background.
+- Adds an optional planning popup over other apps for shared destinations. It remains disabled by default and requires explicit Android overlay permission before it can be enabled.
+- Adds a refresh action in the appointment picker so newly created or newly synchronized calendar events can be loaded without closing the picker.
+- Hardens shared-link resolution with allowlisted HTTPS hosts, bounded redirects, validated coordinate ranges and bounded input sizes.
+- Hardens custom network endpoints, redirect handling and diagnostic redaction so credentials and sensitive URL components are not leaked into debug output.
+- Requires confirmation for exported launcher automation actions that can schedule calendar-writing work. Token-authenticated broadcast automation remains available for unattended integrations.
+- Updates the Android build stack and runtime dependencies while keeping the existing Android 8.0 minimum and public package identity.
+- Adds a German and English Apple Shortcuts construction guide with example configuration for OSRM, Google, TomTom and HERE, fixed and dynamic buffers, and calendar alerts.
+- Keeps the public Android release functionally aligned with the tested 1.3.1 debug feature line, except for the public version name, package identity and signing.
+
 ## 1.2.0
 
 Parking, EV charging and network reliability release.
