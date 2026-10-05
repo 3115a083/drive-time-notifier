@@ -8,6 +8,14 @@
 
 Drive Time Notifier ist eine native Android-App zur manuellen und automatischen Planung von Autofahrten zu Kalenderterminen. Die App berechnet eine passende Abfahrtszeit, berücksichtigt Puffer und vorherige Termine und kann die Fahrt direkt in einen Android-Kalender eintragen oder als ICS-Datei exportieren.
 
+## Download
+
+Aktuelle öffentliche Version: **1.3.0** (`versionCode 11`).
+
+- Release-Paket: `de.drivetime.notifier`
+- Mindestversion: Android 8.0
+- Download, Prüfsumme und Signaturprüfung: [GitHub Release v1.3.0](https://github.com/3115a083/drive-time-notifier/releases/tag/v1.3.0)
+
 ## Apple Kurzbefehle
 
 Für iPhone und iPad steht eine [Bauanleitung für Apple Kurzbefehle](docs/apple-shortcuts/README.md) mit [Beispielkonfiguration](docs/apple-shortcuts/config.example.json) zur Verfügung. Sie beschreibt OSRM, Google, TomTom und HERE, feste und dynamische Puffer sowie Kalendertermine mit Erinnerung. Ein signierter, auf Apple-Geräten geprüfter Shortcut-Download ist noch nicht verfügbar.
@@ -29,6 +37,9 @@ Für iPhone und iPad steht eine [Bauanleitung für Apple Kurzbefehle](docs/apple
 - manuelle Fahrtplanung
 - Android-Kalender als Quelle und Ziel
 - Kalendertermin als Start- oder Zielpunkt
+- Karten- und Adressziele aus anderen Apps direkt an die Planung teilen
+- aktueller Standort für Start oder Ziel nur auf ausdrückliche Anforderung
+- Aktualisieren-Schaltfläche im Termin-Picker für neu angelegte oder synchronisierte Termine
 - benannter Standard-Startort
 - zusätzliche gespeicherte Startorte
 - kalenderabhängige Startorte für automatische Verarbeitung
@@ -86,6 +97,14 @@ Standardtitel für erzeugte Fahrt-Termine:
 - Englisch: `Your drive starts`
 
 Ein eigener Titel kann in den Einstellungen gesetzt werden.
+
+## Teilen aus Karten-Apps und aktueller Standort
+
+Android kann geteilte Adressen, `geo:`-Ziele, unterstützte Google-Maps-Links und OpenStreetMap-Marker an Drive Time Notifier übergeben. Das Ziel wird geprüft und anschließend in die Planung übernommen.
+
+Das optionale Planungs-Popup über anderen Apps ist standardmäßig deaktiviert. Wird es aktiviert, fordert Android die notwendige Overlay-Berechtigung ausdrücklich an. Ohne Popup öffnet sich die normale Planungsansicht mit vorausgefülltem Ziel.
+
+Der aktuelle Standort kann bei Start oder Ziel gezielt angefordert werden. Die App verwendet dafür keine dauerhafte Hintergrundortung.
 
 ## Ausschlussregeln
 
@@ -234,8 +253,8 @@ previous_end_millis=<OPTIONAL>
 Voraussetzungen:
 
 - JDK 17
-- Android SDK 35
-- Gradle 8.9
+- Android SDK 37
+- Gradle 9.6.0
 
 Vollständige Prüfung:
 
