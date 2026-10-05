@@ -62,7 +62,16 @@ object RequestDebugLog {
         }
     }.trimEnd()
 
-    private fun sanitize(value: String, limit: Int): String = value
+    fun redact(value: String): String = Regex("https://[^\\s<>]+", RegexOption.IGNORE_CASE).replace(value) { match ->
+        val uri = runCatching { java.net.URI(match.value) }.getOrNull()
+        if (uri?.host == null) "[URL redacted]" else {
+            val path = uri.path.orEmpty()
+            val safePath = if (path in setOf("", "/", "/api/interpreter", "/api/status")) path else "/[path redacted]"
+            "https://${uri.host}$safePath"
+        }
+    }.replace(Regex("(?i)(api[_-]?key|token|authorization|key)=([^&\\s]+)"), "$1=[redacted]")
+
+    private fun sanitize(value: String, limit: Int): String = redact(value)
         .filter { it == '\n' || it == '\t' || !it.isISOControl() }
         .replace(Regex("[\\r\\n]+"), " ")
         .trim()

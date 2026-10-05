@@ -98,17 +98,22 @@ private enum class ParkingFeeStatus { FREE, PAID, UNKNOWN }
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        when (intent.action) {
-            AutomationReceiver.ACTION_PROCESS_NEXT_DAY -> {
-                AutomationScheduler.runNow(this)
-                finish()
-                return
-            }
-            ACTION_NEXT_DRIVE -> {
-                AutomationScheduler.runNextDriveNow(this)
-                finish()
-                return
-            }
+        if (intent.action == AutomationReceiver.ACTION_PROCESS_NEXT_DAY || intent.action == ACTION_NEXT_DRIVE) {
+            // Exported activities cannot authenticate an external caller. Require a user gesture
+            // before launching work which can write calendar entries or consume API quota.
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Drive Time Notifier")
+                .setMessage(if (java.util.Locale.getDefault().language == "de")
+                    "Kalender-Fahrten jetzt verarbeiten?" else "Process calendar drives now?")
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    if (intent.action == ACTION_NEXT_DRIVE) AutomationScheduler.runNextDriveNow(this)
+                    else AutomationScheduler.runNow(this)
+                    finish()
+                }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
+                .setOnCancelListener { finish() }
+                .show()
+            return
         }
         enableEdgeToEdge()
         Configuration.getInstance().userAgentValue = packageName
@@ -238,7 +243,10 @@ class MainActivity : ComponentActivity() {
             } else {
                 PlannerScreen(
                     modifier = Modifier.padding(padding),
-                    settings = settings,
+                    settings = if (initialIntent.hasExtra("share_buffer_minutes")) settings.copy(
+                        bufferMinutes = initialIntent.getIntExtra("share_buffer_minutes", settings.bufferMinutes).coerceIn(0, 180),
+                        dynamicBufferEnabled = false
+                    ) else settings,
                     keyStore = keyStore,
                     calendarRepo = calendarRepo,
                     initialIntent = initialIntent,
@@ -305,6 +313,7 @@ class MainActivity : ComponentActivity() {
         var pickingStart by remember { mutableStateOf(false) }
         var events by remember { mutableStateOf<List<CalendarEventRef>>(emptyList()) }
         var calendarNames by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
+        var eventPickerRefreshing by remember { mutableStateOf(false) }
         var nextDriveShortcutHandled by rememberSaveable { mutableStateOf(false) }
         var shortcutCalculatePending by remember { mutableStateOf(false) }
 
@@ -355,7 +364,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun loadEvents(forStart: Boolean) {
+        fun loadEvents(forStart: Boolean, refreshing: Boolean = false) {
             if (!hasCalendarPermission) {
                 onRequestCalendarPermission()
                 return
@@ -366,15 +375,29 @@ class MainActivity : ComponentActivity() {
                 return
             }
             pickingStart = forStart
+            if (refreshing) eventPickerRefreshing = true
             scope.launch {
-                val now = System.currentTimeMillis()
-                calendarNames = calendarRepo.calendars().associate { it.id to it.name }
-                events = calendarRepo.events(
-                    now - 24L * 60 * 60 * 1000,
-                    now + 21L * 24 * 60 * 60 * 1000,
-                    selected
-                )
-                showEventPicker = true
+                runCatching {
+                    val now = System.currentTimeMillis()
+                    val refreshedNames = calendarRepo.calendars().associate { it.id to it.name }
+                    val refreshedEvents = calendarRepo.events(
+                        now - 24L * 60 * 60 * 1000,
+                        now + 21L * 24 * 60 * 60 * 1000,
+                        selected
+                    )
+                    refreshedNames to refreshedEvents
+                }.onSuccess { (refreshedNames, refreshedEvents) ->
+                    calendarNames = refreshedNames
+                    events = refreshedEvents
+                    showEventPicker = true
+                }.onFailure {
+                    error = it.message ?: tr(
+                        settings.language,
+                        "Calendar appointments could not be refreshed.",
+                        "Kalendertermine konnten nicht aktualisiert werden."
+                    )
+                }
+                eventPickerRefreshing = false
             }
         }
 
@@ -667,7 +690,7 @@ class MainActivity : ComponentActivity() {
                     leadingIcon = { Icon(Icons.Outlined.MyLocation, null) }
                 )
 
-                if (settings.homeAddress.isNotBlank() || settings.savedPlaces.isNotEmpty()) {
+                run {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
@@ -695,7 +718,7 @@ class MainActivity : ComponentActivity() {
                     leadingIcon = { Icon(Icons.Outlined.LocationOn, null) }
                 )
 
-                if (settings.homeAddress.isNotBlank() || settings.savedPlaces.isNotEmpty()) {
+                run {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
@@ -967,6 +990,8 @@ class MainActivity : ComponentActivity() {
                 events = events,
                 calendarNames = calendarNames,
                 pickingStart = pickingStart,
+                refreshing = eventPickerRefreshing,
+                onRefresh = { loadEvents(pickingStart, refreshing = true) },
                 onDismiss = { showEventPicker = false },
                 onSelect = { event ->
                     if (pickingStart) {
@@ -1434,6 +1459,12 @@ class MainActivity : ComponentActivity() {
         var lastDebugTap by remember { mutableLongStateOf(0L) }
         val debugEntries by RequestDebugLog.entries.collectAsState()
         val latestSettings by rememberUpdatedState(settings)
+        val overlayPermissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) {
+            onChange(latestSettings.copy(sharePopupEnabled = android.provider.Settings.canDrawOverlays(context)))
+        }
+
 
         fun cancelCalendarReselection() {
             showCalendarReselectionPrompt = false
@@ -2046,6 +2077,20 @@ class MainActivity : ComponentActivity() {
                     tr(settings.language, "Export ICS instead of calendar event", "ICS statt Kalendereintrag erzeugen"),
                     settings.outputIcs
                 ) { onChange(settings.copy(outputIcs = it)) }
+                SettingSwitch(
+                    tr(settings.language, "Planning popup over other apps", "Planungs-Popup über anderen Apps"),
+                    settings.sharePopupEnabled && android.provider.Settings.canDrawOverlays(context)
+                ) { enabled ->
+                    if (!enabled || android.provider.Settings.canDrawOverlays(context)) {
+                        onChange(settings.copy(sharePopupEnabled = enabled))
+                    } else {
+                        overlayPermissionLauncher.launch(Intent(
+                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:${context.packageName}")
+                        ))
+                    }
+                }
+
             }
 
             SettingsCard(
@@ -2344,7 +2389,7 @@ class MainActivity : ComponentActivity() {
             if (settings.networkDebugVisible) {
                 val debugText = buildString {
                     appendLine("Version: ${BuildConfig.VERSION_NAME}")
-                    appendLine("Overpass endpoints: ${settings.overpassEndpoints.joinToString(" -> ")}")
+                    appendLine("Overpass endpoints: ${settings.overpassEndpoints.joinToString(" -> ") { RequestDebugLog.redact(it) }}")
                     appendLine("Overpass split requests: ${settings.overpassSplitRequests}")
                     appendLine("Charging: ${settings.showChargingStations}, parking: ${settings.showParking}")
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
@@ -3804,6 +3849,8 @@ class MainActivity : ComponentActivity() {
         events: List<CalendarEventRef>,
         calendarNames: Map<Long, String>,
         pickingStart: Boolean,
+        refreshing: Boolean,
+        onRefresh: () -> Unit,
         onDismiss: () -> Unit,
         onSelect: (CalendarEventRef) -> Unit
     ) {
@@ -3814,11 +3861,37 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxWidth(0.92f).heightIn(max = 650.dp)
             ) {
                 Column(Modifier.padding(20.dp)) {
-                    Text(
-                        if (pickingStart) tr(settings.language, "Choose previous appointment", "Vorherigen Termin wählen")
-                        else tr(settings.language, "Choose appointment", "Termin wählen"),
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (pickingStart) tr(settings.language, "Choose previous appointment", "Vorherigen Termin wählen")
+                            else tr(settings.language, "Choose appointment", "Termin wählen"),
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onRefresh,
+                            enabled = !refreshing
+                        ) {
+                            if (refreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Outlined.Refresh,
+                                    contentDescription = tr(
+                                        settings.language,
+                                        "Refresh appointments",
+                                        "Termine aktualisieren"
+                                    )
+                                )
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text(
                         tr(settings.language, "Only selected source calendars are shown.", "Es werden nur ausgewählte Quellkalender angezeigt."),
@@ -4147,6 +4220,7 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            CurrentLocationChip(settings.language, onSelect)
             if (settings.homeAddress.isNotBlank()) {
                 AssistChip(
                     onClick = { onSelect(settings.homeAddress) },

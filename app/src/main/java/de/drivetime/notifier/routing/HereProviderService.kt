@@ -21,6 +21,8 @@ class HereProviderService(
     private val dailyCap: Int,
     private val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(16, TimeUnit.SECONDS)
@@ -102,6 +104,7 @@ class HereProviderService(
     }
 
     private fun geocode(address: String): Pair<Double, Double> {
+        de.drivetime.notifier.sharing.SharedDestination.coordinates(address)?.let { return it }
         val url = okhttp3.HttpUrl.Builder()
             .scheme("https").host("geocode.search.hereapi.com")
             .addPathSegments("v1/geocode")

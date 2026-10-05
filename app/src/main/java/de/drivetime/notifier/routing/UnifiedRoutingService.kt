@@ -34,6 +34,8 @@ class UnifiedRoutingService(
         .coerceIn(1, 300)
         .toLong()
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(minOf(timeoutSeconds, 8L), TimeUnit.SECONDS)
         .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
         .callTimeout(timeoutSeconds, TimeUnit.SECONDS)

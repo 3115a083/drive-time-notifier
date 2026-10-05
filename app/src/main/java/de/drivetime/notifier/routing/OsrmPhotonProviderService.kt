@@ -22,6 +22,8 @@ class OsrmPhotonProviderService(
     private val dailyCap: Int,
     private val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(9, TimeUnit.SECONDS)
         .callTimeout(12, TimeUnit.SECONDS)
@@ -69,6 +71,7 @@ class OsrmPhotonProviderService(
     }
 
     private fun geocode(address: String): Pair<Double, Double> {
+        de.drivetime.notifier.sharing.SharedDestination.coordinates(address)?.let { return it }
         val hit = photon(address, 1, "en").firstOrNull() ?: error("Address not found: $address")
         return (hit.latitude ?: error("Missing latitude")) to (hit.longitude ?: error("Missing longitude"))
     }

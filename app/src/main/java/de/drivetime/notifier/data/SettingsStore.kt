@@ -167,6 +167,7 @@ data class AppSettings(
     val calendarStartLocations: Set<String> = emptySet(),
     val exclusionRules: Set<String> = emptySet(),
     val bufferMinutes: Int = 15,
+    val sharePopupEnabled: Boolean = false,
     val dynamicBufferEnabled: Boolean = false,
     val dynamicBufferLevel: DynamicBufferLevel = DynamicBufferLevel.BALANCED,
     val reminderLeadMinutes: Int = 0,
@@ -219,6 +220,7 @@ class SettingsStore(private val context: Context) {
         val PLACES = stringSetPreferencesKey("saved_places")
         val CALENDAR_START_LOCATIONS = stringSetPreferencesKey("calendar_start_locations")
         val EXCLUSION_RULES = stringSetPreferencesKey("exclusion_rules")
+        val SHARE_POPUP = booleanPreferencesKey("share_overlay_enabled")
         val BUFFER = intPreferencesKey("buffer_minutes")
         val DYNAMIC_BUFFER = booleanPreferencesKey("dynamic_buffer_enabled")
         val DYNAMIC_BUFFER_LEVEL = stringPreferencesKey("dynamic_buffer_level")
@@ -303,6 +305,7 @@ class SettingsStore(private val context: Context) {
             calendarStartLocations = p[K.CALENDAR_START_LOCATIONS] ?: emptySet(),
             exclusionRules = p[K.EXCLUSION_RULES] ?: emptySet(),
             bufferMinutes = p[K.BUFFER] ?: 15,
+            sharePopupEnabled = p[K.SHARE_POPUP] ?: false,
             dynamicBufferEnabled = p[K.DYNAMIC_BUFFER] ?: false,
             dynamicBufferLevel = DynamicBufferLevel.fromId(p[K.DYNAMIC_BUFFER_LEVEL]),
             reminderLeadMinutes = p[K.REMINDER] ?: 0,
@@ -379,6 +382,7 @@ class SettingsStore(private val context: Context) {
         p[K.PLACES] = s.savedPlaces
         p[K.CALENDAR_START_LOCATIONS] = s.calendarStartLocations
         p[K.EXCLUSION_RULES] = s.exclusionRules
+        p[K.SHARE_POPUP] = s.sharePopupEnabled
         p[K.BUFFER] = s.bufferMinutes.coerceIn(0, 180)
         p[K.DYNAMIC_BUFFER] = s.dynamicBufferEnabled
         p[K.DYNAMIC_BUFFER_LEVEL] = s.dynamicBufferLevel.id
@@ -449,13 +453,11 @@ class SettingsStore(private val context: Context) {
     private fun sanitizeTimeout(value: Int) = value.coerceIn(1, 300)
 
     private fun sanitizeHttpsBaseUrl(value: String, fallback: String): String {
-        val clean = value.trim().removeSuffix("/")
-        return if (clean.startsWith("https://") && clean.length <= 240) clean else fallback
+        return de.drivetime.notifier.network.HttpsEndpoint.normalize(value) ?: fallback
     }
 
     private fun sanitizeHttpsEndpointList(values: List<String>): List<String> = values
-        .map { it.trim().removeSuffix("/") }
-        .filter { it.startsWith("https://") && it.length <= 240 }
+        .mapNotNull(de.drivetime.notifier.network.HttpsEndpoint::normalize)
         .distinct()
         .take(8)
         .ifEmpty { listOf("https://overpass-api.de/api/interpreter") }

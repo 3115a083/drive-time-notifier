@@ -15,6 +15,8 @@ class PhotonSearchService(
     private val baseUrl: String,
     private val userAgent: String,
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(7, TimeUnit.SECONDS)
         .callTimeout(8, TimeUnit.SECONDS)
@@ -36,6 +38,9 @@ class PhotonSearchService(
     suspend fun geocode(query: String): AddressSuggestion = withContext(Dispatchers.IO) {
         val clean = query.trim()
         require(clean.isNotBlank()) { "Address is empty." }
+        de.drivetime.notifier.sharing.SharedDestination.coordinates(clean)?.let { (lat, lon) ->
+            return@withContext AddressSuggestion(clean, lat, lon)
+        }
         val country = Locale.getDefault().country.trim().uppercase()
         if (country.length == 2) {
             search(clean, "en", country, 3).firstOrNull()?.let { return@withContext it }
