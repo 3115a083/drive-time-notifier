@@ -8,6 +8,14 @@
 
 Drive Time Notifier is a native Android app for manually and automatically planning drives to calendar appointments. It calculates a suitable departure time, considers buffers and previous appointments, and can save the drive directly to an Android calendar or export it as an ICS file.
 
+## Download
+
+Current public version: **1.3.0** (`versionCode 11`).
+
+- Release package: `de.drivetime.notifier`
+- Minimum version: Android 8.0
+- Download, checksum and signature verification: [GitHub Release v1.3.0](https://github.com/3115a083/drive-time-notifier/releases/tag/v1.3.0)
+
 ## Apple Shortcuts
 
 An [Apple Shortcuts construction guide](docs/apple-shortcuts/README_EN.md) and [example configuration](docs/apple-shortcuts/config.example.json) cover OSRM, Google, TomTom and HERE routing, fixed and dynamic buffers, and calendar events with alerts. A signed, Apple-device-tested Shortcut download is not available yet.
@@ -28,6 +36,9 @@ An [Apple Shortcuts construction guide](docs/apple-shortcuts/README_EN.md) and [
 - manual drive planning
 - Android calendars as source and target
 - calendar appointment as start or destination
+- share map and address targets from other apps directly into planning
+- use the current location for start or destination only on explicit request
+- refresh the appointment picker to load newly created or synchronized events
 - named default start location
 - additional saved start locations
 - per-calendar start locations for automatic processing
@@ -85,6 +96,14 @@ Default generated drive-event titles:
 - German: `Deine Fahrt beginnt`
 
 A custom title can be configured in Settings.
+
+## Sharing from map apps and current location
+
+Android can hand shared street addresses, `geo:` targets, supported Google Maps links and OpenStreetMap markers to Drive Time Notifier. The destination is validated before it is passed into planning.
+
+The optional planning popup over other apps is disabled by default. Enabling it explicitly requests Android's overlay permission. With the popup disabled, the normal planner opens with the destination prefilled.
+
+Current location can be requested explicitly for either start or destination. The app does not use continuous background location tracking.
 
 ## Exclusion rules
 
@@ -233,8 +252,8 @@ previous_end_millis=<OPTIONAL>
 Requirements:
 
 - JDK 17
-- Android SDK 35
-- Gradle 8.9
+- Android SDK 37
+- Gradle 9.6.0
 
 Full verification:
 
