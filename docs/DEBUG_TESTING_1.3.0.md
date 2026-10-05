@@ -1,6 +1,6 @@
-# Android map target test candidate
+# Android map target validation notes for 1.3.0
 
-This branch is a debug candidate. The published release remains 1.2.0.
+These checks were used to validate the 1.3.0 feature line before publication. The public Android release is built from the same functional source line as the tested 1.3.1 debug build.
 
 ## Device checks
 
