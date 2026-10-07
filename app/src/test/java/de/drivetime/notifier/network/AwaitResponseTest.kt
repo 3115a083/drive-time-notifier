@@ -18,7 +18,7 @@ class AwaitResponseTest {
         call.callback!!.onFailure(call, IOException("cancelled"))
         assertTrue(request.isCancelled)
     }
-    private class PendingCall : Call {
+    private class PendingCall : Call by OkHttpClient().newCall(Request.Builder().url("https://example.com/").build()) {
         var callback: Callback? = null
         private var cancelled = false
         override fun request(): Request = Request.Builder().url("https://example.com/").build()
@@ -29,9 +29,5 @@ class AwaitResponseTest {
         override fun isCanceled() = cancelled
         override fun timeout() = Timeout()
         override fun clone(): Call = PendingCall()
-        override fun <T : Any> tag(type: kotlin.reflect.KClass<T>): T? = null
-        override fun <T> tag(type: Class<out T>): T? = null
-        override fun <T : Any> tag(type: kotlin.reflect.KClass<T>, computeIfAbsent: () -> T): T = computeIfAbsent()
-        override fun <T : Any> tag(type: Class<T>, computeIfAbsent: () -> T): T = computeIfAbsent()
     }
 }
