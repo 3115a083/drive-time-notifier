@@ -10,11 +10,11 @@ Drive Time Notifier is a native Android app for manually and automatically plann
 
 ## Download
 
-Current public version: **1.3.0** (`versionCode 11`).
+Current public version: **1.3.1** (`versionCode 12`).
 
 - Release package: `de.drivetime.notifier`
 - Minimum version: Android 8.0
-- Download, checksum and signature verification: [GitHub Release v1.3.0](https://github.com/3115a083/drive-time-notifier/releases/tag/v1.3.0)
+- Download, checksum and signature verification: [GitHub Release v1.3.1](https://github.com/3115a083/drive-time-notifier/releases/tag/v1.3.1)
 
 ## Apple Shortcuts
 

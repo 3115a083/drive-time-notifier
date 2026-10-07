@@ -66,8 +66,20 @@ fun CurrentLocationChip(language: AppLanguage, onSelect: (String) -> Unit) {
 @SuppressLint("MissingPermission")
 internal suspend fun currentLocation(context: Context): Location = suspendCancellableCoroutine { continuation ->
     val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    val providers = manager.getProviders(true).filter {
+        it != LocationManager.PASSIVE_PROVIDER && (fine || it != LocationManager.GPS_PROVIDER)
+    }
+    val now = android.os.SystemClock.elapsedRealtimeNanos()
+    val cached = providers.mapNotNull { provider ->
+        try { manager.getLastKnownLocation(provider) } catch (_: SecurityException) { null }
+    }.filter { LocationFreshness.usable(it.latitude, it.longitude, it.accuracy.toDouble(), (now - it.elapsedRealtimeNanos) / 1_000_000L, fine) }
+        .minByOrNull { it.accuracy }
+    if (cached != null) { continuation.resume(cached); return@suspendCancellableCoroutine }
     val listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
+            if (!LocationFreshness.usable(location.latitude, location.longitude, location.accuracy.toDouble(),
+                    (android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L, fine)) return
             manager.removeUpdates(this)
             if (continuation.isActive) continuation.resume(location)
         }
@@ -77,13 +89,11 @@ internal suspend fun currentLocation(context: Context): Location = suspendCancel
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
     continuation.invokeOnCancellation { manager.removeUpdates(listener) }
-    try {
-        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val provider = if (fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
-        check(manager.isProviderEnabled(provider)) { "Location services disabled" }
-        manager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
-    } catch (e: Exception) {
-        manager.removeUpdates(listener)
-        if (continuation.isActive) continuation.resumeWithException(e)
+    var registered = false
+    for (provider in providers) {
+        try { manager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper()); registered = true }
+        catch (_: IllegalArgumentException) { }
+        catch (_: SecurityException) { }
     }
+    if (!registered && continuation.isActive) continuation.resumeWithException(IllegalStateException("No permitted location provider available"))
 }
