@@ -1,0 +1,1 @@
+Planungs-Popup im App-Stil mit Dunkelmodus. Schnellere, robustere Standortsuche. Veraltete Adress- und Kartenlink-Anfragen werden abgebrochen. Weniger doppelte Photon-Abfragen.

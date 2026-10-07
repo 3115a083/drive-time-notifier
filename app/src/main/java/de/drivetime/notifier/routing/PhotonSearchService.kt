@@ -2,6 +2,7 @@ package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.network.readStringLimited
+import de.drivetime.notifier.network.awaitResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -29,7 +30,7 @@ class PhotonSearchService(
 
         val country = Locale.getDefault().country.trim().uppercase()
         val local = if (country.length == 2) search(clean, language, country, 6) else emptyList()
-        if (local.size >= 6) return@withContext local.take(6)
+        if (local.isNotEmpty()) return@withContext local.take(6)
 
         val global = search(clean, language, null, 8)
         (local + global).distinctBy { it.label.lowercase() }.take(6)
@@ -49,7 +50,7 @@ class PhotonSearchService(
             ?: error("Address not found: $clean")
     }
 
-    private fun search(
+    private suspend fun search(
         query: String,
         language: String,
         countryCode: String?,
@@ -70,7 +71,7 @@ class PhotonSearchService(
             .get()
             .build()
 
-        client.newCall(request).execute().use { response ->
+        client.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) return emptyList()
             val features = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("features") ?: return emptyList()
             return buildList {

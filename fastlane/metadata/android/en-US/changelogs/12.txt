@@ -1,0 +1,1 @@
+Planning popup uses the app theme and dark mode. Faster, more reliable current-location lookup. Cancels obsolete address and shared-link requests. Reduces redundant Photon searches.

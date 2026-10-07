@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1
+
+Planning popup styling and timeout reliability fixes.
+
+- Replaces the legacy white system-overlay form with the app’s Compose Material theme, configured colors, rounded surfaces and light/dark appearance.
+- Adds themed address autocomplete, saved-place chips, arrival date/time controls and buffer input to the actual system overlay.
+- Shows location progress and recoverable errors inside the popup and ignores results from an obsolete popup session.
+- Requests all permitted enabled location providers instead of waiting only for GPS, and reuses sufficiently accurate positions no older than two minutes.
+- Keeps approximate-location support and bounded, user-initiated location lookup without background tracking.
+- Cancels abandoned Photon autocomplete and shared-link HTTP calls when their coroutine is cancelled.
+- Avoids an extra global Photon query when a local address search already found matches.
+- Gives supported map shortlinks a bounded 15-second overall resolution budget instead of repeated five-second failures.
+- Preserves the disabled-by-default overlay option and explicit Android permission requirement.
+
 ## 1.3.0
 
 Map sharing, on-demand location and cross-platform automation release.
