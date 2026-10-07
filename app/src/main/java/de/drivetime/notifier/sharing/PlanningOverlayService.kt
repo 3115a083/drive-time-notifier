@@ -46,6 +46,7 @@ class PlanningOverlayService : Service() {
     private var message by mutableStateOf<String?>(null)
     private var pendingField: String? = null
     private var requestId: String? = null
+    private var locationDeadline: Job? = null
     private val handler = Handler(Looper.getMainLooper())
     private val expiry = Runnable { stopSelf() }
 
@@ -68,6 +69,7 @@ class PlanningOverlayService : Service() {
         if (intent?.action == "location") {
             if (panel == null) { stopSelf(); return START_NOT_STICKY }
             if (intent.getStringExtra("request_id") != requestId) return START_NOT_STICKY
+            locationDeadline?.cancel(); locationDeadline = null
             locating = false
             val value = intent.getStringExtra("coordinates")
             if (value != null && SharedDestination.coordinates(value) != null) {
@@ -180,6 +182,15 @@ class PlanningOverlayService : Service() {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistChip(enabled = !locating, onClick = {
                 pendingField = field; requestId = UUID.randomUUID().toString(); locating = true; message = null
+                val activeRequest = requestId
+                locationDeadline?.cancel()
+                locationDeadline = scope.launch {
+                    delay(25_000L)
+                    if (requestId == activeRequest) {
+                        locating = false; pendingField = null; requestId = null
+                        message = tr(settings.language, "Location request ended. Try again or enter an address.", "Standortabfrage beendet. Erneut versuchen oder eine Adresse eingeben.")
+                    }
+                }
                 try { startActivity(Intent(this@PlanningOverlayService, OverlayLocationPermissionActivity::class.java)
                     .putExtra("request_id", requestId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 catch (_: RuntimeException) { locating = false; message = tr(settings.language, "Open the app to grant location access.", "App öffnen, um den Standortzugriff freizugeben.") }
@@ -192,6 +203,7 @@ class PlanningOverlayService : Service() {
         }
     }
     private fun removePanel() {
+        locationDeadline?.cancel(); locationDeadline = null
         requestId = null; pendingField = null; locating = false
         panel?.let { if (it.isAttachedToWindow) manager.removeViewImmediate(it); it.disposeComposition() }; panel = null
         owner?.close(); owner = null

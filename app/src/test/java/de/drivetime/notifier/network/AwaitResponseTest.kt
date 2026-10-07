@@ -29,5 +29,9 @@ class AwaitResponseTest {
         override fun isCanceled() = cancelled
         override fun timeout() = Timeout()
         override fun clone(): Call = PendingCall()
+        override fun <T : Any> tag(type: kotlin.reflect.KClass<T>): T? = null
+        override fun <T> tag(type: Class<out T>): T? = null
+        override fun <T : Any> tag(type: kotlin.reflect.KClass<T>, computeIfAbsent: () -> T): T = computeIfAbsent()
+        override fun <T : Any> tag(type: Class<T>, computeIfAbsent: () -> T): T = computeIfAbsent()
     }
 }
