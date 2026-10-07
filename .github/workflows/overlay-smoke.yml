@@ -38,7 +38,7 @@ jobs:
             mkdir -p overlay-screenshots
             adb pull /data/local/tmp/overlay-light.png overlay-screenshots/
             adb pull /data/local/tmp/overlay-dark.png overlay-screenshots/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: overlay-device-verification
