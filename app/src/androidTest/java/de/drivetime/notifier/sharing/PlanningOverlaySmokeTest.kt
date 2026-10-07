@@ -33,6 +33,8 @@ class PlanningOverlaySmokeTest {
                 device.waitForIdle()
                 val output = File(context.getExternalFilesDir(null), "overlay-${appearance.id}.png")
                 assertTrue(device.takeScreenshot(output))
+                // Gradle removes the app and its external files after instrumentation.
+                device.executeShellCommand("cp ${output.absolutePath} /data/local/tmp/${output.name}")
                 device.findObject(By.desc("Schließen")).click()
                 assertTrue("Overlay did not close", device.wait(Until.gone(By.text("Fahrt planen")), 10_000))
             }

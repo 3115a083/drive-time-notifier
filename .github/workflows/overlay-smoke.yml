@@ -36,7 +36,8 @@ jobs:
           script: |
             gradle connectedDebugAndroidTest --stacktrace
             mkdir -p overlay-screenshots
-            adb pull /sdcard/Android/data/de.drivetime.notifier.debug/files/. overlay-screenshots/
+            adb pull /data/local/tmp/overlay-light.png overlay-screenshots/
+            adb pull /data/local/tmp/overlay-dark.png overlay-screenshots/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
