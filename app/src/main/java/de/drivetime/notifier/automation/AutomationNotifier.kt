@@ -191,7 +191,8 @@ object AutomationNotifier {
         origin: String,
         destination: String,
         arrivalMillis: Long,
-        previousEndMillis: Long?
+        previousEndMillis: Long?,
+        trigger: String = "single-event"
     ) {
         if (!canNotify(context)) return
         createChannel(
@@ -237,14 +238,19 @@ object AutomationNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val triggerText = when (trigger) {
+            "scheduled" -> tr(language, "Started by the daily schedule.", "Durch den täglichen Zeitplan gestartet.")
+            "manual-next-day" -> tr(language, "Started by a manual next-day search.", "Durch die manuelle Suche nach morgigen Terminen gestartet.")
+            else -> tr(language, "Started by an individual drive action or retry.", "Durch eine Einzelaktion oder einen Wiederholungsversuch gestartet.")
+        }
         val text = tr(
             language,
             "The route to $destination could not be calculated after two attempts.",
             "Die Route nach $destination konnte nach zwei Versuchen nicht berechnet werden."
-        )
+        ) + " " + triggerText
         val notification = NotificationCompat.Builder(context, FAILURE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(tr(language, "Automatic drive failed", "Automatische Fahrt fehlgeschlagen"))
+            .setContentTitle(tr(language, "Drive calculation failed", "Fahrtberechnung fehlgeschlagen"))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)

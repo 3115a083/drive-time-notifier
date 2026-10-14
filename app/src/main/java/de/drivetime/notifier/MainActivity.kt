@@ -905,9 +905,12 @@ class MainActivity : ComponentActivity() {
                                         end,
                                         settings.reminderLeadMinutes,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                                        destinationStartMillis = activeRequest?.arrivalMillis,
+                                        allowDuplicate = duplicateExists
                                     )
                                 }.onSuccess {
+                                    duplicateExists = true
                                     calendarSaved = true
                                     delay(1400)
                                     calendarSaved = false
@@ -2395,6 +2398,8 @@ class MainActivity : ComponentActivity() {
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
                     appendLine()
                     append(RequestDebugLog.format(debugEntries))
+                    append("\n\n")
+                    append(de.drivetime.notifier.automation.AutomationRunLog.format(context))
                 }
                 SettingsCard(
                     title = tr(settings.language, "Network debug", "Netzwerk-Debug"),
@@ -2415,7 +2420,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Copy", "Kopieren"))
                         }
-                        TextButton(onClick = { RequestDebugLog.clear() }) {
+                        TextButton(onClick = { RequestDebugLog.clear(); de.drivetime.notifier.automation.AutomationRunLog.clear(context) }) {
                             Icon(Icons.Outlined.DeleteOutline, null)
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Clear", "Leeren"))

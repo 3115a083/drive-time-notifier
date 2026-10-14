@@ -49,13 +49,17 @@ class CalendarRepository(private val context: Context) {
                 CalendarContract.Instances.TITLE,
                 CalendarContract.Instances.EVENT_LOCATION,
                 CalendarContract.Instances.BEGIN,
-                CalendarContract.Instances.END
+                CalendarContract.Instances.END,
+                CalendarContract.Instances.DESCRIPTION
             )
             val out = mutableListOf<CalendarEventRef>()
-            context.contentResolver.query(builder.build(), projection, null, null, CalendarContract.Instances.BEGIN + " ASC")?.use { cursor ->
+            val cursorResult = context.contentResolver.query(builder.build(), projection, null, null, CalendarContract.Instances.BEGIN + " ASC")
+                ?: error("Calendar appointments could not be read.")
+            cursorResult.use { cursor ->
                 while (cursor.moveToNext()) {
                     val calendarId = cursor.getLong(1)
                     if (calendarId !in calendarIds) continue
+                    if (DriveEntryIdentity.isOwnDescription(cursor.getString(6).orEmpty())) continue
                     val location = cursor.getString(3).orEmpty().trim()
                     if (location.isBlank()) continue
                     out += CalendarEventRef(
@@ -89,19 +93,22 @@ class CalendarRepository(private val context: Context) {
         val from = destinationStartMillis - 24L * 60 * 60 * 1000
         val to = destinationStartMillis + 5L * 60 * 1000
         val selection = "${CalendarContract.Events.CALENDAR_ID}=? AND " +
-            "${CalendarContract.Events.DELETED}=0 AND " +
-            "${CalendarContract.Events.DTSTART}>=? AND ${CalendarContract.Events.DTSTART}<=?"
-        val args = arrayOf(calendarId.toString(), from.toString(), to.toString())
+            "${CalendarContract.Events.DELETED}=0 AND (" +
+            "${CalendarContract.Events.DESCRIPTION} LIKE ? OR " +
+            "(${CalendarContract.Events.DTSTART}>=? AND ${CalendarContract.Events.DTSTART}<=?))"
+        require(identityKey.matches(Regex("[a-f0-9]{24}"))) { "Invalid drive identity." }
+        val args = arrayOf(calendarId.toString(), "%${DriveEntryIdentity.marker(identityKey)}%", from.toString(), to.toString())
         val normalizedDestination = DriveEntryIdentity.normalizeLocation(destination)
         val legacyTolerance = 185L * 60 * 1000
 
-        context.contentResolver.query(
+        val cursorResult = context.contentResolver.query(
             CalendarContract.Events.CONTENT_URI,
             projection,
             selection,
             args,
             CalendarContract.Events.DTSTART + " ASC"
-        )?.use { cursor ->
+        ) ?: error("Calendar duplicate check failed.")
+        cursorResult.use { cursor ->
             while (cursor.moveToNext()) {
                 val eventId = cursor.getLong(0)
                 val location = cursor.getString(1).orEmpty()
@@ -113,7 +120,8 @@ class CalendarRepository(private val context: Context) {
                     return@withContext ExistingDriveEntry(eventId, startMillis, endMillis)
                 }
 
-                val legacyMatch = DriveEntryIdentity.isOwnDescription(description) &&
+                val legacyMatch = !DriveEntryIdentity.hasAnyMarker(description) &&
+                    DriveEntryIdentity.isOwnDescription(description) &&
                     DriveEntryIdentity.normalizeLocation(location) == normalizedDestination &&
                     endMillis <= destinationStartMillis + 5L * 60 * 1000 &&
                     abs(destinationStartMillis - endMillis) <= legacyTolerance
@@ -127,14 +135,42 @@ class CalendarRepository(private val context: Context) {
 
     suspend fun insertDrive(
         calendarId: Long,
-        origin: String,
+        @Suppress("UNUSED_PARAMETER") origin: String,
+        destination: String,
+        departureMillis: Long,
+        arrivalMillis: Long,
+        reminderLeadMinutes: Int,
+        title: String,
+        description: String,
+        destinationStartMillis: Long? = null,
+        allowDuplicate: Boolean = false
+    ): Long = withContext(Dispatchers.IO) {
+        val identityKey = DriveEntryIdentity.extractKey(description)
+        if (!allowDuplicate && identityKey != null) {
+            require(destinationStartMillis != null) { "Appointment time is required for duplicate protection." }
+            return@withContext DriveWriteGuard.save(
+                findExisting = {
+                    findExistingDrive(calendarId, destination, destinationStartMillis, identityKey)?.eventId
+                },
+                insert = {
+                    insertDriveUnchecked(calendarId, destination, departureMillis, arrivalMillis,
+                        reminderLeadMinutes, title, description)
+                }
+            )
+        }
+        insertDriveUnchecked(calendarId, destination, departureMillis, arrivalMillis,
+            reminderLeadMinutes, title, description)
+    }
+
+    private fun insertDriveUnchecked(
+        calendarId: Long,
         destination: String,
         departureMillis: Long,
         arrivalMillis: Long,
         reminderLeadMinutes: Int,
         title: String,
         description: String
-    ): Long = withContext(Dispatchers.IO) {
+    ): Long {
         require(calendarId >= 0) { "No target calendar selected." }
         val values = ContentValues().apply {
             put(CalendarContract.Events.CALENDAR_ID, calendarId)
@@ -159,6 +195,6 @@ class CalendarRepository(private val context: Context) {
                 }
             )
         }
-        eventId
+        return eventId
     }
 }

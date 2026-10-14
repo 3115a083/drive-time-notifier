@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.2 (unreleased)
+
+- Exclude generated drive events from source-calendar scans, preventing recursive planning when source and destination calendars overlap.
+- Recheck calendar duplicates under a shared write lock immediately before insertion, including concurrent manual and scheduled runs.
+- Preserve explicit “Save anyway” actions; treat modern appointment identifiers separately from legacy matching.
+- Anchor each daily run to the configured local time, including time-zone and daylight-saving changes. Skip jobs delayed by more than two hours and migrate old schedules.
+- Keep the requested planning date when a delayed job crosses midnight.
+- Record bounded, persistent automation execution metadata in diagnostics and identify manual versus scheduled routing failures in notifications.
+- Propagate cancellation and distinguish calendar/output failures from routing failures.
+
+
 ## 1.3.1
 
 Planning popup styling and timeout reliability fixes.

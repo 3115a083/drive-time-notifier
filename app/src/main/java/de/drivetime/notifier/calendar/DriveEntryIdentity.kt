@@ -23,6 +23,11 @@ object DriveEntryIdentity {
         return if (description.contains(marker)) description else "$description\n\n$marker"
     }
 
+    fun extractKey(description: String): String? =
+        Regex("\\[DriveTimeNotifier-ID:([a-f0-9]{24})\\]").find(description)?.groupValues?.get(1)
+
+    fun hasAnyMarker(description: String): Boolean = description.contains(MARKER_PREFIX)
+
     fun hasMarker(description: String, key: String): Boolean = description.contains(marker(key))
 
     fun isOwnDescription(description: String): Boolean =
