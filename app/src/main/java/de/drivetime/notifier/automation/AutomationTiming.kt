@@ -8,6 +8,10 @@ import java.time.ZonedDateTime
 object AutomationTiming {
     const val MAX_LATENESS_MINUTES = 120L
 
+    fun mayRunManual(nowMillis: Long, requestedMillis: Long): Boolean =
+        requestedMillis > 0 && nowMillis >= requestedMillis &&
+            nowMillis - requestedMillis <= MAX_LATENESS_MINUTES * 60_000L
+
     fun nextRun(now: ZonedDateTime, hour: Int, minute: Int): ZonedDateTime {
         val time = java.time.LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59))
         val today = now.toLocalDate().atTime(time).atZone(now.zone)

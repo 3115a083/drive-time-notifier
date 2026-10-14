@@ -9,6 +9,15 @@ import org.junit.Test
 class AutomationTimingTest {
     private fun time(value: String) = ZonedDateTime.parse(value + "[Europe/Berlin]")
 
+    @Test fun oldOrClockShiftedManualJobsCannotResumeForAnotherDay() {
+        val now = 1_800_000_000_000L
+        assertTrue(AutomationTiming.mayRunManual(now, now))
+        assertTrue(AutomationTiming.mayRunManual(now, now - 120 * 60_000))
+        assertFalse(AutomationTiming.mayRunManual(now, -1))
+        assertFalse(AutomationTiming.mayRunManual(now, now - 120 * 60_000 - 1))
+        assertFalse(AutomationTiming.mayRunManual(now, now + 1))
+    }
+
     @Test fun choosesTheNextLocalEvening() {
         val noon = time("2026-10-14T12:00:00+02:00")
         assertEquals(time("2026-10-14T21:00:00+02:00"), AutomationTiming.nextRun(noon, 21, 0))

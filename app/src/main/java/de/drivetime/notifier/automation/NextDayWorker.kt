@@ -64,7 +64,7 @@ class NextDayWorker(
             return Result.success()
         }
         val requestedAt = inputData.getLong("requested_at", -1L)
-        if (forced && requestedAt > 0 && System.currentTimeMillis() - requestedAt > 120L * 60_000) {
+        if (forced && !AutomationTiming.mayRunManual(now.toInstant().toEpochMilli(), requestedAt)) {
             AutomationRunLog.add(applicationContext, trigger, "skipped-stale-manual-request")
             return Result.success()
         }
