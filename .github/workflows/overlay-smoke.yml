@@ -34,10 +34,13 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            gradle connectedDebugAndroidTest --stacktrace
+            test_status=0
+            gradle connectedDebugAndroidTest --stacktrace || test_status=$?
             mkdir -p overlay-screenshots
-            adb pull /data/local/tmp/overlay-light.png overlay-screenshots/
-            adb pull /data/local/tmp/overlay-dark.png overlay-screenshots/
+            for file in overlay-light.png overlay-dark.png overlay-start-failure.png overlay-start-failure.xml; do
+              adb pull /data/local/tmp/$file overlay-screenshots/ || true
+            done
+            exit "$test_status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
