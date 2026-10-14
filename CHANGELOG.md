@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.2 (unreleased)
+
+- Exclude generated drive events from source-calendar scans, preventing recursive planning when source and destination calendars overlap.
+- Recalculate existing drives and update their times, descriptions and reminders in place when appointment, start and destination match. Preserve calendar IDs and consolidate confirmed older duplicates under one shared write lock.
+- Prevent slower, older calculations from overwriting newer results. Keep different start addresses and distinct appointments separate. Treat modern identifiers separately from legacy matching.
+- Add optional package-scoped broadcast intents and HTTPS JSON webhooks after calendar storage or ICS export, with selectable data fields, stable plan IDs, revisions and bounded retries. Encrypt forwarding destinations and credentials.
+- Use stable ICS UIDs for the same appointment and route.
+- Anchor each daily run to the configured local time, including time-zone and daylight-saving changes. Skip jobs delayed by more than two hours and migrate old schedules.
+- Keep the requested planning date when a delayed job crosses midnight.
+- Record bounded, persistent automation execution metadata in diagnostics and identify manual versus scheduled routing failures in notifications.
+- Propagate cancellation and distinguish calendar/output failures from routing failures.
+
+
 ## 1.3.1
 
 Planning popup styling and timeout reliability fixes.

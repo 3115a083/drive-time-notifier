@@ -6,6 +6,7 @@ on:
       - 'app/src/main/java/de/drivetime/notifier/ui/**'
       - 'app/src/androidTest/**'
       - '.github/workflows/overlay-smoke.yml'
+      - '.github/scripts/verify-device.sh'
 permissions:
   contents: read
 jobs:
@@ -33,11 +34,7 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
-          script: |
-            gradle connectedDebugAndroidTest --stacktrace
-            mkdir -p overlay-screenshots
-            adb pull /data/local/tmp/overlay-light.png overlay-screenshots/
-            adb pull /data/local/tmp/overlay-dark.png overlay-screenshots/
+          script: bash .github/scripts/verify-device.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
