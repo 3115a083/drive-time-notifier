@@ -38,40 +38,18 @@ class SingleEventWorker(
     }
 
     private suspend fun process(): Result {
+        val calculationRevision = System.currentTimeMillis()
         val settings = SettingsStore(applicationContext).flow.first()
         val destination = inputData.getString("destination").orEmpty().trim()
         val arrival = inputData.getLong("arrival_millis", -1L)
         val previousEnd = inputData.getLong("previous_end_millis", -1L).takeIf { it > 0 }
         val origin = inputData.getString("origin").orEmpty().trim().ifBlank { settings.homeAddress }
-        val allowDuplicate = inputData.getBoolean("allow_duplicate", false)
         if (origin.isBlank() || destination.isBlank() || arrival <= 0) return Result.failure()
 
         setForeground(AutomationNotifier.processingForegroundInfo(applicationContext, settings.language, id))
         val identityKey = DriveEntryIdentity.key(destination, arrival)
         AutomationRunLog.add(applicationContext, "single-event", "started", identityKey)
         val calendar = CalendarRepository(applicationContext)
-
-        if (!allowDuplicate && !settings.outputIcs) {
-            val duplicate = calendar.findExistingDrive(
-                    settings.targetCalendarId,
-                    destination,
-                    arrival,
-                    identityKey
-                )
-            if (duplicate != null) {
-                AutomationRunLog.add(applicationContext, "single-event", "duplicate-skipped", identityKey)
-                AutomationNotifier.notifyDuplicateDecision(
-                    applicationContext,
-                    settings.language,
-                    origin,
-                    destination,
-                    arrival,
-                    previousEnd,
-                    identityKey
-                )
-                return Result.success()
-            }
-        }
 
         val routes = RoutingServiceFactory.create(applicationContext, settings, automated = true)
         val request = RouteRequest(origin, destination, arrival)
@@ -128,7 +106,9 @@ class SingleEventWorker(
                     plan.departureMillis,
                     plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                     title,
-                    description
+                    description,
+                    appointmentMillis = arrival,
+                    calculatedAtMillis = calculationRevision
                 )
             } else {
                 calendar.insertDrive(
@@ -141,7 +121,7 @@ class SingleEventWorker(
                     title,
                     description,
                     destinationStartMillis = arrival,
-                    allowDuplicate = allowDuplicate
+                    calculatedAtMillis = calculationRevision
                 )
             }
             if (overlapsPrevious) {
@@ -152,7 +132,7 @@ class SingleEventWorker(
                     plan.departureMillis
                 )
             }
-            AutomationRunLog.add(applicationContext, "single-event", "saved-or-already-present", identityKey)
+            AutomationRunLog.add(applicationContext, "single-event", "saved-or-newer-plan-preserved", identityKey)
             Result.success()
         }
     }

@@ -7,6 +7,6 @@ import kotlinx.coroutines.sync.withLock
 object DriveWriteGuard {
     private val mutex = Mutex()
 
-    suspend fun <T> save(findExisting: suspend () -> T?, insert: suspend () -> T): T =
-        mutex.withLock { findExisting() ?: insert() }
+    suspend fun <T> locked(block: suspend () -> T): T = mutex.withLock { block() }
+
 }

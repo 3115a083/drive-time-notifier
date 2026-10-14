@@ -10,10 +10,10 @@ class DriveWriteGuardTest {
         var inserts = 0
         val ids = (1..40).map {
             async(Dispatchers.Default) {
-                DriveWriteGuard.save(
-                    findExisting = { delay(1); entry },
-                    insert = { delay(1); inserts++; entry = 42L; 42L }
-                )
+                DriveWriteGuard.locked {
+                    delay(1)
+                    entry ?: run { delay(1); inserts++; entry = 42L; 42L }
+                }
             }
         }.awaitAll()
         assertEquals(1, inserts)
@@ -22,14 +22,14 @@ class DriveWriteGuardTest {
 
     @Test fun failedChecksPreventWritesAndReleaseTheLock() = runBlocking {
         var inserts = 0
+        suspend fun lookup(): Long? { error("Calendar access denied") }
         try {
-            DriveWriteGuard.save<Long>(
-                findExisting = { error("Calendar access denied") },
-                insert = { inserts++; 1L }
-            )
+            DriveWriteGuard.locked<Long> {
+                lookup() ?: run { inserts++; 1L }
+            }
             fail("The calendar check must fail closed")
         } catch (_: IllegalStateException) { }
         assertEquals(0, inserts)
-        assertEquals(2L, DriveWriteGuard.save(findExisting = { null }, insert = { 2L }))
+        assertEquals(2L, DriveWriteGuard.locked { 2L })
     }
 }

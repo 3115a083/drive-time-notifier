@@ -300,6 +300,7 @@ class MainActivity : ComponentActivity() {
         var planWarning by remember { mutableStateOf<String?>(null) }
         var planConflict by remember { mutableStateOf(false) }
         var duplicateExists by remember { mutableStateOf(false) }
+        var calculationRevision by remember { mutableLongStateOf(0L) }
         var driveIdentityKey by remember { mutableStateOf("") }
         var plannedStart by remember { mutableStateOf<Long?>(null) }
         var plannedEnd by remember { mutableStateOf<Long?>(null) }
@@ -344,7 +345,9 @@ class MainActivity : ComponentActivity() {
                             start,
                             end,
                             resolvedDriveEventTitle(settings),
-                            description
+                            description,
+                            appointmentMillis = activeRequest?.arrivalMillis,
+                            calculatedAtMillis = calculationRevision
                         )
                     }.onFailure {
                         error = it.message ?: tr(
@@ -425,8 +428,8 @@ class MainActivity : ComponentActivity() {
             planWarning = listOfNotNull(
                 if (duplicate) tr(
                     settings.language,
-                    "A Drive Time Notifier entry already exists for this destination and appointment time. You can still save another drive if you want to.",
-                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Du kannst die Fahrt auf Wunsch trotzdem erneut speichern."
+                    "A Drive Time Notifier entry already exists for this destination and appointment time. Saving updates the existing drive with the latest calculation.",
+                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Beim Speichern wird die vorhandene Fahrt mit der aktuellen Berechnung aktualisiert."
                 ) else null,
                 planWarningText(settings.language, plan, effectiveBufferMinutes),
                 routeWarningText(settings.language, settings.routingProvider, route.warning)
@@ -560,6 +563,7 @@ class MainActivity : ComponentActivity() {
         fun calculateRoute() {
             if (origin.isBlank() || destination.isBlank() || loading) return
             calculationGeneration += 1
+            calculationRevision = System.currentTimeMillis()
             val generation = calculationGeneration
             error = null
             loading = true
@@ -586,7 +590,8 @@ class MainActivity : ComponentActivity() {
                         settings.targetCalendarId,
                         cleanDestination,
                         target,
-                        identityKey
+                        identityKey,
+                        origin = origin.trim()
                     )
                 }.getOrNull()
             } else null
@@ -851,7 +856,9 @@ class MainActivity : ComponentActivity() {
                                         start,
                                         end,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                            appointmentMillis = activeRequest?.arrivalMillis,
+                            calculatedAtMillis = calculationRevision
                                     )
                                     context.startActivity(
                                         Intent.createChooser(
@@ -907,7 +914,7 @@ class MainActivity : ComponentActivity() {
                                         resolvedDriveEventTitle(settings),
                                         description,
                                         destinationStartMillis = activeRequest?.arrivalMillis,
-                                        allowDuplicate = duplicateExists
+                                        calculatedAtMillis = calculationRevision
                                     )
                                 }.onSuccess {
                                     duplicateExists = true
@@ -946,7 +953,7 @@ class MainActivity : ComponentActivity() {
                             if (calendarSaved)
                                 tr(settings.language, "Added successfully", "Erfolgreich eingetragen")
                             else if (duplicateExists)
-                                tr(settings.language, "Save anyway", "Trotzdem speichern")
+                                tr(settings.language, "Update drive", "Fahrt aktualisieren")
                             else
                                 tr(settings.language, "Save drive to calendar", "Fahrt im Kalender speichern")
                         )
@@ -1426,6 +1433,7 @@ class MainActivity : ComponentActivity() {
         var showTargetPicker by remember { mutableStateOf(false) }
         var showSourcePicker by remember { mutableStateOf(false) }
         var showAutomationTimePicker by remember { mutableStateOf(false) }
+        var showPlanHookSettings by remember { mutableStateOf(false) }
         var showAddPlace by remember { mutableStateOf(false) }
         var calendarPlaceAssignmentRaw by remember { mutableStateOf<String?>(null) }
         var showAddExclusion by remember { mutableStateOf(false) }
@@ -2117,6 +2125,14 @@ class MainActivity : ComponentActivity() {
                     onClick = { showAutomationTimePicker = true },
                     leadingIcon = Icons.Outlined.Schedule
                 )
+                OutlinedButton(onClick = { showPlanHookSettings = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Send, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(tr(settings.language, "Forward saved plans", "Gespeicherte Planungen weitergeben"))
+                }
+                if (showPlanHookSettings) de.drivetime.notifier.ui.PlanHookSettingsDialog(settings.language) {
+                    showPlanHookSettings = false
+                }
             }
 
             SettingsCard(

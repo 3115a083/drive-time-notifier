@@ -44,7 +44,7 @@ Für iPhone und iPad steht eine [Bauanleitung für Apple Kurzbefehle](docs/apple
 - zusätzliche gespeicherte Startorte
 - kalenderabhängige Startorte für automatische Verarbeitung
 - frei konfigurierbarer Ankunftspuffer, dynamischer Zusatzpuffer und Erinnerung
-- Konfliktprüfung mit vorherigen Terminen und kontrolliertes Speichern trotz Duplikatwarnung
+- Konfliktprüfung mit vorherigen Terminen und Aktualisierung bestehender Fahrten
 - TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes und HERE Routing v8
 - geordnete Fallback-Routinganbieter
 - lokale tägliche, wöchentliche und monatliche Request-Caps
@@ -131,6 +131,13 @@ Wenn sie deaktiviert ist, läuft die Verarbeitung nur:
 - über autorisierte externe Trigger
 
 Automatische Routinganfragen verwenden längere Timeouts. Nach einem Fehler erfolgt ein zweiter Versuch. Schlägt auch dieser fehl, bietet eine Benachrichtigung **Fahrt öffnen** und **Wiederholen** an.
+
+
+Neue Berechnungen aktualisieren die vorhandene Fahrt zum selben Termin, wenn Start- und Zieladresse übereinstimmen. Zeiten, Beschreibung und Erinnerung werden ersetzt; die Kalender-ID bleibt erhalten. Unterschiedliche Startorte und Termine bleiben getrennt. Bereits erzeugte Fahrten werden nicht erneut als Ausgangstermine verarbeitet.
+
+Die tägliche Verarbeitung richtet sich nach der eingestellten lokalen Uhrzeit und berücksichtigt Zeitumstellungen. Android kann Hintergrundarbeit verzögern. Mehr als zwei Stunden verspätete Aufträge werden übersprungen und für den nächsten geplanten Zeitpunkt neu eingeplant. Diagnose und Fehlermeldungen unterscheiden manuelle und zeitgesteuerte Verarbeitung.
+
+Unter **Automatische Verarbeitung → Gespeicherte Planungen weitergeben** lassen sich Broadcast-Intents, etwa für Tasker, und HTTPS-Webhooks, etwa für Home Assistant, aktivieren. Die Weitergabe erfolgt nach erfolgreicher Speicherung oder Aktualisierung einer Kalenderfahrt sowie beim ICS-Export. Der Nutzer wählt Adressen, Zeiten und optionale weitere Felder aus. Beide Ausgaben sind standardmäßig deaktiviert. [Einrichtung, Datenformat und Beispiele](docs/PLAN_INTEGRATIONS.md).
 
 ## Routinganbieter und Zugangsdaten
 

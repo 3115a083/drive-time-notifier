@@ -45,13 +45,17 @@ class AutomationCalendarTest {
         try {
             val meeting = repo.insertDrive(calendarId, "Home", destination, arrival, arrival + 3_600_000,
                 0, "Appointment", "Source appointment")
-            val saves = (1..20).map {
+            val revision = System.currentTimeMillis()
+            val saves = (1..20).map { index ->
                 async(Dispatchers.Default) {
-                    repo.insertDrive(calendarId, "Home", destination, arrival - 3_600_000, arrival - 600_000,
-                        0, "Drive", description, destinationStartMillis = arrival)
+                    repo.insertDrive(calendarId, "Home", destination, arrival - 3_600_000 + index * 1_000, arrival - 600_000 + index * 1_000,
+                        0, "Drive", description, destinationStartMillis = arrival, calculatedAtMillis = revision + index)
                 }
             }.awaitAll()
             assertEquals("Concurrent planning must reuse one entry", 1, saves.distinct().size)
+            val newest = requireNotNull(repo.findExistingDrive(calendarId, destination, arrival, origin = "Home"))
+            assertEquals(arrival - 600_000 + 20_000, newest.endMillis)
+            assertEquals(revision + 20, DriveEntryIdentity.revision(newest.description))
             val sourceEvents = repo.events(arrival - 7_200_000, arrival + 7_200_000, setOf(calendarId))
             assertEquals(listOf(meeting), sourceEvents.map { it.id })
 
@@ -70,9 +74,38 @@ class AutomationCalendarTest {
                 destinationStartMillis = distant)
             assertEquals(longEntry, repo.findExistingDrive(calendarId, destination, distant)?.eventId)
 
-            val explicitDuplicate = repo.insertDrive(calendarId, "Home", destination, arrival - 3_600_000, arrival - 600_000,
-                0, "Drive", description, destinationStartMillis = arrival, allowDuplicate = true)
-            assertNotEquals(saves.first(), explicitDuplicate)
+            val differentOrigin = repo.insertDrive(calendarId, "Other home", destination, arrival - 3_600_000, arrival - 600_000,
+                0, "Drive", description, destinationStartMillis = arrival, calculatedAtMillis = revision + 100)
+            assertNotEquals(saves.first(), differentOrigin)
+            val updated = repo.insertDrive(calendarId, "Home", destination, arrival - 2_700_000, arrival - 900_000,
+                5, "Updated drive", description, destinationStartMillis = arrival, calculatedAtMillis = revision + 200)
+            assertEquals(saves.first(), updated)
+            assertEquals(arrival - 900_000, repo.findExistingDrive(calendarId, destination, arrival, origin = "Home")?.endMillis)
+            // The slower older result must leave the new plan untouched.
+            repo.insertDrive(calendarId, "Home", destination, arrival - 3_600_000, arrival - 600_000,
+                0, "Outdated drive", description, destinationStartMillis = arrival, calculatedAtMillis = revision + 150)
+            assertEquals(arrival - 900_000, repo.findExistingDrive(calendarId, destination, arrival, origin = "Home")?.endMillis)
+            resolver.query(CalendarContract.Reminders.CONTENT_URI, arrayOf(CalendarContract.Reminders.MINUTES),
+                "${CalendarContract.Reminders.EVENT_ID}=?", arrayOf(updated.toString()), null)?.use { reminders ->
+                assertEquals(1, reminders.count)
+                assertTrue(reminders.moveToFirst())
+                assertEquals(5, reminders.getInt(0))
+            } ?: fail("Missing reminders")
+            // A confirmed duplicate from an older app version is consolidated by the next update.
+            val oldDuplicate = requireNotNull(resolver.insert(CalendarContract.Events.CONTENT_URI, ContentValues().apply {
+                put(CalendarContract.Events.CALENDAR_ID, calendarId)
+                put(CalendarContract.Events.TITLE, "Old duplicate")
+                put(CalendarContract.Events.EVENT_LOCATION, destination)
+                put(CalendarContract.Events.DESCRIPTION, "From: Home\n$description")
+                put(CalendarContract.Events.DTSTART, arrival - 3_600_000)
+                put(CalendarContract.Events.DTEND, arrival - 600_000)
+                put(CalendarContract.Events.EVENT_TIMEZONE, "UTC")
+            }))
+            repo.insertDrive(calendarId, "Home", destination, arrival - 2_700_000, arrival - 900_000,
+                5, "Updated drive", description, destinationStartMillis = arrival, calculatedAtMillis = revision + 300)
+            resolver.query(oldDuplicate, arrayOf(CalendarContract.Events.DELETED), null, null, null)?.use { cursor ->
+                assertTrue("Confirmed old duplicate must be removed", !cursor.moveToFirst() || cursor.getInt(0) == 1)
+            } ?: fail("Could not inspect duplicate")
         } finally {
             resolver.delete(calendarsUri, "${CalendarContract.Calendars._ID}=?", arrayOf(calendarId.toString()))
         }

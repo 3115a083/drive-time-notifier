@@ -43,7 +43,7 @@ An [Apple Shortcuts construction guide](docs/apple-shortcuts/README_EN.md) and [
 - additional saved start locations
 - per-calendar start locations for automatic processing
 - configurable arrival buffer, dynamic extra buffer and reminder
-- conflict checks and controlled saving despite a duplicate warning
+- conflict checks and in-place updates of existing drives
 - TomTom, Valhalla, openrouteservice, OSRM, GraphHopper, Google Routes and HERE Routing v8
 - ordered fallback routing providers
 - local daily, weekly and monthly request caps
@@ -130,6 +130,13 @@ When disabled, processing runs only:
 - through authorized external triggers
 
 Automatic routing uses longer timeouts. A failed calculation is retried once. If the second attempt fails, a notification offers **Open drive** and **Retry**.
+
+
+A new calculation updates the existing drive for the same appointment when start and destination addresses match. Times, description and reminder are replaced while the calendar ID is preserved. Different origins and appointments remain separate. Generated drives are excluded from source appointment scans.
+
+Daily processing follows the configured local clock, including daylight-saving changes. Android may delay background work; jobs delayed more than two hours are skipped and reanchored to the next configured time. Diagnostics and failure notifications distinguish manual and scheduled runs.
+
+**Automatic processing → Forward saved plans** enables optional package-scoped broadcast intents, such as Tasker, and HTTPS JSON webhooks, such as Home Assistant. Selected fields are sent after calendar creation/update or ICS export. Both outputs are disabled by default. [Setup, payload format and examples](docs/PLAN_INTEGRATIONS.md).
 
 ## Routing providers and credentials
 

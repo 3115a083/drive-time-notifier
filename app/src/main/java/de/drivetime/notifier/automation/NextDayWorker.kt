@@ -52,6 +52,7 @@ class NextDayWorker(
     }
 
     private suspend fun process(forced: Boolean): Result {
+        val calculationRevision = System.currentTimeMillis()
         val settings = SettingsStore(applicationContext).flow.first()
         val now = ZonedDateTime.now()
         val scheduled = inputData.getLong("scheduled_for", -1L)
@@ -109,29 +110,6 @@ class NextDayWorker(
             }
 
             val identityKey = DriveEntryIdentity.key(event.location, event.startMillis)
-            if (!settings.outputIcs) {
-                val duplicate = calendar.findExistingDrive(
-                        settings.targetCalendarId,
-                        event.location,
-                        event.startMillis,
-                        identityKey
-                    )
-                if (duplicate != null) {
-                    AutomationRunLog.add(applicationContext, trigger, "duplicate-skipped", identityKey)
-                    AutomationNotifier.notifyDuplicateDecision(
-                        applicationContext,
-                        settings.language,
-                        origin,
-                        event.location,
-                        event.startMillis,
-                        previousEnd,
-                        identityKey
-                    )
-                    previousEnd = event.endMillis
-                    continue
-                }
-            }
-
             val request = RouteRequest(origin, event.location, event.startMillis)
             val initialEstimate = routeWithRetry(routes, request)
             if (initialEstimate == null) {
@@ -193,7 +171,9 @@ class NextDayWorker(
                         plan.departureMillis,
                         plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                         title,
-                        description
+                        description,
+                        appointmentMillis = event.startMillis,
+                        calculatedAtMillis = calculationRevision
                     )
                 } else {
                     calendar.insertDrive(
@@ -205,10 +185,11 @@ class NextDayWorker(
                         settings.reminderLeadMinutes,
                         title,
                         description,
-                        destinationStartMillis = event.startMillis
+                        destinationStartMillis = event.startMillis,
+                        calculatedAtMillis = calculationRevision
                     )
                 }
-                AutomationRunLog.add(applicationContext, trigger, "saved-or-already-present", identityKey)
+                AutomationRunLog.add(applicationContext, trigger, "saved-or-newer-plan-preserved", identityKey)
             }.onFailure {
                 if (it is CancellationException) throw it
                 AutomationRunLog.add(applicationContext, trigger, "save-failed", it.javaClass.simpleName)

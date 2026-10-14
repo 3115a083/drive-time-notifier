@@ -28,7 +28,6 @@ object AutomationNotifier {
     private const val CHANNEL_ID = "drive_conflicts"
     private const val FAILURE_CHANNEL_ID = "drive_failures"
     private const val PROCESSING_CHANNEL_ID = "drive_processing"
-    private const val DUPLICATE_CHANNEL_ID = "drive_duplicates"
 
     fun processingForegroundInfo(context: Context, language: AppLanguage, workId: UUID): ForegroundInfo {
         createChannel(
@@ -72,77 +71,6 @@ object AutomationNotifier {
             notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
-    }
-
-    @SuppressLint("MissingPermission")
-    fun notifyDuplicateDecision(
-        context: Context,
-        language: AppLanguage,
-        origin: String,
-        destination: String,
-        arrivalMillis: Long,
-        previousEndMillis: Long?,
-        identityKey: String
-    ) {
-        if (!canNotify(context)) return
-        createChannel(
-            context,
-            DUPLICATE_CHANNEL_ID,
-            tr(language, "Duplicate drives", "Doppelte Fahrten"),
-            tr(
-                language,
-                "Asks what to do when an automatically planned drive already exists.",
-                "Fragt nach, wenn eine automatisch geplante Fahrt bereits vorhanden ist."
-            ),
-            NotificationManager.IMPORTANCE_DEFAULT,
-            silent = true
-        )
-
-        val notificationId = duplicateNotificationId(identityKey)
-        val saveIntent = Intent(context, AutomationDuplicateReceiver::class.java).apply {
-            action = AutomationDuplicateReceiver.ACTION_SAVE_ANYWAY
-            putExtra("origin", origin)
-            putExtra("destination", destination)
-            putExtra("arrival_millis", arrivalMillis)
-            putExtra("previous_end_millis", previousEndMillis ?: -1L)
-            putExtra("identity_key", identityKey)
-            putExtra("notification_id", notificationId)
-        }
-        val cancelIntent = Intent(context, AutomationDuplicateReceiver::class.java).apply {
-            action = AutomationDuplicateReceiver.ACTION_CANCEL
-            putExtra("notification_id", notificationId)
-        }
-        val savePending = PendingIntent.getBroadcast(
-            context,
-            notificationId + 1,
-            saveIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val cancelPending = PendingIntent.getBroadcast(
-            context,
-            notificationId + 2,
-            cancelIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val text = tr(
-            language,
-            "A Drive Time Notifier entry for $destination already exists. No new routing request was sent.",
-            "Für $destination existiert bereits ein Drive-Time-Notifier-Eintrag. Es wurde keine neue Routinganfrage gesendet."
-        )
-        val notification = NotificationCompat.Builder(context, DUPLICATE_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(tr(language, "Drive already exists", "Fahrt existiert bereits"))
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setSilent(true)
-            .setAutoCancel(false)
-            .setDeleteIntent(cancelPending)
-            .addAction(0, tr(language, "Save anyway", "Trotzdem speichern"), savePending)
-            .addAction(0, tr(language, "Cancel", "Abbrechen"), cancelPending)
-            .build()
-
-        NotificationManagerCompat.from(context).notify(notificationId, notification)
     }
 
     @SuppressLint("MissingPermission")
@@ -304,8 +232,6 @@ object AutomationNotifier {
     }
 
     private fun processingNotificationId(workId: UUID): Int = 40_000 + workId.hashCode().absoluteValue % 10_000
-
-    private fun duplicateNotificationId(identityKey: String): Int = 60_000 + identityKey.hashCode().absoluteValue % 10_000
 
     private fun createChannel(
         context: Context,
