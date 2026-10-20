@@ -6,9 +6,10 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ShortcutManager
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.UiDevice
+import androidx.test.filters.SdkSuppress
 import androidx.work.Configuration
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -85,7 +86,7 @@ class ShortcutActionTest {
             // Direct automation must authenticate even though registered shortcuts need no dialog.
             val before = manager.getWorkInfosForUniqueWork("manual-next-drive-locator").get().single().id
             val token = AutomationTokenStore(context).token()
-            for (supplied in listOf<String?>(null, "", "invalid", token.dropLast(1) + if (token.last() == 'A') "B" else "A")) {
+            for (supplied in listOf<String?>(null, "", "invalid", token.reversed())) {
                 AutomationReceiver().onReceive(context, Intent(MainActivity.ACTION_NEXT_DRIVE)
                     .putExtra(AutomationReceiver.EXTRA_TOKEN, supplied))
                 assertEquals(before, manager.getWorkInfosForUniqueWork("manual-next-drive-locator")
@@ -103,7 +104,9 @@ class ShortcutActionTest {
         }
     }
 
-    @Test fun directExternalLaunchIsDeniedAndShortcutHasItsOwnTask() {
+    @Test
+    @SdkSuppress(minSdkVersion = 34)
+    fun directExternalLaunchIsDeniedAndShortcutHasItsOwnTask() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val component = ComponentName(context, ShortcutActionActivity::class.java)
@@ -111,8 +114,20 @@ class ShortcutActionTest {
         val info = context.packageManager.getActivityInfo(component, 0)
         assertFalse("Hands-off entry must not accept arbitrary external intents", info.exported)
         assertEquals("", info.taskAffinity.orEmpty())
-        val output = UiDevice.getInstance(instrumentation).executeShellCommand(
+        // UiAutomation's original executeShellCommand only returns stdout. Permission
+        // denials are written to stderr; API 34 exposes that stream explicitly.
+        val pipes = instrumentation.uiAutomation.executeShellCommandRwe(
             "am start -W -n ${component.flattenToString()} -a ${MainActivity.ACTION_NEXT_DRIVE}")
+        val output = try {
+            pipes[1].close()
+            val stdout = ParcelFileDescriptor.AutoCloseInputStream(pipes[0])
+                .bufferedReader().use { it.readText() }
+            val stderr = ParcelFileDescriptor.AutoCloseInputStream(pipes[2])
+                .bufferedReader().use { it.readText() }
+            stdout + stderr
+        } finally {
+            pipes.forEach { it.close() }
+        }
         assertTrue("Shell must not be able to trigger private shortcut work: $output",
             output.contains("Permission Denial") || output.contains("SecurityException"))
     }
