@@ -28,7 +28,6 @@ class AutomationDuplicateReceiver : BroadcastReceiver() {
                     "destination" to destination,
                     "arrival_millis" to arrival,
                     "previous_end_millis" to intent.getLongExtra("previous_end_millis", -1L),
-                    "allow_duplicate" to true,
                     "identity_key" to identityKey
                 )
             )

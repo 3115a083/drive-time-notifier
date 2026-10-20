@@ -11,8 +11,8 @@ android {
         applicationId = "de.drivetime.notifier"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.3.1"
+        versionCode = 13
+        versionName = "1.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         manifestPlaceholders["appLabel"] = "Drive Time Notifier"
@@ -91,6 +91,7 @@ dependencies {
     implementation("org.osmdroid:osmdroid-android:6.1.20")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.work:work-testing:2.12.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

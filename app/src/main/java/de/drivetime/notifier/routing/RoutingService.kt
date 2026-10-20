@@ -71,7 +71,8 @@ private class FallbackRoutingService(
             activeService = service
             val result = runCatching { service.routeResolved(request, points) }
             activeService = null
-            result.getOrNull()?.let { return it }
+            if (result.exceptionOrNull() is kotlinx.coroutines.CancellationException) throw result.exceptionOrNull()!!
+            result.getOrNull()?.let { return it.copy(providerId = provider.id) }
             val message = result.exceptionOrNull()?.message.orEmpty().ifBlank { "unknown error" }
             failures += "${provider.displayName}: $message"
         }

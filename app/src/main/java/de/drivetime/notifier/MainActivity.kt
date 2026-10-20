@@ -144,6 +144,8 @@ class MainActivity : ComponentActivity() {
         val calendarRepo = remember { CalendarRepository(context) }
         val keyStore = remember { SecureApiKeyStore(context) }
         var showSettings by rememberSaveable { mutableStateOf(false) }
+        var showHistory by rememberSaveable { mutableStateOf(false) }
+        var historyPlanningRequest by remember { mutableStateOf<HistoryPlanningRequest?>(null) }
         var permissionTick by remember { mutableIntStateOf(0) }
         var lastBackPress by remember { mutableLongStateOf(0L) }
 
@@ -213,6 +215,9 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { showHistory = true }) {
+                            Icon(Icons.Outlined.History, contentDescription = tr(settings.language, "Search history", "Suchhistorie"))
+                        }
                         IconButton(onClick = { showSettings = !showSettings }) {
                             Icon(
                                 if (showSettings) Icons.Outlined.Close else Icons.Outlined.Settings,
@@ -250,6 +255,8 @@ class MainActivity : ComponentActivity() {
                     keyStore = keyStore,
                     calendarRepo = calendarRepo,
                     initialIntent = initialIntent,
+                    historyRequest = historyPlanningRequest,
+                    onHistoryRequestHandled = { historyPlanningRequest = null },
                     hasCalendarPermission = hasCalendarPermission,
                     onRequestCalendarPermission = {
                         permissionLauncher.launch(arrayOf(
@@ -260,6 +267,16 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        if (showHistory) RouteHistoryDialog(
+            settings = settings,
+            onDismiss = { showHistory = false },
+            onSettings = { showHistory = false; showSettings = true },
+            onPlan = { request ->
+                historyPlanningRequest = request
+                showSettings = false
+                showHistory = false
+            }
+        )
     }
 
     @Composable
@@ -269,6 +286,8 @@ class MainActivity : ComponentActivity() {
         keyStore: SecureApiKeyStore,
         calendarRepo: CalendarRepository,
         initialIntent: Intent,
+        historyRequest: HistoryPlanningRequest?,
+        onHistoryRequestHandled: () -> Unit,
         hasCalendarPermission: Boolean,
         onRequestCalendarPermission: () -> Unit
     ) {
@@ -288,9 +307,17 @@ class MainActivity : ComponentActivity() {
         var previousEndMillis by rememberSaveable {
             mutableStateOf(initialIntent.getLongExtra("previous_end_millis", -1L).takeIf { it > 0 })
         }
+        var explicitPreviousEndMillis by rememberSaveable { mutableStateOf(previousEndMillis) }
+        var selectedTargetEvent by remember { mutableStateOf<CalendarEventRef?>(null) }
         var estimate by remember { mutableStateOf<RouteEstimate?>(null) }
         var baseRoute by remember { mutableStateOf<RouteEstimate?>(null) }
         var activeRequest by remember { mutableStateOf<RouteRequest?>(null) }
+        val historyStore = remember { RouteHistoryStore(context) }
+        var activeHistoryEntry by remember { mutableStateOf<RouteHistoryEntry?>(null) }
+        var historyNeedsNewTime by remember { mutableStateOf(false) }
+        var calculationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+        var activeRoutingService by remember { mutableStateOf<CancelableRoutingService?>(null) }
+
         var pois by remember { mutableStateOf<List<RoutePoi>>(emptyList()) }
         var chargingLoad by remember { mutableStateOf(PoiLoadStatus()) }
         var registryLoad by remember { mutableStateOf(PoiLoadStatus()) }
@@ -300,6 +327,7 @@ class MainActivity : ComponentActivity() {
         var planWarning by remember { mutableStateOf<String?>(null) }
         var planConflict by remember { mutableStateOf(false) }
         var duplicateExists by remember { mutableStateOf(false) }
+        var calculationRevision by remember { mutableLongStateOf(0L) }
         var driveIdentityKey by remember { mutableStateOf("") }
         var plannedStart by remember { mutableStateOf<Long?>(null) }
         var plannedEnd by remember { mutableStateOf<Long?>(null) }
@@ -320,6 +348,7 @@ class MainActivity : ComponentActivity() {
         val saveIcsLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("text/calendar")
         ) { uri ->
+            val outputHistory = activeHistoryEntry
             val route = estimate
             val start = plannedStart
             val end = plannedEnd
@@ -344,9 +373,15 @@ class MainActivity : ComponentActivity() {
                             start,
                             end,
                             resolvedDriveEventTitle(settings),
-                            description
+                            description,
+                            appointmentMillis = activeRequest?.arrivalMillis,
+                            calculatedAtMillis = calculationRevision
                         )
+                    }.onSuccess {
+                        historyStore.markSafely(context, outputHistory, HistorySaveState.ICS)
                     }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        historyStore.markSafely(context, outputHistory, HistorySaveState.FAILED)
                         error = it.message ?: tr(
                             settings.language,
                             "Could not save the ICS file.",
@@ -401,7 +436,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun applyRoutePlan(
+        suspend fun applyRoutePlan(
             route: RouteEstimate,
             effectiveArrivalMillis: Long,
             walkingDurationSeconds: Long,
@@ -425,12 +460,19 @@ class MainActivity : ComponentActivity() {
             planWarning = listOfNotNull(
                 if (duplicate) tr(
                     settings.language,
-                    "A Drive Time Notifier entry already exists for this destination and appointment time. You can still save another drive if you want to.",
-                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Du kannst die Fahrt auf Wunsch trotzdem erneut speichern."
+                    "A Drive Time Notifier entry already exists for this destination and appointment time. Saving updates the existing drive with the latest calculation.",
+                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Beim Speichern wird die vorhandene Fahrt mit der aktuellen Berechnung aktualisiert."
                 ) else null,
                 planWarningText(settings.language, plan, effectiveBufferMinutes),
                 routeWarningText(settings.language, settings.routingProvider, route.warning)
             ).joinToString(" ").ifBlank { null }
+            val request = activeRequest
+            if (request != null) {
+                val id = activeHistoryEntry?.id ?: java.util.UUID.randomUUID().toString()
+                activeHistoryEntry = historyStore.recordSafely(context) {
+                    RouteHistoryEntry.create(id, calculationRevision, HistoryTrigger.MANUAL, request, route, plan, walkingDurationSeconds)
+                }
+            }
         }
 
         suspend fun loadChargingData(
@@ -558,8 +600,13 @@ class MainActivity : ComponentActivity() {
         }
 
         fun calculateRoute() {
+            if (historyNeedsNewTime) { showDatePicker = true; return }
             if (origin.isBlank() || destination.isBlank() || loading) return
+            calculationJob?.cancel()
+            activeRoutingService?.cancelActiveCalls()
+            activeHistoryEntry = null
             calculationGeneration += 1
+            calculationRevision = System.currentTimeMillis()
             val generation = calculationGeneration
             error = null
             loading = true
@@ -573,24 +620,39 @@ class MainActivity : ComponentActivity() {
             parkingLoad = if (settings.showParking) PoiLoadStatus(PoiLoadPhase.QUEUED) else PoiLoadStatus()
             duplicateExists = false
             driveIdentityKey = ""
-            scope.launch {
+            calculationJob = scope.launch {
                 val target = LocalDateTime.of(appointmentDate, appointmentTime)
                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 val result = runCatching {
             val cleanDestination = destination.trim()
             val request = RouteRequest(origin.trim(), cleanDestination, target)
             val identityKey = DriveEntryIdentity.key(cleanDestination, target)
+            val sourceIds = settings.sourceCalendarIds.mapNotNull { it.toLongOrNull() }.toSet()
+            val canReadCalendar = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+            val busy = if (sourceIds.isNotEmpty() && canReadCalendar)
+                calendarRepo.events(target - 86_400_000L, target + 86_400_000L, sourceIds, includeWithoutLocation = true)
+                else emptyList()
+            val selected = selectedTargetEvent?.takeIf {
+                it.startMillis == target && DriveEntryIdentity.normalizeLocation(it.location) == DriveEntryIdentity.normalizeLocation(cleanDestination)
+            } ?: busy.firstOrNull {
+                it.startMillis == target && DriveEntryIdentity.normalizeLocation(it.location) == DriveEntryIdentity.normalizeLocation(cleanDestination)
+            } ?: CalendarEventRef(-1, -1, "", cleanDestination, target, target)
+            previousEndMillis = listOfNotNull(explicitPreviousEndMillis, CalendarConflicts.previousEnd(busy, selected)).maxOrNull()
             val existingDrive = if (!settings.outputIcs && settings.targetCalendarId >= 0) {
                 runCatching {
                     calendarRepo.findExistingDrive(
                         settings.targetCalendarId,
                         cleanDestination,
                         target,
-                        identityKey
+                        identityKey,
+                        origin = origin.trim()
                     )
                 }.getOrNull()
             } else null
-            val route = RoutingServiceFactory.create(context, settings).route(request)
+            val routing = RoutingServiceFactory.create(context, settings)
+            activeRoutingService = routing as? CancelableRoutingService
+            val route = try { routing.route(request) }
+                finally { if (generation == calculationGeneration) activeRoutingService = null }
             InitialRouteCalculation(
                 route = route,
                 request = request,
@@ -607,6 +669,7 @@ class MainActivity : ComponentActivity() {
             applyRoutePlan(calculation.route, calculation.request.arrivalMillis, 0L, calculation.duplicateExists)
             loading = false
         }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
             if (generation != calculationGeneration) return@onFailure
             error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
             loading = false
@@ -622,6 +685,58 @@ class MainActivity : ComponentActivity() {
                     loadChargingData(calculation.route, calculation.request, generation, enrichmentClient)
                 }
                 if (settings.showParking) loadParkingData(calculation.route, generation, enrichmentClient)
+            }
+        }
+
+        LaunchedEffect(historyRequest?.nonce) {
+            val request = historyRequest ?: return@LaunchedEffect
+            calculationGeneration += 1
+            calculationJob?.cancel()
+            activeRoutingService?.cancelActiveCalls()
+            activeRoutingService = null
+            loading = false
+            estimate = null
+            baseRoute = null
+            activeRequest = null
+            activeHistoryEntry = null
+            pois = emptyList()
+            previousEndMillis = null
+            explicitPreviousEndMillis = null
+            selectedTargetEvent = null
+            origin = request.entry.request.origin
+            originInitialized = true
+            destination = request.entry.request.destination
+            val past = request.entry.request.arrivalMillis <= System.currentTimeMillis()
+            val time = if (past) LocalDateTime.now().plusHours(1)
+                else Instant.ofEpochMilli(request.entry.request.arrivalMillis).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            appointmentDate = time.toLocalDate()
+            appointmentTime = time.toLocalTime().withSecond(0).withNano(0)
+            historyNeedsNewTime = past
+            if (past) {
+                error = tr(settings.language, "Choose a new appointment date and time, then calculate.",
+                    "Wähle eine neue Terminzeit und berechne anschließend die Fahrt.")
+                showDatePicker = true
+            } else {
+                error = null
+                if (request.recalculate) calculateRoute()
+            }
+            onHistoryRequestHandled()
+        }
+
+        LaunchedEffect(origin, destination, appointmentDate, appointmentTime, activeRequest) {
+            val request = activeRequest ?: return@LaunchedEffect
+            val time = LocalDateTime.of(appointmentDate, appointmentTime).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            if (request.origin != origin.trim() || request.destination != destination.trim() || request.arrivalMillis != time) {
+                calculationGeneration += 1
+                calculationJob?.cancel()
+                activeRoutingService?.cancelActiveCalls()
+                activeRoutingService = null
+                estimate = null
+                baseRoute = null
+                activeRequest = null
+                activeHistoryEntry = null
+                loading = false
+                pois = emptyList()
             }
         }
 
@@ -831,6 +946,7 @@ class MainActivity : ComponentActivity() {
                         }
                         FilledTonalButton(
                             onClick = {
+                                val outputHistory = activeHistoryEntry
                                 val start = plannedStart ?: return@FilledTonalButton
                                 val end = plannedEnd ?: return@FilledTonalButton
                                 runCatching {
@@ -851,7 +967,9 @@ class MainActivity : ComponentActivity() {
                                         start,
                                         end,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                            appointmentMillis = activeRequest?.arrivalMillis,
+                            calculatedAtMillis = calculationRevision
                                     )
                                     context.startActivity(
                                         Intent.createChooser(
@@ -863,6 +981,8 @@ class MainActivity : ComponentActivity() {
                                             tr(settings.language, "Export ICS", "ICS exportieren")
                                         )
                                     )
+                                }.onSuccess {
+                                    scope.launch { historyStore.markSafely(context, outputHistory, HistorySaveState.ICS) }
                                 }.onFailure { error = it.message }
                             },
                             modifier = Modifier.weight(1f).height(56.dp),
@@ -877,6 +997,7 @@ class MainActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             if (calendarSaving || calendarSaved) return@Button
+                            val outputHistory = activeHistoryEntry
                             val start = plannedStart ?: return@Button
                             val end = plannedEnd ?: return@Button
                             calendarSaving = true
@@ -905,13 +1026,19 @@ class MainActivity : ComponentActivity() {
                                         end,
                                         settings.reminderLeadMinutes,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                                        destinationStartMillis = activeRequest?.arrivalMillis,
+                                        calculatedAtMillis = calculationRevision
                                     )
                                 }.onSuccess {
+                                    historyStore.markSafely(context, outputHistory, HistorySaveState.CALENDAR)
+                                    duplicateExists = true
                                     calendarSaved = true
                                     delay(1400)
                                     calendarSaved = false
                                 }.onFailure {
+                                    if (it is kotlinx.coroutines.CancellationException) throw it
+                                    historyStore.markSafely(context, outputHistory, HistorySaveState.FAILED)
                                     error = it.message ?: tr(
                                         settings.language,
                                         "Could not add the drive to the calendar.",
@@ -943,7 +1070,7 @@ class MainActivity : ComponentActivity() {
                             if (calendarSaved)
                                 tr(settings.language, "Added successfully", "Erfolgreich eingetragen")
                             else if (duplicateExists)
-                                tr(settings.language, "Save anyway", "Trotzdem speichern")
+                                tr(settings.language, "Update drive", "Fahrt aktualisieren")
                             else
                                 tr(settings.language, "Save drive to calendar", "Fahrt im Kalender speichern")
                         )
@@ -971,7 +1098,7 @@ class MainActivity : ComponentActivity() {
             AppDatePickerDialog(
                 initialDate = appointmentDate,
                 onDismiss = { showDatePicker = false },
-                onConfirm = { appointmentDate = it; showDatePicker = false }
+                onConfirm = { appointmentDate = it; showDatePicker = false; if (historyNeedsNewTime) showTimePicker = true }
             )
         }
         if (showTimePicker) {
@@ -981,7 +1108,7 @@ class MainActivity : ComponentActivity() {
                 cancelLabel = tr(settings.language, "Cancel", "Abbrechen"),
                 confirmLabel = tr(settings.language, "Apply", "Übernehmen"),
                 onDismiss = { showTimePicker = false },
-                onConfirm = { appointmentTime = it; showTimePicker = false }
+                onConfirm = { appointmentTime = it; showTimePicker = false; historyNeedsNewTime = false }
             )
         }
         if (showEventPicker) {
@@ -998,8 +1125,10 @@ class MainActivity : ComponentActivity() {
                         origin = event.location
                         originInitialized = true
                         previousEndMillis = event.endMillis
+                        explicitPreviousEndMillis = event.endMillis
                     } else {
                         destination = event.location
+                        selectedTargetEvent = event
                         val dt = Instant.ofEpochMilli(event.startMillis).atZone(ZoneId.systemDefault()).toLocalDateTime()
                         appointmentDate = dt.toLocalDate()
                         appointmentTime = dt.toLocalTime().withSecond(0).withNano(0)
@@ -1568,6 +1697,8 @@ class MainActivity : ComponentActivity() {
         ) {
             Spacer(Modifier.height(4.dp))
 
+            HistoryPreferencesCard(settings.language)
+            Spacer(Modifier.height(12.dp))
             SettingsCard(
                 title = tr(settings.language, "Appearance", "Darstellung"),
                 icon = Icons.Outlined.Palette
@@ -2114,6 +2245,7 @@ class MainActivity : ComponentActivity() {
                     onClick = { showAutomationTimePicker = true },
                     leadingIcon = Icons.Outlined.Schedule
                 )
+
             }
 
             SettingsCard(
@@ -2400,6 +2532,8 @@ class MainActivity : ComponentActivity() {
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
                     appendLine()
                     append(RequestDebugLog.format(debugEntries))
+                    append("\n\n")
+                    append(de.drivetime.notifier.automation.AutomationRunLog.format(context))
                 }
                 SettingsCard(
                     title = tr(settings.language, "Network debug", "Netzwerk-Debug"),
@@ -2420,7 +2554,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Copy", "Kopieren"))
                         }
-                        TextButton(onClick = { RequestDebugLog.clear() }) {
+                        TextButton(onClick = { RequestDebugLog.clear(); de.drivetime.notifier.automation.AutomationRunLog.clear(context) }) {
                             Icon(Icons.Outlined.DeleteOutline, null)
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Clear", "Leeren"))
