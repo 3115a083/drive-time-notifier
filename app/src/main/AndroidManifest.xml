@@ -27,7 +27,8 @@
 
         <activity
             android:name=".automation.ShortcutActionActivity"
-            android:exported="true"
+            android:exported="false"
+            android:taskAffinity=""
             android:excludeFromRecents="true"
             android:noHistory="true"
             android:theme="@android:style/Theme.NoDisplay" />
@@ -97,6 +98,7 @@
             <intent-filter>
                 <action android:name="de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY" />
                 <action android:name="de.drivetime.notifier.ACTION_PROCESS_EVENT" />
+                <action android:name="de.drivetime.notifier.ACTION_NEXT_DRIVE" />
             </intent-filter>
         </receiver>
 

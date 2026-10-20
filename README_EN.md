@@ -131,6 +131,14 @@ When disabled, processing runs only:
 
 Automatic routing uses longer timeouts. A failed calculation is retried once. If the second attempt fails, a notification offers **Open drive** and **Retry**.
 
+## Hands-off app shortcuts
+
+The registered **Next drive** and **Tomorrow's drives** actions enqueue background work directly, without opening the main screen or a confirmation dialog. Calendar permission, start location and output must be configured beforehand. Failures are reported by notification; missing permissions cannot be granted silently.
+
+The invisible shortcut activity is private and uses a separate task. Android launches registered shortcuts as the publishing app. External apps must use a registered Android shortcut or the token-authenticated broadcasts with `mode=process`; `mode=open` deliberately opens planning.
+
+This fixes the initial confirmation only. Existing-drive updates and daily scheduling changes remain separate in [PR #26](https://github.com/3115a083/drive-time-notifier/pull/26).
+
 ## Routing providers and credentials
 
 | Provider | Traffic | Credentials |
@@ -232,6 +240,16 @@ Action: de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY
 Package: de.drivetime.notifier
 token=<TOKEN>
 ```
+
+### Process the next upcoming drive without a prompt
+
+```text
+Action: de.drivetime.notifier.ACTION_NEXT_DRIVE
+Package: de.drivetime.notifier
+token=<TOKEN>
+```
+
+The broadcast selects the next matching appointment from the configured source calendars and processes it in the background. No activity launch or confirmation is required.
 
 ### Process one drive
 

@@ -2366,6 +2366,11 @@ class MainActivity : ComponentActivity() {
                     onCopy = { clipboard.setText(AnnotatedString(AutomationReceiver.ACTION_PROCESS_NEXT_DAY)) }
                 )
                 CopyableAutomationValue(
+                    label = tr(settings.language, "Next drive action", "Action für nächste Fahrt"),
+                    value = ACTION_NEXT_DRIVE,
+                    onCopy = { clipboard.setText(AnnotatedString(ACTION_NEXT_DRIVE)) }
+                )
+                CopyableAutomationValue(
                     label = tr(settings.language, "Single drive action", "Action für einzelne Fahrt"),
                     value = AutomationReceiver.ACTION_PROCESS_EVENT,
                     onCopy = { clipboard.setText(AnnotatedString(AutomationReceiver.ACTION_PROCESS_EVENT)) }
