@@ -48,9 +48,25 @@ class RouteHistoryUiTest {
             device.findObject(By.text("Historieneinstellungen")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Maximale Eintragszahl")),10_000))
             val input=device.findObject(By.clazz("android.widget.EditText").text("50"))
+            input.click()
             input.text="2"
-            device.findObject(By.text("Eintragsgrenze übernehmen")).click()
-            withTimeout(5000){store.flow.first {it.limit==2}}
+            assertTrue("Entry-limit edit was not reflected in the field",
+                device.wait(Until.hasObject(By.clazz("android.widget.EditText").text("2")),5000))
+            // Close the IME before clicking the action below the input. With the
+            // keyboard open its accessible node can exist outside the usable viewport.
+            device.pressBack()
+            device.waitForIdle()
+            assertTrue("Settings closed instead of dismissing the keyboard",
+                device.hasObject(By.text("Maximale Eintragszahl")))
+            val apply=device.findObject(By.text("Eintragsgrenze übernehmen"))
+            assertTrue("Limit action must be enabled after changing the number",apply.isEnabled)
+            apply.click()
+            try {
+                withTimeout(10_000){store.flow.first {it.limit==2}}
+            } catch(error:TimeoutCancellationException) {
+                val state=store.flow.first()
+                throw AssertionError("Limit was not saved: limit=\u0024{state.limit}, error=\u0024{state.error}, actionEnabled=\u0024{apply.isEnabled}",error)
+            }
             assertEquals(2,store.flow.first().limit)
         } finally {
             store.configure(false,50)
