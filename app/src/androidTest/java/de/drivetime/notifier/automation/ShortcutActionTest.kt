@@ -95,7 +95,7 @@ class ShortcutActionTest {
         assertFalse("Hands-off entry must not accept arbitrary external intents", info.exported)
         assertEquals("", info.taskAffinity.orEmpty())
         val output = UiDevice.getInstance(instrumentation).executeShellCommand(
-            "am start -W -n ${component.flattenToString()} -a ${MainActivity.ACTION_NEXT_DRIVE}")
+            "am start -W -n ${component.flattenToString()} -a ${MainActivity.ACTION_NEXT_DRIVE} 2>&1")
         assertTrue("Shell must not be able to trigger private shortcut work: $output",
             output.contains("Permission Denial") || output.contains("SecurityException"))
     }
