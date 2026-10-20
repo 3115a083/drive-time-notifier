@@ -27,7 +27,8 @@
 
         <activity
             android:name=".automation.ShortcutActionActivity"
-            android:exported="true"
+            android:exported="false"
+            android:taskAffinity=""
             android:excludeFromRecents="true"
             android:noHistory="true"
             android:theme="@android:style/Theme.NoDisplay" />

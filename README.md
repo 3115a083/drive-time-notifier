@@ -132,6 +132,14 @@ Wenn sie deaktiviert ist, läuft die Verarbeitung nur:
 
 Automatische Routinganfragen verwenden längere Timeouts. Nach einem Fehler erfolgt ein zweiter Versuch. Schlägt auch dieser fehl, bietet eine Benachrichtigung **Fahrt öffnen** und **Wiederholen** an.
 
+## App-Shortcuts ohne Bestätigung
+
+Die registrierten App-Aktionen **Nächste Fahrt** und **Morgige Fahrten** starten die Hintergrundverarbeitung direkt. Sie öffnen weder die Hauptansicht noch einen Bestätigungsdialog. Kalenderzugriff, Startort und Ausgabe müssen vorher eingerichtet sein. Fehler erscheinen als Benachrichtigung; eine fehlende Berechtigung kann nicht still erteilt werden.
+
+Die unsichtbare Shortcut-Activity ist nicht exportiert und verwendet einen eigenen Task. Android führt registrierte Shortcuts im Namen der App aus. Fremde Apps können diese Komponente nicht durch einen direkten Activity-Intent auslösen. Tasker und MacroDroid verwenden entweder den registrierten Android-Shortcut oder die unten beschriebenen Broadcasts mit Token und `mode=process`. `mode=open` öffnet weiterhin bewusst die Planung.
+
+Dieser Fix entfernt die Bestätigung beim Start. Die Behandlung bereits vorhandener Fahrten und die Korrekturen der täglichen Zeitplanung sind separat in [PR #26](https://github.com/3115a083/drive-time-notifier/pull/26) enthalten und noch nicht Bestandteil dieses Fixes.
+
 ## Routinganbieter und Zugangsdaten
 
 | Anbieter | Verkehr | Zugangsdaten |
