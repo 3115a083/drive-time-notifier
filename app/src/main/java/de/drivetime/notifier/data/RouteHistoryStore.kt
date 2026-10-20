@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import de.drivetime.notifier.automation.AutomationRunLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 
 private val Context.routeHistoryDataStore by preferencesDataStore("route_history")
@@ -30,11 +32,15 @@ class RouteHistoryStore internal constructor(private val store:DataStore<Prefere
     }.catch { error ->
         if(error is CancellationException)throw error
         emit(RouteHistoryState(error="Historie ist zurzeit nicht verfügbar.",ready=true))
+    }.flowOn(Dispatchers.Default)
+
+    private suspend fun edit(transform:suspend (MutablePreferences)->Unit) {
+        withContext(Dispatchers.Default) { store.edit(transform) }
     }
 
     suspend fun configure(enabled:Boolean,limit:Int) {
         require(limit in 1..RouteHistoryPolicy.MAX_ENTRIES)
-        store.edit { preferences ->
+        edit { preferences ->
             val entries=if(enabled)RouteHistoryPolicy.trim(RouteHistoryCodec.decode(preferences[entriesKey]),limit,now())
                 else emptyList()
             if(!enabled)preferences[clearedKey]=now()
@@ -45,7 +51,7 @@ class RouteHistoryStore internal constructor(private val store:DataStore<Prefere
     }
     suspend fun record(build:()->RouteHistoryEntry):RouteHistoryEntry? {
         var saved:RouteHistoryEntry?=null
-        store.edit { preferences ->
+        edit { preferences ->
             if(preferences[enabledKey]!=true)return@edit
             val entry=build()
             if(entry.createdAt<(preferences[clearedKey]?:0L))return@edit
@@ -61,7 +67,7 @@ class RouteHistoryStore internal constructor(private val store:DataStore<Prefere
         return saved
     }
     suspend fun mark(id:String,snapshotKey:String,state:HistorySaveState) {
-        store.edit { preferences ->
+        edit { preferences ->
             if(preferences[enabledKey]!=true)return@edit
             val entries=RouteHistoryCodec.decode(preferences[entriesKey]).map {
                 if(it.id==id&&it.snapshotKey()==snapshotKey)it.copy(saveState=state) else it
@@ -70,14 +76,14 @@ class RouteHistoryStore internal constructor(private val store:DataStore<Prefere
         }
     }
     suspend fun remove(id:String) {
-        store.edit { preferences ->
+        edit { preferences ->
             preferences[entriesKey]=RouteHistoryCodec.encode(
                 RouteHistoryCodec.decode(preferences[entriesKey]).filterNot {it.id==id})
         }
     }
-    suspend fun clear() { store.edit {it.remove(entriesKey);it[clearedKey]=now()} }
+    suspend fun clear() { edit {it.remove(entriesKey);it[clearedKey]=now()} }
     suspend fun prune() {
-        store.edit { preferences ->
+        edit { preferences ->
             preferences[entriesKey]=RouteHistoryCodec.encode(RouteHistoryPolicy.trim(
                 RouteHistoryCodec.decode(preferences[entriesKey]),preferences[limitKey]?:50,now()))
         }
