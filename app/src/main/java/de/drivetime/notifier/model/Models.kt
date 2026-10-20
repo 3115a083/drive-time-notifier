@@ -22,7 +22,8 @@ data class RouteEstimate(
     val originLatitude: Double? = null,
     val originLongitude: Double? = null,
     val destinationLatitude: Double? = null,
-    val destinationLongitude: Double? = null
+    val destinationLongitude: Double? = null,
+    val providerId: String? = null
 ) {
     val trafficDelaySeconds: Long get() = (durationSeconds - staticDurationSeconds).coerceAtLeast(0)
     val trafficProbabilityPercent: Int
