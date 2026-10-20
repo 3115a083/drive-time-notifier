@@ -21,6 +21,8 @@ class RouteHistoryUiTest {
         val instrumentation=InstrumentationRegistry.getInstrumentation()
         val context=instrumentation.targetContext
         val device=UiDevice.getInstance(instrumentation)
+        fun find(selector:BySelector):UiObject2 = device.wait(Until.findObject(selector),10_000)
+            ?: throw AssertionError("UI element did not appear: "+selector)
         val store=RouteHistoryStore(context)
         SettingsStore(context).update(AppSettings(language=AppLanguage.GERMAN))
         store.configure(true,50)
@@ -32,22 +34,22 @@ class RouteHistoryUiTest {
         try {
             context.startActivity(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             assertTrue(device.wait(Until.hasObject(By.desc("Suchhistorie")),15_000))
-            val history=device.findObject(By.desc("Suchhistorie"))
-            val settings=device.findObject(By.desc("Einstellungen"))
+            val history=find(By.desc("Suchhistorie"))
+            val settings=find(By.desc("Einstellungen"))
             assertTrue(history.visibleBounds.centerX()<settings.visibleBounds.centerX())
             history.click()
             assertTrue(device.wait(Until.hasObject(By.text("Teststart → Testziel")),10_000))
-            device.findObject(By.text("Teststart → Testziel")).click()
+            find(By.text("Teststart → Testziel")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Neu berechnen")),10_000))
             assertTrue(device.hasObject(By.text("Als Vorlage verwenden")))
             assertTrue(device.hasObject(By.textContains("Gespeichertes Ergebnis.")))
             // Reading history must leave the stored calculation unchanged.
             assertEquals(now,store.flow.first().entries.single().calculatedAt)
-            device.findObject(By.desc("Historie schließen")).click()
-            device.findObject(By.desc("Suchhistorie")).click()
-            device.findObject(By.text("Historieneinstellungen")).click()
+            find(By.desc("Historie schließen")).click()
+            find(By.desc("Suchhistorie")).click()
+            find(By.text("Historieneinstellungen")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Maximale Eintragszahl")),10_000))
-            val input=device.findObject(By.clazz("android.widget.EditText").text("50"))
+            val input=find(By.clazz("android.widget.EditText").text("50"))
             input.click()
             input.text="2"
             assertTrue("Entry-limit edit was not reflected in the field",
@@ -58,14 +60,14 @@ class RouteHistoryUiTest {
             device.waitForIdle()
             assertTrue("Settings closed instead of dismissing the keyboard",
                 device.hasObject(By.text("Maximale Eintragszahl")))
-            val apply=device.findObject(By.text("Eintragsgrenze übernehmen"))
+            val apply=find(By.text("Eintragsgrenze übernehmen"))
             assertTrue("Limit action must be enabled after changing the number",apply.isEnabled)
             apply.click()
             try {
                 withTimeout(10_000){store.flow.first {it.limit==2}}
             } catch(error:TimeoutCancellationException) {
                 val state=store.flow.first()
-                throw AssertionError("Limit was not saved: limit=\u0024{state.limit}, error=\u0024{state.error}, actionEnabled=\u0024{apply.isEnabled}",error)
+                throw AssertionError("Limit was not saved: limit=${state.limit}, error=${state.error}, actionEnabled=${apply.isEnabled}",error)
             }
             assertEquals(2,store.flow.first().limit)
         } finally {
