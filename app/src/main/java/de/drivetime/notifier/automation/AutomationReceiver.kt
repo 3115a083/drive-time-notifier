@@ -15,6 +15,7 @@ class AutomationReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             ACTION_PROCESS_NEXT_DAY -> AutomationScheduler.runNow(context)
+            MainActivity.ACTION_NEXT_DRIVE -> AutomationScheduler.runNextDriveNow(context)
             ACTION_PROCESS_EVENT -> {
                 val mode = intent.getStringExtra("mode") ?: "process"
                 if (mode == "open") {

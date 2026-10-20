@@ -98,6 +98,7 @@
             <intent-filter>
                 <action android:name="de.drivetime.notifier.ACTION_PROCESS_NEXT_DAY" />
                 <action android:name="de.drivetime.notifier.ACTION_PROCESS_EVENT" />
+                <action android:name="de.drivetime.notifier.ACTION_NEXT_DRIVE" />
             </intent-filter>
         </receiver>
 

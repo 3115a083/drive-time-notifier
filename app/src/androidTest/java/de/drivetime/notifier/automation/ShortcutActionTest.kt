@@ -15,6 +15,7 @@ import androidx.work.WorkManager
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import de.drivetime.notifier.MainActivity
+import de.drivetime.notifier.security.AutomationTokenStore
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -80,6 +81,22 @@ class ShortcutActionTest {
             assertEquals(0, mainCreates.get())
             assertEquals(1, manager.getWorkInfosForUniqueWork("manual-next-day").get().size)
             assertEquals(1, manager.getWorkInfosForUniqueWork("manual-next-drive-locator").get().size)
+
+            // Direct automation must authenticate even though registered shortcuts need no dialog.
+            val before = manager.getWorkInfosForUniqueWork("manual-next-drive-locator").get().single().id
+            val token = AutomationTokenStore(context).token()
+            for (supplied in listOf<String?>(null, "", "invalid", token.dropLast(1) + if (token.last() == 'A') "B" else "A")) {
+                AutomationReceiver().onReceive(context, Intent(MainActivity.ACTION_NEXT_DRIVE)
+                    .putExtra(AutomationReceiver.EXTRA_TOKEN, supplied))
+                assertEquals(before, manager.getWorkInfosForUniqueWork("manual-next-drive-locator")
+                    .get().single().id)
+            }
+            AutomationReceiver().onReceive(context, Intent(MainActivity.ACTION_NEXT_DRIVE)
+                .putExtra(AutomationReceiver.EXTRA_TOKEN, token))
+            val replacement = manager.getWorkInfosForUniqueWork("manual-next-drive-locator").get()
+                .single { it.state == WorkInfo.State.ENQUEUED }
+            assertNotEquals("Authenticated next-drive broadcast was not dispatched", before, replacement.id)
+            assertEquals(0, mainCreates.get())
         } finally {
             application.unregisterActivityLifecycleCallbacks(callbacks)
             manager.cancelAllWork().result.get(10, TimeUnit.SECONDS)
@@ -95,7 +112,7 @@ class ShortcutActionTest {
         assertFalse("Hands-off entry must not accept arbitrary external intents", info.exported)
         assertEquals("", info.taskAffinity.orEmpty())
         val output = UiDevice.getInstance(instrumentation).executeShellCommand(
-            "am start -W -n ${component.flattenToString()} -a ${MainActivity.ACTION_NEXT_DRIVE} 2>&1")
+            "am start -W -n ${component.flattenToString()} -a ${MainActivity.ACTION_NEXT_DRIVE}")
         assertTrue("Shell must not be able to trigger private shortcut work: $output",
             output.contains("Permission Denial") || output.contains("SecurityException"))
     }

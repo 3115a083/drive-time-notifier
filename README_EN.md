@@ -241,6 +241,16 @@ Package: de.drivetime.notifier
 token=<TOKEN>
 ```
 
+### Process the next upcoming drive without a prompt
+
+```text
+Action: de.drivetime.notifier.ACTION_NEXT_DRIVE
+Package: de.drivetime.notifier
+token=<TOKEN>
+```
+
+The broadcast selects the next matching appointment from the configured source calendars and processes it in the background. No activity launch or confirmation is required.
+
 ### Process one drive
 
 ```text

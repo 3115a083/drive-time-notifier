@@ -242,6 +242,16 @@ Package: de.drivetime.notifier
 token=<TOKEN>
 ```
 
+### Nächste anstehende Fahrt ohne Rückfrage
+
+```text
+Action: de.drivetime.notifier.ACTION_NEXT_DRIVE
+Package: de.drivetime.notifier
+token=<TOKEN>
+```
+
+Der Broadcast sucht den nächsten passenden Termin in den ausgewählten Quellkalendern und verarbeitet ihn im Hintergrund. Kein Activity-Start und keine Bestätigung sind erforderlich.
+
 ### Einzelne Fahrt verarbeiten
 
 ```text
