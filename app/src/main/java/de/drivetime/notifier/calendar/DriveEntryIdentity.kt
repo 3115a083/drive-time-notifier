@@ -23,6 +23,31 @@ object DriveEntryIdentity {
         return if (description.contains(marker)) description else "$description\n\n$marker"
     }
 
+    fun originKey(origin: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(normalizeLocation(origin).toByteArray(Charsets.UTF_8))
+        .take(12).joinToString("") { "%02x".format(it) }
+
+    fun attachPlanningMetadata(description: String, origin: String, revision: Long): String {
+        val cleaned = description.replace(Regex("\\[DriveTimeNotifier-(Origin|Revision):[^\\]]+\\]"), "").trim()
+        return "$cleaned\n[DriveTimeNotifier-Origin:${originKey(origin)}]\n[DriveTimeNotifier-Revision:$revision]"
+    }
+
+    fun matchesOrigin(description: String, origin: String): Boolean {
+        val marker = Regex("\\[DriveTimeNotifier-Origin:([a-f0-9]{24})\\]").find(description)?.groupValues?.get(1)
+        if (marker != null) return marker == originKey(origin)
+        val oldOrigin = description.lineSequence().firstOrNull { it.startsWith("From: ") || it.startsWith("Von: ") }
+            ?.substringAfter(": ") ?: return false
+        return normalizeLocation(oldOrigin) == normalizeLocation(origin)
+    }
+
+    fun revision(description: String): Long = Regex("\\[DriveTimeNotifier-Revision:([0-9]+)\\]")
+        .find(description)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+
+    fun extractKey(description: String): String? = Regex("\\[DriveTimeNotifier-ID:([a-f0-9]{24})\\]")
+        .find(description)?.groupValues?.get(1)
+
+    fun hasAnyMarker(description: String): Boolean = description.contains(MARKER_PREFIX)
+
     fun hasMarker(description: String, key: String): Boolean = description.contains(marker(key))
 
     fun isOwnDescription(description: String): Boolean =
@@ -39,5 +64,6 @@ object DriveEntryIdentity {
 data class ExistingDriveEntry(
     val eventId: Long,
     val startMillis: Long,
-    val endMillis: Long
+    val endMillis: Long,
+    val description: String = ""
 )

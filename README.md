@@ -289,3 +289,7 @@ Drittanbieter-Hinweise: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 ## Haftungsausschluss
 
 Die App wird **AS IS** bereitgestellt. Es gibt keine Garantie für Routen, Fahrzeiten, Verkehrsdaten, Parkplätze, Ladesäulen, Kalenderdaten oder die dauerhafte Verfügbarkeit externer APIs. Nutzer bleiben für Provider-Verträge, API-Nutzung und entstehende Kosten verantwortlich.
+
+## Automatik im Testzweig
+
+Manuelle und zeitgesteuerte Planung aktualisieren dieselbe Fahrt für denselben Start, dasselbe Ziel und dieselbe Terminzeit. Eigene Fahrttermine werden nicht erneut verarbeitet. Die lokale Ausführungszeit wird geprüft; mehr als zwei Stunden verspätete Aufträge werden übersprungen. Diese Korrekturen sind zunächst im Testzweig für 1.3.2 verfügbar.

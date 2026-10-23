@@ -300,6 +300,7 @@ class MainActivity : ComponentActivity() {
         var planWarning by remember { mutableStateOf<String?>(null) }
         var planConflict by remember { mutableStateOf(false) }
         var duplicateExists by remember { mutableStateOf(false) }
+        var calculationRevision by remember { mutableLongStateOf(0L) }
         var driveIdentityKey by remember { mutableStateOf("") }
         var plannedStart by remember { mutableStateOf<Long?>(null) }
         var plannedEnd by remember { mutableStateOf<Long?>(null) }
@@ -344,7 +345,9 @@ class MainActivity : ComponentActivity() {
                             start,
                             end,
                             resolvedDriveEventTitle(settings),
-                            description
+                            description,
+                            appointmentMillis = activeRequest?.arrivalMillis,
+                            calculatedAtMillis = calculationRevision
                         )
                     }.onFailure {
                         error = it.message ?: tr(
@@ -425,8 +428,8 @@ class MainActivity : ComponentActivity() {
             planWarning = listOfNotNull(
                 if (duplicate) tr(
                     settings.language,
-                    "A Drive Time Notifier entry already exists for this destination and appointment time. You can still save another drive if you want to.",
-                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Du kannst die Fahrt auf Wunsch trotzdem erneut speichern."
+                    "A Drive Time Notifier entry already exists for this destination and appointment time. Saving updates the existing drive with the latest calculation.",
+                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Beim Speichern wird die vorhandene Fahrt mit der aktuellen Berechnung aktualisiert."
                 ) else null,
                 planWarningText(settings.language, plan, effectiveBufferMinutes),
                 routeWarningText(settings.language, settings.routingProvider, route.warning)
@@ -560,6 +563,7 @@ class MainActivity : ComponentActivity() {
         fun calculateRoute() {
             if (origin.isBlank() || destination.isBlank() || loading) return
             calculationGeneration += 1
+            calculationRevision = System.currentTimeMillis()
             val generation = calculationGeneration
             error = null
             loading = true
@@ -586,7 +590,8 @@ class MainActivity : ComponentActivity() {
                         settings.targetCalendarId,
                         cleanDestination,
                         target,
-                        identityKey
+                        identityKey,
+                        origin = origin.trim()
                     )
                 }.getOrNull()
             } else null
@@ -851,7 +856,9 @@ class MainActivity : ComponentActivity() {
                                         start,
                                         end,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                                        appointmentMillis = activeRequest?.arrivalMillis,
+                                        calculatedAtMillis = calculationRevision
                                     )
                                     context.startActivity(
                                         Intent.createChooser(
@@ -905,9 +912,12 @@ class MainActivity : ComponentActivity() {
                                         end,
                                         settings.reminderLeadMinutes,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                                        destinationStartMillis = activeRequest?.arrivalMillis,
+                                        calculatedAtMillis = calculationRevision
                                     )
                                 }.onSuccess {
+                                    duplicateExists = true
                                     calendarSaved = true
                                     delay(1400)
                                     calendarSaved = false
@@ -943,7 +953,7 @@ class MainActivity : ComponentActivity() {
                             if (calendarSaved)
                                 tr(settings.language, "Added successfully", "Erfolgreich eingetragen")
                             else if (duplicateExists)
-                                tr(settings.language, "Save anyway", "Trotzdem speichern")
+                                tr(settings.language, "Update drive", "Fahrt aktualisieren")
                             else
                                 tr(settings.language, "Save drive to calendar", "Fahrt im Kalender speichern")
                         )
@@ -2400,6 +2410,8 @@ class MainActivity : ComponentActivity() {
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
                     appendLine()
                     append(RequestDebugLog.format(debugEntries))
+                    append("\n\n")
+                    append(de.drivetime.notifier.automation.AutomationRunLog.format(context))
                 }
                 SettingsCard(
                     title = tr(settings.language, "Network debug", "Netzwerk-Debug"),
@@ -2420,7 +2432,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Copy", "Kopieren"))
                         }
-                        TextButton(onClick = { RequestDebugLog.clear() }) {
+                        TextButton(onClick = { RequestDebugLog.clear(); de.drivetime.notifier.automation.AutomationRunLog.clear(context) }) {
                             Icon(Icons.Outlined.DeleteOutline, null)
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Clear", "Leeren"))

@@ -36,4 +36,14 @@ class DriveEntryIdentityTest {
         assertTrue(DriveEntryIdentity.isOwnDescription("Fahrt automatisch durch Drive Time Notifier geplant."))
         assertFalse(DriveEntryIdentity.isOwnDescription("Unrelated calendar entry"))
     }
+    @Test fun originAndRevisionSupportLegacyAndModernDescriptions() {
+        assertTrue(DriveEntryIdentity.matchesOrigin("From: Main Street 1\nTo: Station", " main   street 1 "))
+        assertTrue(DriveEntryIdentity.matchesOrigin("Von: Zuhause\nNach: Bahnhof", "zuhause"))
+        assertFalse(DriveEntryIdentity.matchesOrigin("Von: Zuhause", "Büro"))
+        val description = DriveEntryIdentity.attachPlanningMetadata("Drive", "Home", 1234L)
+        assertTrue(DriveEntryIdentity.matchesOrigin(description, "home"))
+        assertFalse(DriveEntryIdentity.matchesOrigin(description, "Other home"))
+        assertEquals(1234L, DriveEntryIdentity.revision(description))
+        assertEquals(2000L, DriveEntryIdentity.revision(DriveEntryIdentity.attachPlanningMetadata(description, "Home", 2000L)))
+    }
 }
