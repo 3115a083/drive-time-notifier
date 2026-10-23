@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased: 1.3.2 test build
+
+- Prevent duplicate calendar drives from concurrent manual and scheduled planning.
+- Update existing drives and reminders atomically; preserve newer calculations.
+- Exclude generated drives from source appointments.
+- Anchor daily work to the configured local time across clock and daylight-saving changes.
+- Skip jobs more than two hours late and stale manual requests.
+- Identify manual and scheduled failures and keep bounded execution diagnostics.
+- Use stable appointment identities for ICS exports.
+
 ## 1.3.1
 
 Planning popup styling and timeout reliability fixes.

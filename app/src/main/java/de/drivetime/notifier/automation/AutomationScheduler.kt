@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.work.*
-import java.time.Duration
 import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
 
@@ -21,13 +20,10 @@ object AutomationScheduler {
     }
 
     private fun schedule(context: Context, hour: Int, minute: Int) {
-        val now = ZonedDateTime.now()
-        var next = now.withHour(hour.coerceIn(0, 23)).withMinute(minute.coerceIn(0, 59)).withSecond(0).withNano(0)
-        if (!next.isAfter(now)) next = next.plusDays(1)
-        val delay = Duration.between(now, next).toMillis()
-
+        val next = AutomationTiming.nextRun(ZonedDateTime.now(), hour, minute)
         val request = PeriodicWorkRequestBuilder<NextDayWorker>(24, TimeUnit.HOURS)
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .setNextScheduleTimeOverride(next.toInstant().toEpochMilli())
+            .setInputData(workDataOf("scheduled_for" to next.toInstant().toEpochMilli()))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
 
@@ -40,12 +36,13 @@ object AutomationScheduler {
 
     fun runNow(context: Context) {
         val request = OneTimeWorkRequestBuilder<NextDayWorker>()
-            .setInputData(workDataOf("force" to true))
+            .setInputData(workDataOf("force" to true, "requested_at" to System.currentTimeMillis(),
+                "planning_day" to java.time.LocalDate.now().plusDays(1).toString()))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             "manual-next-day",
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             request
         )
     }

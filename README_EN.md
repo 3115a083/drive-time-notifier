@@ -288,3 +288,7 @@ Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 ## Disclaimer
 
 The app is provided **AS IS**. There is no warranty for routes, travel times, traffic information, parking data, charging-station or register data, calendar data or long-term availability of external APIs. Users remain responsible for provider contracts, API usage and charges.
+
+## Automation test branch
+
+Manual and scheduled planning update the same drive for the same origin, destination and appointment time. Generated drives are excluded from source scans. Local execution time is validated; jobs more than two hours late are skipped. These fixes are initially available in the 1.3.2 test branch.
