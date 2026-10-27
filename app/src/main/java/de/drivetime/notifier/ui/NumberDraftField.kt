@@ -14,8 +14,8 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun NumberDraftField(initialValue: Int, label: String, minimum: Int = 0, maximum: Int = Int.MAX_VALUE,
-    onValid: (Int) -> Unit) {
-    val draft = rememberTextDraft(initialValue.toString())
+    editSessionKey: Any = Unit, onValid: (Int) -> Unit) {
+    val draft = rememberTextDraft(initialValue.toString(), editSessionKey)
     val latestOnValid by rememberUpdatedState(onValid)
     val latestInitial by rememberUpdatedState(initialValue)
     val focus = LocalFocusManager.current

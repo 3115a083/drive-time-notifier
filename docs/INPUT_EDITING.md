@@ -46,3 +46,5 @@ any newer edit occurred, including when the text later returns to its earlier va
 
 DraftValue and rememberTextDraft implement the common ownership rule. NumberDraftField is
 the single numeric settings editor. FieldDraftTest and FieldDraftUiTest enforce the contract.
+
+Concurrent settings saves apply only changed preference keys inside the DataStore transaction. A delayed edit of one field cannot undo an unrelated field. Explicit radius preset selection starts a new numeric edit session; persistence echoes never do. PreferencePatchTest covers overlapping saves.

@@ -179,7 +179,7 @@ class MainActivity : ComponentActivity() {
 
         fun updateSettings(newSettings: AppSettings) {
             scope.launch {
-                settingsStore.update(newSettings)
+                settingsStore.update(newSettings, previous = settings)
                 if (newSettings.automaticEnabled != settings.automaticEnabled ||
                     newSettings.autoHour != settings.autoHour ||
                     newSettings.autoMinute != settings.autoMinute
@@ -706,6 +706,7 @@ class MainActivity : ComponentActivity() {
             previousEndMillis = null
             explicitPreviousEndMillis = null
             selectedTargetEvent = null
+            originEditRevision++; destinationEditRevision++
             origin = request.entry.request.origin
             originInitialized = true
             destination = request.entry.request.destination
@@ -758,13 +759,15 @@ class MainActivity : ComponentActivity() {
             val requestedOrigin = origin
             val requestedDestination = destination
             val requestedRevision = originEditRevision to destinationEditRevision
+            val requestedArrival = appointmentDate to appointmentTime
             val now = System.currentTimeMillis()
             val next = runCatching {
                 calendarRepo.events(now, now + 21L * 24 * 60 * 60 * 1000, selected)
                     .firstOrNull { it.startMillis > now }
             }.getOrNull()
             if (origin != requestedOrigin || destination != requestedDestination ||
-                requestedRevision != (originEditRevision to destinationEditRevision)) {
+                requestedRevision != (originEditRevision to destinationEditRevision) ||
+                requestedArrival != (appointmentDate to appointmentTime)) {
                 nextDriveShortcutHandled = true
                 return@LaunchedEffect
             }
@@ -822,6 +825,7 @@ class MainActivity : ComponentActivity() {
                         settings = settings,
                         currentValue = origin, currentRevision = originEditRevision,
                         onSelect = { address ->
+                            originEditRevision++
                             origin = address
                             originInitialized = true
                             previousEndMillis = null
@@ -850,7 +854,7 @@ class MainActivity : ComponentActivity() {
                     QuickLocationChips(
                         settings = settings,
                         currentValue = destination, currentRevision = destinationEditRevision,
-                        onSelect = { destination = it }
+                        onSelect = { destinationEditRevision++; destination = it }
                     )
                 }
 
@@ -1135,11 +1139,13 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { showEventPicker = false },
                 onSelect = { event ->
                     if (pickingStart) {
+                        originEditRevision++
                         origin = event.location
                         originInitialized = true
                         previousEndMillis = event.endMillis
                         explicitPreviousEndMillis = event.endMillis
                     } else {
+                        destinationEditRevision++
                         destination = event.location
                         selectedTargetEvent = event
                         val dt = Instant.ofEpochMilli(event.startMillis).atZone(ZoneId.systemDefault()).toLocalDateTime()
@@ -1568,7 +1574,9 @@ class MainActivity : ComponentActivity() {
         var showAddPlace by remember { mutableStateOf(false) }
         var calendarPlaceAssignmentRaw by remember { mutableStateOf<String?>(null) }
         var showAddExclusion by remember { mutableStateOf(false) }
+        var parkingRadiusRevision by rememberSaveable { mutableLongStateOf(0L) }
         var showParkingSettings by remember { mutableStateOf(false) }
+        var chargingRadiusRevision by rememberSaveable { mutableLongStateOf(0L) }
         var showChargingSettings by remember { mutableStateOf(false) }
         var showFallbackSettings by remember { mutableStateOf(false) }
         var showFallbackPicker by remember { mutableStateOf(false) }
@@ -2131,13 +2139,14 @@ class MainActivity : ComponentActivity() {
                                 listOf(250, 500, 750, 1000, 1500, 2000).forEach { meters ->
                                     FilterChip(
                                         selected = settings.chargingMaxDistanceMeters == meters,
-                                        onClick = { onChange(settings.copy(chargingMaxDistanceMeters = meters)) },
+                                        onClick = { chargingRadiusRevision++; onChange(settings.copy(chargingMaxDistanceMeters = meters)) },
                                         label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
                                     )
                                 }
                             }
                             NumberDraftField(
                                 initialValue = settings.chargingMaxDistanceMeters,
+                    editSessionKey = chargingRadiusRevision,
                     minimum = 100, maximum = 10000,
                                 label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
                                 onValid = { onChange(settings.copy(chargingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
@@ -3001,13 +3010,14 @@ class MainActivity : ComponentActivity() {
                             listOf(250, 500, 750, 1000, 1500, 2000, 3000).forEach { meters ->
                                 FilterChip(
                                     selected = settings.parkingMaxDistanceMeters == meters,
-                                    onClick = { onChange(settings.copy(parkingMaxDistanceMeters = meters)) },
+                                    onClick = { parkingRadiusRevision++; onChange(settings.copy(parkingMaxDistanceMeters = meters)) },
                                     label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
                                 )
                             }
                         }
                         NumberDraftField(
                             initialValue = settings.parkingMaxDistanceMeters,
+                    editSessionKey = parkingRadiusRevision,
                     minimum = 100, maximum = 10000,
                             label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
                             onValid = { onChange(settings.copy(parkingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
