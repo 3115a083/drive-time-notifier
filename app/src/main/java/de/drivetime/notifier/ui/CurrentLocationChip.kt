@@ -29,18 +29,24 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 @Composable
-fun CurrentLocationChip(language: AppLanguage, onSelect: (String) -> Unit) {
+fun CurrentLocationChip(language: AppLanguage, currentValue: String, currentRevision: Long, onSelect: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val select by rememberUpdatedState(onSelect)
     var busy by remember { mutableStateOf(false) }
+    val latestValue by rememberUpdatedState(currentValue)
+    val latestRevision by rememberUpdatedState(currentRevision)
+    var requestedRevision by remember { mutableLongStateOf(0L) }
+    var requestedValue by remember { mutableStateOf<String?>(null) }
     fun locate() {
         if (busy) return
+        val expected = requestedValue ?: latestValue
+        val expectedRevision = requestedRevision
         scope.launch {
             busy = true
             try {
                 val location = withTimeout(20_000L) { currentLocation(context) }
-                select("${location.latitude},${location.longitude}")
+                if (fieldRequestStillCurrent(expected, expectedRevision, latestValue, latestRevision)) select("${location.latitude},${location.longitude}")
             } catch (e: Exception) {
                 if (e is CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException) throw e
                 Toast.makeText(context, tr(language, "Location unavailable. Check location services and try again.", "Standort nicht verfügbar. Standortdienste prüfen und erneut versuchen."), Toast.LENGTH_LONG).show()
@@ -54,6 +60,8 @@ fun CurrentLocationChip(language: AppLanguage, onSelect: (String) -> Unit) {
     AssistChip(
         enabled = !busy,
         onClick = {
+            requestedValue = latestValue
+            requestedRevision = latestRevision
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) locate()
             else permissions.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))

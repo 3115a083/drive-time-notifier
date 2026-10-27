@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.3, development
+
+- Preserve numeric and text drafts during pauses, delayed saves and settings updates.
+- Keep blank and invalid intermediate input visible; save only validated numeric values.
+- Preserve edited history limits and endpoint lists during background updates.
+- Prevent delayed location/calendar responses from replacing newer edits.
+- Add editor ownership rules and Compose regression coverage.
+
 ## 1.3.1
 
 Planning popup styling and timeout reliability fixes.

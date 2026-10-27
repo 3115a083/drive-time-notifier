@@ -120,7 +120,8 @@ class MainActivity : ComponentActivity() {
 
         val settingsStore = SettingsStore(this)
         setContent {
-            val settings by settingsStore.flow.collectAsState(initial = AppSettings())
+            val loadedSettings by settingsStore.flow.collectAsState(initial = null)
+            val settings = loadedSettings ?: return@setContent
             val dark = resolvedDarkMode(settings.appearance)
             val view = LocalView.current
             SideEffect {
@@ -178,7 +179,7 @@ class MainActivity : ComponentActivity() {
 
         fun updateSettings(newSettings: AppSettings) {
             scope.launch {
-                settingsStore.update(newSettings)
+                settingsStore.update(newSettings, previous = settings)
                 if (newSettings.automaticEnabled != settings.automaticEnabled ||
                     newSettings.autoHour != settings.autoHour ||
                     newSettings.autoMinute != settings.autoMinute
@@ -300,6 +301,8 @@ class MainActivity : ComponentActivity() {
         }
 
         var origin by rememberSaveable { mutableStateOf(initialIntent.getStringExtra("origin").orEmpty()) }
+        var originEditRevision by rememberSaveable { mutableLongStateOf(0L) }
+        var destinationEditRevision by rememberSaveable { mutableLongStateOf(0L) }
         var originInitialized by rememberSaveable { mutableStateOf(origin.isNotBlank()) }
         var destination by rememberSaveable { mutableStateOf(initialIntent.getStringExtra("destination").orEmpty()) }
         var appointmentDate by remember { mutableStateOf(defaultDateTime.toLocalDate()) }
@@ -703,6 +706,7 @@ class MainActivity : ComponentActivity() {
             previousEndMillis = null
             explicitPreviousEndMillis = null
             selectedTargetEvent = null
+            originEditRevision++; destinationEditRevision++
             origin = request.entry.request.origin
             originInitialized = true
             destination = request.entry.request.destination
@@ -752,11 +756,21 @@ class MainActivity : ComponentActivity() {
                 nextDriveShortcutHandled = true
                 return@LaunchedEffect
             }
+            val requestedOrigin = origin
+            val requestedDestination = destination
+            val requestedRevision = originEditRevision to destinationEditRevision
+            val requestedArrival = appointmentDate to appointmentTime
             val now = System.currentTimeMillis()
             val next = runCatching {
                 calendarRepo.events(now, now + 21L * 24 * 60 * 60 * 1000, selected)
                     .firstOrNull { it.startMillis > now }
             }.getOrNull()
+            if (origin != requestedOrigin || destination != requestedDestination ||
+                requestedRevision != (originEditRevision to destinationEditRevision) ||
+                requestedArrival != (appointmentDate to appointmentTime)) {
+                nextDriveShortcutHandled = true
+                return@LaunchedEffect
+            }
             if (next == null) {
                 error = tr(settings.language, "No upcoming appointment with a location was found.", "Kein kommender Termin mit Ort gefunden.")
                 nextDriveShortcutHandled = true
@@ -800,7 +814,7 @@ class MainActivity : ComponentActivity() {
                 AddressAutocompleteField(
                     settings = settings,
                     value = origin,
-                    onValueChange = { origin = it; originInitialized = true; previousEndMillis = null },
+                    onValueChange = { originEditRevision++; origin = it; originInitialized = true; previousEndMillis = null },
                     label = tr(settings.language, "Start location", "Startort"),
                     leadingIcon = { Icon(Icons.Outlined.MyLocation, null) }
                 )
@@ -809,7 +823,9 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
+                        currentValue = origin, currentRevision = originEditRevision,
                         onSelect = { address ->
+                            originEditRevision++
                             origin = address
                             originInitialized = true
                             previousEndMillis = null
@@ -828,7 +844,7 @@ class MainActivity : ComponentActivity() {
                 AddressAutocompleteField(
                     settings = settings,
                     value = destination,
-                    onValueChange = { destination = it },
+                    onValueChange = { destinationEditRevision++; destination = it },
                     label = tr(settings.language, "Destination", "Ziel"),
                     leadingIcon = { Icon(Icons.Outlined.LocationOn, null) }
                 )
@@ -837,7 +853,8 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
-                        onSelect = { destination = it }
+                        currentValue = destination, currentRevision = destinationEditRevision,
+                        onSelect = { destinationEditRevision++; destination = it }
                     )
                 }
 
@@ -1122,11 +1139,13 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { showEventPicker = false },
                 onSelect = { event ->
                     if (pickingStart) {
+                        originEditRevision++
                         origin = event.location
                         originInitialized = true
                         previousEndMillis = event.endMillis
                         explicitPreviousEndMillis = event.endMillis
                     } else {
+                        destinationEditRevision++
                         destination = event.location
                         selectedTargetEvent = event
                         val dt = Instant.ofEpochMilli(event.startMillis).atZone(ZoneId.systemDefault()).toLocalDateTime()
@@ -1555,7 +1574,9 @@ class MainActivity : ComponentActivity() {
         var showAddPlace by remember { mutableStateOf(false) }
         var calendarPlaceAssignmentRaw by remember { mutableStateOf<String?>(null) }
         var showAddExclusion by remember { mutableStateOf(false) }
+        var parkingRadiusRevision by rememberSaveable { mutableLongStateOf(0L) }
         var showParkingSettings by remember { mutableStateOf(false) }
+        var chargingRadiusRevision by rememberSaveable { mutableLongStateOf(0L) }
         var showChargingSettings by remember { mutableStateOf(false) }
         var showFallbackSettings by remember { mutableStateOf(false) }
         var showFallbackPicker by remember { mutableStateOf(false) }
@@ -1572,12 +1593,18 @@ class MainActivity : ComponentActivity() {
         var pendingReselectedSourceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
         var restoreAutomaticAfterCalendarSelection by remember { mutableStateOf(false) }
         var automationToken by remember { mutableStateOf(AutomationTokenStore(context).token()) }
-        var homeNameDraft by remember { mutableStateOf(settings.homeName) }
-        var homeDraft by remember { mutableStateOf(settings.homeAddress) }
-        var calendarTitleDraft by remember { mutableStateOf(settings.calendarEventTitle) }
-        var osrmDraft by remember { mutableStateOf(settings.osrmBaseUrl) }
-        var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
-        var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
+        val homeNameDraftState = rememberTextDraft(settings.homeName)
+        var homeNameDraft by homeNameDraftState
+        val homeDraftState = rememberTextDraft(settings.homeAddress)
+        var homeDraft by homeDraftState
+        val calendarTitleDraftState = rememberTextDraft(settings.calendarEventTitle)
+        var calendarTitleDraft by calendarTitleDraftState
+        val osrmDraftState = rememberTextDraft(settings.osrmBaseUrl)
+        var osrmDraft by osrmDraftState
+        val valhallaDraftState = rememberTextDraft(settings.valhallaBaseUrl)
+        var valhallaDraft by valhallaDraftState
+        val photonDraftState = rememberTextDraft(settings.photonBaseUrl)
+        var photonDraft by photonDraftState
         val operatorCatalog = remember { ChargingOperatorCatalog(context) }
         var operatorOptions by remember { mutableStateOf(operatorCatalog.operators()) }
         var operatorRefreshing by remember { mutableStateOf(false) }
@@ -1663,31 +1690,31 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(homeNameDraft) {
             delay(500)
-            if (homeNameDraft != latestSettings.homeName) {
+            if (homeNameDraftState.edited && homeNameDraft != latestSettings.homeName) {
                 onChange(latestSettings.copy(homeName = homeNameDraft))
             }
         }
         LaunchedEffect(homeDraft) {
             delay(500)
-            if (homeDraft != latestSettings.homeAddress) {
+            if (homeDraftState.edited && homeDraft != latestSettings.homeAddress) {
                 onChange(latestSettings.copy(homeAddress = homeDraft))
             }
         }
         LaunchedEffect(calendarTitleDraft) {
             delay(500)
-            if (calendarTitleDraft != latestSettings.calendarEventTitle) {
+            if (calendarTitleDraftState.edited && calendarTitleDraft != latestSettings.calendarEventTitle) {
                 onChange(latestSettings.copy(calendarEventTitle = calendarTitleDraft))
             }
         }
         LaunchedEffect(osrmDraft) {
             delay(600)
-            if (osrmDraft != latestSettings.osrmBaseUrl) {
+            if (osrmDraftState.edited && osrmDraft != latestSettings.osrmBaseUrl) {
                 onChange(latestSettings.copy(osrmBaseUrl = osrmDraft))
             }
         }
         LaunchedEffect(valhallaDraft) {
             delay(600)
-            if (valhallaDraft != latestSettings.valhallaBaseUrl) {
+            if (valhallaDraftState.edited && valhallaDraft != latestSettings.valhallaBaseUrl) {
                 onChange(latestSettings.copy(valhallaBaseUrl = valhallaDraft))
             }
         }
@@ -1954,6 +1981,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 NumberDraftField(
                     initialValue = settings.bufferMinutes,
+                    minimum = 0, maximum = 180,
                     label = tr(settings.language, "Arrival buffer (minutes)", "Ankunftspuffer (Minuten)"),
                     onValid = { onChange(settings.copy(bufferMinutes = it.coerceIn(0, 180))) }
                 )
@@ -1994,6 +2022,7 @@ class MainActivity : ComponentActivity() {
                 }
                 NumberDraftField(
                     initialValue = settings.reminderLeadMinutes,
+                    minimum = 0, maximum = 180,
                     label = tr(settings.language, "Departure reminder lead (minutes)", "Benachrichtigung vor Abfahrt (Minuten)"),
                     onValid = { onChange(settings.copy(reminderLeadMinutes = it.coerceIn(0, 180))) }
                 )
@@ -2053,6 +2082,7 @@ class MainActivity : ComponentActivity() {
                             )
                             NumberDraftField(
                                 initialValue = settings.chargingResultLimit,
+                    minimum = 1, maximum = 50,
                                 label = tr(settings.language, "Number of charging stations (1–50)", "Anzahl der Ladesäulen (1–50)"),
                                 onValid = { onChange(settings.copy(chargingResultLimit = it.coerceIn(1, 50))) }
                             )
@@ -2109,13 +2139,15 @@ class MainActivity : ComponentActivity() {
                                 listOf(250, 500, 750, 1000, 1500, 2000).forEach { meters ->
                                     FilterChip(
                                         selected = settings.chargingMaxDistanceMeters == meters,
-                                        onClick = { onChange(settings.copy(chargingMaxDistanceMeters = meters)) },
+                                        onClick = { chargingRadiusRevision++; onChange(settings.copy(chargingMaxDistanceMeters = meters)) },
                                         label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
                                     )
                                 }
                             }
                             NumberDraftField(
                                 initialValue = settings.chargingMaxDistanceMeters,
+                    editSessionKey = chargingRadiusRevision,
+                    minimum = 100, maximum = 10000,
                                 label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
                                 onValid = { onChange(settings.copy(chargingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
                             )
@@ -2787,12 +2819,12 @@ class MainActivity : ComponentActivity() {
                                                 calendarStartLocations = emptySet(),
                                                 automaticEnabled = false
                                             )
-                                            homeNameDraft = restored.homeName
-                                            homeDraft = restored.homeAddress
-                                            calendarTitleDraft = restored.calendarEventTitle
-                                            osrmDraft = restored.osrmBaseUrl
-                                            valhallaDraft = restored.valhallaBaseUrl
-                                            photonDraft = restored.photonBaseUrl
+                                            homeNameDraftState.reset(restored.homeName)
+                                            homeDraftState.reset(restored.homeAddress)
+                                            calendarTitleDraftState.reset(restored.calendarEventTitle)
+                                            osrmDraftState.reset(restored.osrmBaseUrl)
+                                            valhallaDraftState.reset(restored.valhallaBaseUrl)
+                                            photonDraftState.reset(restored.photonBaseUrl)
                                             pendingImportedSettings = restored
                                             pendingReselectedSourceIds = emptySet()
                                             restoreAutomaticAfterCalendarSelection = imported.settings.automaticEnabled
@@ -2963,6 +2995,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         NumberDraftField(
                             initialValue = settings.parkingResultLimit,
+                    minimum = 1, maximum = 50,
                             label = tr(settings.language, "Number of parking spaces (1–50)", "Anzahl der Parkplätze (1–50)"),
                             onValid = { onChange(settings.copy(parkingResultLimit = it.coerceIn(1, 50))) }
                         )
@@ -2977,13 +3010,15 @@ class MainActivity : ComponentActivity() {
                             listOf(250, 500, 750, 1000, 1500, 2000, 3000).forEach { meters ->
                                 FilterChip(
                                     selected = settings.parkingMaxDistanceMeters == meters,
-                                    onClick = { onChange(settings.copy(parkingMaxDistanceMeters = meters)) },
+                                    onClick = { parkingRadiusRevision++; onChange(settings.copy(parkingMaxDistanceMeters = meters)) },
                                     label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
                                 )
                             }
                         }
                         NumberDraftField(
                             initialValue = settings.parkingMaxDistanceMeters,
+                    editSessionKey = parkingRadiusRevision,
+                    minimum = 100, maximum = 10000,
                             label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
                             onValid = { onChange(settings.copy(parkingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
                         )
@@ -3221,12 +3256,14 @@ class MainActivity : ComponentActivity() {
         if (advancedExpanded) {
             NumberDraftField(
                 initialValue = settings.providerCaps.forProvider(provider),
+                minimum = 1, maximum = 1_000_000,
                 label = tr(settings.language, "Daily request limit", "Tägliches Anfrage-Limit"),
                 onValid = { onCap(it.coerceIn(1, 1_000_000)) }
             )
             Spacer(Modifier.height(8.dp))
             NumberDraftField(
                 initialValue = settings.providerTimeoutSeconds.forProvider(provider),
+                minimum = 1, maximum = 300,
                 label = tr(settings.language, "Timeout in seconds", "Timeout in Sekunden"),
                 onValid = { onTimeout(it.coerceIn(1, 300)) }
             )
@@ -3428,10 +3465,10 @@ class MainActivity : ComponentActivity() {
         var testingId by remember { mutableStateOf<String?>(null) }
         var confirmProvider by remember { mutableStateOf<RoutingProvider?>(null) }
         var showOverpassConfig by remember { mutableStateOf(false) }
-        var overpassEndpointDrafts by remember(settings.overpassEndpoints) {
+        var overpassEndpointDrafts by rememberSaveable {
             mutableStateOf(settings.overpassEndpoints.ifEmpty { listOf(settings.overpassBaseUrl) })
         }
-        var splitOverpassDraft by remember(settings.overpassSplitRequests) {
+        var splitOverpassDraft by rememberSaveable {
             mutableStateOf(settings.overpassSplitRequests)
         }
 
@@ -3952,10 +3989,11 @@ class MainActivity : ComponentActivity() {
         testing: Boolean,
         onTest: (String) -> Unit
     ) {
-        var keyDraft by remember(provider) { mutableStateOf(keyStore.read(provider).orEmpty()) }
+        val keyDraftState = rememberTextDraft(keyStore.read(provider).orEmpty(), provider.id)
+        var keyDraft by keyDraftState
         LaunchedEffect(provider, keyDraft) {
             delay(700)
-            keyStore.save(provider, keyDraft.trim())
+            if (keyDraftState.edited) keyStore.save(provider, keyDraft.trim())
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
@@ -4353,13 +4391,15 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun QuickLocationChips(
         settings: AppSettings,
+        currentValue: String,
+        currentRevision: Long,
         onSelect: (String) -> Unit
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            CurrentLocationChip(settings.language, onSelect)
+            CurrentLocationChip(settings.language, currentValue, currentRevision, onSelect)
             if (settings.homeAddress.isNotBlank()) {
                 AssistChip(
                     onClick = { onSelect(settings.homeAddress) },
@@ -4461,38 +4501,6 @@ class MainActivity : ComponentActivity() {
             Text(label, Modifier.weight(1f))
             Switch(checked, onCheckedChange = onCheckedChange)
         }
-    }
-
-    @Composable
-    private fun NumberDraftField(initialValue: Int, label: String, onValid: (Int) -> Unit) {
-        var text by remember(label) { mutableStateOf(initialValue.toString()) }
-        var userEditing by remember(label) { mutableStateOf(false) }
-        val latestOnValid by rememberUpdatedState(onValid)
-        val latestInitial by rememberUpdatedState(initialValue)
-        LaunchedEffect(text, userEditing) {
-            if (!userEditing) return@LaunchedEffect
-            delay(450)
-            val submitted = text
-            val parsed = submitted.toIntOrNull()
-            if (parsed != null && parsed != latestInitial) latestOnValid(parsed)
-            delay(120)
-            if (text == submitted) userEditing = false
-        }
-        LaunchedEffect(initialValue, userEditing) {
-            if (!userEditing && text.toIntOrNull() != initialValue) text = initialValue.toString()
-        }
-        OutlinedTextField(
-            value = text,
-            onValueChange = {
-                if (it.all(Char::isDigit)) {
-                    text = it
-                    userEditing = true
-                }
-            },
-            label = { Text(label) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
     }
 
     @Composable

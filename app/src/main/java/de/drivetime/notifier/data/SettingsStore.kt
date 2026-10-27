@@ -376,7 +376,12 @@ class SettingsStore(private val context: Context) {
         )
     }
 
-    suspend fun update(s: AppSettings) = context.dataStore.edit { p ->
+    suspend fun update(s: AppSettings, previous: AppSettings? = null) = context.dataStore.edit { p ->
+        p.applyChangedValues(encode(s), previous?.let(::encode))
+        p.remove(K.LEGACY_NOMINATIM)
+    }
+
+    private fun encode(s: AppSettings): Preferences = mutablePreferencesOf().also { p ->
         p[K.HOME_NAME] = s.homeName.trim().ifBlank { "Standard" }.take(80)
         p[K.HOME] = s.homeAddress
         p[K.PLACES] = s.savedPlaces
