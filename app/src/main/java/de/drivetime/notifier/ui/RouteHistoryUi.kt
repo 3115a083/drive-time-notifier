@@ -46,11 +46,11 @@ fun HistoryPreferencesCard(language:AppLanguage) {
     val store=remember {RouteHistoryStore(context)}
     val state by store.flow.collectAsState(initial=RouteHistoryState())
     val scope=rememberCoroutineScope()
-    var limit by remember {mutableStateOf("50")}
+    val limitDraft = rememberTextDraft(state.limit.toString())
+    var limit by limitDraft
     var message by remember {mutableStateOf<String?>(null)}
     var busy by remember {mutableStateOf(false)}
     var disableConfirm by remember {mutableStateOf(false)}
-    LaunchedEffect(state.limit) {limit=state.limit.toString()}
 
     fun change(enabled:Boolean,count:Int) {
         busy=true
@@ -77,7 +77,7 @@ fun HistoryPreferencesCard(language:AppLanguage) {
                 style=MaterialTheme.typography.bodySmall)
             val count=limit.toIntOrNull()
             val valid=count!=null&&count in 1..RouteHistoryPolicy.MAX_ENTRIES
-            OutlinedTextField(value=limit,onValueChange={limit=it.take(4).filter(Char::isDigit)},
+            OutlinedTextField(value=limit,onValueChange={limit=it},
                 label={Text(tr(language,"Maximum entries","Maximale Eintragszahl"))},
                 supportingText={Text(tr(language,"1 to 500 entries","1 bis 500 Einträge"))},
                 isError=!valid,singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),
