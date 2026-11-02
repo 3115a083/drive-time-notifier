@@ -69,8 +69,9 @@ class PhotonSearchService(
     private suspend fun searchEndpoint(endpoint: String, query: String, language: String, countryCode: String?, limit: Int): List<AddressSuggestion> {
         val base = endpoint.toHttpUrl()
         require(base.isHttps) { "Photon endpoint must use HTTPS." }
-        val builder = base.newBuilder()
-            .addPathSegment("api")
+        val builder = base.newBuilder().apply {
+            if(base.pathSegments.lastOrNull { it.isNotBlank() } != "api") addPathSegment("api")
+        }
             .addQueryParameter("q", query)
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("lang", language)

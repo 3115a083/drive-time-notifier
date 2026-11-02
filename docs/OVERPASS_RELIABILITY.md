@@ -12,3 +12,5 @@ References:
 - https://dev.overpass-api.de/overpass-doc/en/preface/commons.html
 - https://dev.overpass-api.de/command_line.html
 - https://wiki.openstreetmap.org/wiki/Overpass_API
+
+A bounded real parking query at fixed Berlin test coordinates succeeded via GET after 31.3 seconds, returning three elements without a runtime remark. This validates the query syntax and the need for a budget longer than nine seconds on the observed network.

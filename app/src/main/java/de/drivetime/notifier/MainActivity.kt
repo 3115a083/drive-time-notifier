@@ -63,6 +63,8 @@ import de.drivetime.notifier.security.AutomationTokenStore
 import de.drivetime.notifier.security.PasswordBackup
 import de.drivetime.notifier.security.SecureApiKeyStore
 import de.drivetime.notifier.ui.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import de.drivetime.notifier.update.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -146,6 +148,7 @@ class MainActivity : ComponentActivity() {
         val keyStore = remember { SecureApiKeyStore(context) }
         var showSettings by rememberSaveable { mutableStateOf(false) }
         var showHistory by rememberSaveable { mutableStateOf(false) }
+        var historySettingsRequested by rememberSaveable { mutableStateOf(false) }
         var historyPlanningRequest by remember { mutableStateOf<HistoryPlanningRequest?>(null) }
         var permissionTick by remember { mutableIntStateOf(0) }
         var lastBackPress by remember { mutableLongStateOf(0L) }
@@ -219,7 +222,7 @@ class MainActivity : ComponentActivity() {
                         IconButton(onClick = { showHistory = true }) {
                             Icon(Icons.Outlined.History, contentDescription = tr(settings.language, "Search history", "Suchhistorie"))
                         }
-                        IconButton(onClick = { showSettings = !showSettings }) {
+                        IconButton(onClick = { historySettingsRequested = false; showSettings = !showSettings }) {
                             Icon(
                                 if (showSettings) Icons.Outlined.Close else Icons.Outlined.Settings,
                                 contentDescription = tr(settings.language, "Settings", "Einstellungen")
@@ -236,6 +239,7 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     keyStore = keyStore,
                     calendarRepo = calendarRepo,
+                    historySettingsRequested = historySettingsRequested,
                     hasCalendarPermission = hasCalendarPermission,
                     onRequestCalendarPermission = {
                         permissionLauncher.launch(arrayOf(
@@ -271,7 +275,7 @@ class MainActivity : ComponentActivity() {
         if (showHistory) RouteHistoryDialog(
             settings = settings,
             onDismiss = { showHistory = false },
-            onSettings = { showHistory = false; showSettings = true },
+            onSettings = { showHistory = false; historySettingsRequested = true; showSettings = true },
             onPlan = { request ->
                 historyPlanningRequest = request
                 showSettings = false
@@ -1557,10 +1561,18 @@ class MainActivity : ComponentActivity() {
         settings: AppSettings,
         keyStore: SecureApiKeyStore,
         calendarRepo: CalendarRepository,
+        historySettingsRequested: Boolean,
         hasCalendarPermission: Boolean,
         onRequestCalendarPermission: () -> Unit,
         onChange: (AppSettings) -> Unit
     ) {
+        val historyRequester = remember { BringIntoViewRequester() }
+        LaunchedEffect(historySettingsRequested) {
+            if (historySettingsRequested) {
+                withFrameNanos { }
+                historyRequester.bringIntoView()
+            }
+        }
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         val uriHandler = LocalUriHandler.current
@@ -2285,8 +2297,10 @@ class MainActivity : ComponentActivity() {
             SettingsCard(title=tr(settings.language,"Address and map data services","Adress- und Kartendienste"),icon=Icons.Outlined.Map) {
                 MapServiceLists(settings,onChange)
             }
-            SettingsCard(title=tr(settings.language,"Search history","Suchhistorie"),icon=Icons.Outlined.History) {
-                HistoryPreferencesCard(settings.language)
+            Box(Modifier.fillMaxWidth().bringIntoViewRequester(historyRequester)) {
+                SettingsCard(title=tr(settings.language,"Search history","Suchhistorie"),icon=Icons.Outlined.History) {
+                    HistoryPreferencesCard(settings.language)
+                }
             }
 
             SettingsCard(

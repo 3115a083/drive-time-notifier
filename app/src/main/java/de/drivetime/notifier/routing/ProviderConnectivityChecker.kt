@@ -100,8 +100,10 @@ class ProviderConnectivityChecker(
     suspend fun checkPhoton(): InterfaceCheckResult = withContext(Dispatchers.IO) {
         val fingerprint = photonFingerprint(settings)
         val result = runCatching {
-            val base = settings.photonBaseUrl.trimEnd('/')
-            val url = "$base/api".toHttpUrl().newBuilder()
+            val base = settings.photonBaseUrl.trimEnd('/').toHttpUrl()
+            val url = base.newBuilder().apply {
+                if(base.pathSegments.lastOrNull { it.isNotBlank() } != "api") addPathSegment("api")
+            }
                 .addQueryParameter("q", "Berlin")
                 .addQueryParameter("limit", "1")
                 .build()
