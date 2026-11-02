@@ -26,8 +26,11 @@ class PlanningOverlaySmokeTest {
         }
         val opened=device.wait(Until.hasObject(By.pkg(context.packageName)), 15_000)
         if(!opened) {
-            device.takeScreenshot(File("/data/local/tmp/overlay-start-failure.png"))
-            device.dumpWindowHierarchy(File("/data/local/tmp/overlay-start-failure.xml"))
+            val image=File(context.getExternalFilesDir(null),"overlay-start-failure.png")
+            val tree=File(context.getExternalFilesDir(null),"overlay-start-failure.xml")
+            device.takeScreenshot(image);device.dumpWindowHierarchy(tree)
+            device.executeShellCommand("cp ${image.absolutePath} /data/local/tmp/${image.name}")
+            device.executeShellCommand("cp ${tree.absolutePath} /data/local/tmp/${tree.name}")
         }
         assertTrue("Main activity was not accessible",opened)
         try {

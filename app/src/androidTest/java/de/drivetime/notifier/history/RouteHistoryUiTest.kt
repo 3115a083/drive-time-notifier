@@ -39,8 +39,11 @@ class RouteHistoryUiTest {
             }
             val opened=device.wait(Until.hasObject(By.desc("Suchhistorie")),15_000)
             if(!opened) {
-                device.takeScreenshot(java.io.File("/data/local/tmp/history-start-failure.png"))
-                device.dumpWindowHierarchy(java.io.File("/data/local/tmp/history-start-failure.xml"))
+                val image=java.io.File(context.getExternalFilesDir(null),"history-start-failure.png")
+                val tree=java.io.File(context.getExternalFilesDir(null),"history-start-failure.xml")
+                device.takeScreenshot(image);device.dumpWindowHierarchy(tree)
+                device.executeShellCommand("cp ${image.absolutePath} /data/local/tmp/${image.name}")
+                device.executeShellCommand("cp ${tree.absolutePath} /data/local/tmp/${tree.name}")
             }
             assertTrue("Main history button was not accessible",opened)
             val history=find(By.desc("Suchhistorie"))
