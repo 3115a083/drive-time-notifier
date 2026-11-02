@@ -1724,7 +1724,6 @@ class MainActivity : ComponentActivity() {
         ) {
             Spacer(Modifier.height(4.dp))
 
-            HistoryPreferencesCard(settings.language)
             Spacer(Modifier.height(12.dp))
             SettingsCard(
                 title = tr(settings.language, "Appearance", "Darstellung"),
@@ -2280,160 +2279,14 @@ class MainActivity : ComponentActivity() {
 
             }
 
-            SettingsCard(
-                title = tr(settings.language, "Routing provider", "Routingdienst"),
-                icon = Icons.Outlined.Route
-            ) {
-                RoutingProvider.entries.forEach { provider ->
-                    ProviderCard(
-                        provider = provider,
-                        selected = settings.routingProvider == provider,
-                        settings = settings,
-                        keyStore = keyStore,
-                        interfaceHealthStore = interfaceHealthStore,
-                        healthRevision = healthRevision,
-                        onHealthChanged = { healthRevision++ },
-                        onSelect = {
-                            onChange(
-                                settings.copy(
-                                    routingProvider = provider,
-                                    fallbackProviderIds = settings.fallbackProviderIds.filterNot { it == provider.id }
-                                )
-                            )
-                        },
-                        onCap = { cap ->
-                    onChange(settings.copy(providerCaps = settings.providerCaps.withProvider(provider, cap)))
-                },
-                onTimeout = { seconds ->
-                    onChange(
-                        settings.copy(
-                            providerTimeoutSeconds = settings.providerTimeoutSeconds.withProvider(provider, seconds)
-                        )
-                    )
-                }
-                    )
-                    Spacer(Modifier.height(10.dp))
-                }
-
-                OutlinedButton(
-                    onClick = { showFallbackSettings = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Outlined.AltRoute, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (settings.fallbackProviderIds.isEmpty())
-                            tr(settings.language, "Configure fallback routing", "Fallback-Routing konfigurieren")
-                        else tr(
-                            settings.language,
-                            "Fallback routing (${settings.fallbackProviderIds.size})",
-                            "Fallback-Routing (${settings.fallbackProviderIds.size})"
-                        )
-                    )
-                }
-                if (showFallbackSettings) {
-                    Dialog(onDismissRequest = { showFallbackSettings = false }) {
-                    Surface(
-                        shape = MaterialTheme.shapes.extraLarge,
-                        tonalElevation = 6.dp,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)
-                    ) {
-                    Column(
-                        Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                Text(
-                    tr(settings.language, "Fallback routing", "Fallback-Routing"),
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Text(
-                    tr(
-                        settings.language,
-                        "If the primary provider reaches its local cap or fails, providers below are tried in this order.",
-                        "Wenn der primäre Dienst sein lokales Limit erreicht oder fehlschlägt, werden die folgenden Dienste in dieser Reihenfolge versucht."
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                settings.fallbackProviderIds.forEachIndexed { index, id ->
-                    val fallback = RoutingProvider.entries.firstOrNull { it.id == id }
-                    if (fallback != null && fallback != settings.routingProvider) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("${index + 1}.", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.width(8.dp))
-                            ProviderMonochromeMark(fallback)
-                            Spacer(Modifier.width(8.dp))
-                            Text(fallback.displayName, Modifier.weight(1f))
-                            IconButton(
-                                enabled = index > 0,
-                                onClick = {
-                                    val list = settings.fallbackProviderIds.toMutableList()
-                                    val item = list.removeAt(index)
-                                    list.add(index - 1, item)
-                                    onChange(settings.copy(fallbackProviderIds = list))
-                                }
-                            ) { Icon(Icons.Outlined.KeyboardArrowUp, null) }
-                            IconButton(
-                                enabled = index < settings.fallbackProviderIds.lastIndex,
-                                onClick = {
-                                    val list = settings.fallbackProviderIds.toMutableList()
-                                    val item = list.removeAt(index)
-                                    list.add(index + 1, item)
-                                    onChange(settings.copy(fallbackProviderIds = list))
-                                }
-                            ) { Icon(Icons.Outlined.KeyboardArrowDown, null) }
-                            IconButton(onClick = {
-                                onChange(settings.copy(fallbackProviderIds = settings.fallbackProviderIds - id))
-                            }) {
-                                Icon(Icons.Outlined.DeleteOutline, tr(settings.language, "Remove", "Entfernen"))
-                            }
-                        }
-                    }
-                }
-                FilledTonalButton(onClick = { showFallbackPicker = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(tr(settings.language, "Add fallback provider", "Fallback-Dienst hinzufügen"))
-                }
-                Button(onClick = { showFallbackSettings = false }, modifier = Modifier.fillMaxWidth()) {
-                    Text(tr(settings.language, "Done", "Fertig"))
-                }
-                    }
-                    }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-
-                ProviderKeyAndEndpoints(
-                    settings = settings,
-                    keyStore = keyStore,
-                    osrmDraft = osrmDraft,
-                    valhallaDraft = valhallaDraft,
-                    photonDraft = photonDraft,
-                    interfaceHealthStore = interfaceHealthStore,
-                    healthRevision = healthRevision,
-                    onHealthChanged = { healthRevision++ },
-                    onOsrmDraft = { osrmDraft = it },
-                    onValhallaDraft = { valhallaDraft = it },
-                    onPhotonDraft = { photonDraft = it },
-                    onNetworkDataConfig = { photon, endpoints, split ->
-                        val sanitized = OsmEnrichmentClient.normalizeConfiguredEndpoints(endpoints)
-                        onChange(
-                            settings.copy(
-                                photonBaseUrl = photon,
-                                overpassBaseUrl = sanitized.first(),
-                                overpassEndpoints = sanitized,
-                                overpassSplitRequests = split
-                            )
-                        )
-                    },
-                    onOpenUrl = { uriHandler.openUri(it) }
-                )
-
+            SettingsCard(title=tr(settings.language,"Routing services","Routingdienste"),icon=Icons.Outlined.Route) {
+                RoutingServiceList(settings,keyStore,onChange)
+            }
+            SettingsCard(title=tr(settings.language,"Address and map data services","Adress- und Kartendienste"),icon=Icons.Outlined.Map) {
+                MapServiceLists(settings,onChange)
+            }
+            SettingsCard(title=tr(settings.language,"Search history","Suchhistorie"),icon=Icons.Outlined.History) {
+                HistoryPreferencesCard(settings.language)
             }
 
             SettingsCard(

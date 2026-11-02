@@ -44,7 +44,7 @@ class UnifiedRoutingService(
 
 
     override suspend fun route(request: RouteRequest): RouteEstimate = withContext(Dispatchers.IO) {
-        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName)
+        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints)
         val origin = geocoder.geocode(request.origin)
         val destination = geocoder.geocode(request.destination)
         routeResolved(

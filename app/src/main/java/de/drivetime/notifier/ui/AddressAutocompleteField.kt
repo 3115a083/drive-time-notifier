@@ -42,7 +42,7 @@ fun AddressAutocompleteField(
         searching = true
         suggestions = withTimeoutOrNull(8_000) {
             runCatching {
-                PhotonSearchService(settings.photonBaseUrl, context.packageName)
+                PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints)
                     .suggest(value.trim(), settings.language.id)
             }.getOrDefault(emptyList())
         }.orEmpty()

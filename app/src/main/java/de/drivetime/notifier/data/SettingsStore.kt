@@ -196,6 +196,7 @@ data class AppSettings(
     val osrmBaseUrl: String = "https://router.project-osrm.org",
     val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
+    val photonEndpoints: List<String> = emptyList(),
     val overpassBaseUrl: String = "https://overpass-api.de/api/interpreter",
     val overpassEndpoints: List<String> = listOf(
         "https://overpass-api.de/api/interpreter",
@@ -210,7 +211,7 @@ data class AppSettings(
     val providerCaps: ProviderCaps = ProviderCaps(),
     val providerLimitPeriods: ProviderLimitPeriods = ProviderLimitPeriods(),
     val providerTimeoutSeconds: ProviderTimeouts = ProviderTimeouts(),
-    val fallbackProviderIds: List<String> = emptyList()
+    val fallbackProviderIds: List<String> = listOf(RoutingProvider.OSRM.id)
 )
 
 class SettingsStore(private val context: Context) {
@@ -250,6 +251,7 @@ class SettingsStore(private val context: Context) {
         val OSRM = stringPreferencesKey("osrm_base_url")
         val VALHALLA = stringPreferencesKey("valhalla_base_url")
         val PHOTON = stringPreferencesKey("photon_base_url")
+        val PHOTON_ENDPOINTS = stringPreferencesKey("photon_endpoints")
         val OVERPASS = stringPreferencesKey("overpass_base_url")
         val OVERPASS_ENDPOINTS = stringPreferencesKey("overpass_endpoints")
         val OVERPASS_SPLIT = booleanPreferencesKey("overpass_split_requests")
@@ -341,6 +343,7 @@ class SettingsStore(private val context: Context) {
             osrmBaseUrl = p[K.OSRM] ?: "https://router.project-osrm.org",
             valhallaBaseUrl = p[K.VALHALLA] ?: "https://valhalla1.openstreetmap.de",
             photonBaseUrl = p[K.PHOTON] ?: "https://photon.komoot.io",
+            photonEndpoints = p[K.PHOTON_ENDPOINTS]?.split("\n")?.filter { it.isNotBlank() }.orEmpty(),
             overpassBaseUrl = overpassEndpoints.first(),
             overpassEndpoints = overpassEndpoints,
             overpassSplitRequests = p[K.OVERPASS_SPLIT] ?: true,
@@ -367,8 +370,7 @@ class SettingsStore(private val context: Context) {
         here = (p[K.TIMEOUT_HERE] ?: 18).coerceIn(1, 300),
         tomTom = (p[K.TIMEOUT_TOMTOM] ?: 16).coerceIn(1, 300)
     ),
-            fallbackProviderIds = p[K.FALLBACK_PROVIDERS]
-                .orEmpty()
+            fallbackProviderIds = (p[K.FALLBACK_PROVIDERS] ?: RoutingProvider.OSRM.id)
                 .split(",")
                 .map { it.trim() }
                 .filter { id -> RoutingProvider.entries.any { it.id == id } }
@@ -417,6 +419,7 @@ class SettingsStore(private val context: Context) {
         p[K.OSRM] = sanitizeHttpsBaseUrl(s.osrmBaseUrl, "https://router.project-osrm.org")
         p[K.VALHALLA] = sanitizeHttpsBaseUrl(s.valhallaBaseUrl, "https://valhalla1.openstreetmap.de")
         p[K.PHOTON] = sanitizeHttpsBaseUrl(s.photonBaseUrl, "https://photon.komoot.io")
+        p[K.PHOTON_ENDPOINTS] = s.photonOrder().mapNotNull(de.drivetime.notifier.network.HttpsEndpoint::normalize).distinct().take(8).joinToString("\n")
         val overpassEndpoints = sanitizeHttpsEndpointList(s.overpassEndpoints.ifEmpty { listOf(s.overpassBaseUrl) })
         p[K.OVERPASS] = overpassEndpoints.first()
         p[K.OVERPASS_ENDPOINTS] = overpassEndpoints.joinToString("\n")

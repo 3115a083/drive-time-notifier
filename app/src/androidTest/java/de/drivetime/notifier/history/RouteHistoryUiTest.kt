@@ -42,6 +42,7 @@ class RouteHistoryUiTest {
             find(By.text("Teststart → Testziel")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Neu berechnen")),10_000))
             assertTrue(device.hasObject(By.text("Als Vorlage verwenden")))
+            assertTrue(device.hasObject(By.text("Im Kalender speichern")))
             assertTrue(device.hasObject(By.textContains("Gespeichertes Ergebnis.")))
             // Reading history must leave the stored calculation unchanged.
             assertEquals(now,store.flow.first().entries.single().calculatedAt)

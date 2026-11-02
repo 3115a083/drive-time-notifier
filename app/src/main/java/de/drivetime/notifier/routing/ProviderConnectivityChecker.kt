@@ -4,6 +4,7 @@ import android.content.Context
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
 import de.drivetime.notifier.debug.RequestDebugLog
+import de.drivetime.notifier.network.awaitResponse
 import de.drivetime.notifier.network.readBytesLimited
 import de.drivetime.notifier.network.readStringLimited
 import de.drivetime.notifier.security.SecureApiKeyStore
@@ -77,8 +78,8 @@ class ProviderConnectivityChecker(
     }
 
 
-    suspend fun checkProvider(provider: RoutingProvider): InterfaceCheckResult = withContext(Dispatchers.IO) {
-        val key = keyStore.read(provider).orEmpty()
+    suspend fun checkProvider(provider: RoutingProvider, keyOverride: String? = null): InterfaceCheckResult = withContext(Dispatchers.IO) {
+        val key = keyOverride ?: keyStore.read(provider).orEmpty()
         val fingerprint = providerFingerprint(provider, settings, key)
         if (provider.keyRequired && key.isBlank()) {
             return@withContext InterfaceCheckResult(
@@ -117,17 +118,9 @@ class ProviderConnectivityChecker(
         val fingerprint = overpassFingerprint(settings)
         val started = System.nanoTime()
         val result = runCatching {
-            val endpoint = settings.overpassBaseUrl.toHttpUrl()
-            require(endpoint.isHttps) { "Overpass endpoint must use HTTPS." }
-            val query = "[out:json][timeout:8];node(52.519,13.403,52.521,13.407)[\"amenity\"=\"charging_station\"];out 1;"
-            val request = Request.Builder()
-                .url(endpoint)
-                .header("User-Agent", context.packageName)
-                .header("Accept-Encoding", "identity")
-                .header("Connection", "close")
-                .post(FormBody.Builder().add("data", query).build())
-                .build()
-            client(12).newCall(request).execute().use { response ->
+            val query = "[out:json][timeout:20];node(1);out ids;"
+            val request = OverpassProtocol.request(settings.overpassBaseUrl, query)
+            OverpassProtocol.client.newCall(request).awaitResponse().use { response ->
                 val responseBody = response.body
                 require(responseBody == null || responseBody.contentLength() <= 65_536L) {
                     "Overpass test response is too large."
@@ -139,6 +132,7 @@ class ProviderConnectivityChecker(
                     RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", body.take(1_200))
                     error("Overpass: HTTP ${response.code}")
                 }
+                OverpassProtocol.parse(body)
                 RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "success", "HTTP ${response.code}, ${body.length} characters")
             }
         }.fold(

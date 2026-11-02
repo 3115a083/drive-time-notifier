@@ -3,6 +3,7 @@ package de.drivetime.notifier.routing
 import android.content.Context
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
+import de.drivetime.notifier.data.routingOrder
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
@@ -36,7 +37,7 @@ private class FallbackRoutingService(
     private var activeService: UnifiedRoutingService? = null
 
     override suspend fun route(request: RouteRequest): RouteEstimate {
-        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName)
+        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints)
         val origin = geocoder.geocode(request.origin)
         val destination = geocoder.geocode(request.destination)
         val points = ResolvedRoutePoints(
@@ -46,13 +47,7 @@ private class FallbackRoutingService(
             destinationLongitude = destination.longitude ?: error("Destination longitude missing.")
         )
 
-        val providers = buildList {
-            add(settings.routingProvider)
-            settings.fallbackProviderIds
-                .mapNotNull { id -> RoutingProvider.entries.firstOrNull { it.id == id } }
-                .filter { it != settings.routingProvider }
-                .forEach { if (it !in this) add(it) }
-        }
+        val providers = settings.routingOrder()
 
         val failures = mutableListOf<String>()
         val keyStore = SecureApiKeyStore(context)
@@ -95,6 +90,6 @@ object RoutingServiceFactory {
     fun addressSearch(context: Context, settings: AppSettings): AddressSearchService =
         object : AddressSearchService {
             override suspend fun suggest(query: String, language: String): List<AddressSuggestion> =
-                PhotonSearchService(settings.photonBaseUrl, context.packageName).suggest(query, language)
+                PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints).suggest(query, language)
         }
 }
