@@ -3,6 +3,7 @@ package de.drivetime.notifier.routing
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
 import de.drivetime.notifier.network.readBytesLimited
+import de.drivetime.notifier.network.awaitResponse
 import de.drivetime.notifier.network.readStringLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -69,15 +70,7 @@ class OsmEnrichmentClient(
     preferredEndpoint: String = DEFAULT_OVERPASS_ENDPOINT,
     configuredEndpoints: List<String> = emptyList(),
     private val splitRequests: Boolean = false,
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(4, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .callTimeout(9, TimeUnit.SECONDS)
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .retryOnConnectionFailure(false)
-        .protocols(listOf(Protocol.HTTP_1_1))
-        .build()
+    private val client: OkHttpClient = OverpassProtocol.client
 ) {
     private val endpoints = if (configuredEndpoints.isEmpty()) {
         endpointOrder(preferredEndpoint)
@@ -85,7 +78,7 @@ class OsmEnrichmentClient(
         normalizeConfiguredEndpoints(configuredEndpoints)
     }
     private var lastSuccessfulEndpoint: String? = null
-    private val failedEndpoints = mutableSetOf<String>()
+
 
     suspend fun query(
         points: List<GeoPoint>,
@@ -203,7 +196,7 @@ class OsmEnrichmentClient(
     }
 
     private fun wrapQuery(body: String, limit: Int) =
-        "[out:json][timeout:7][maxsize:8388608];($body);out center $limit;"
+        "[out:json][timeout:20][maxsize:33554432];($body);out center $limit;"
 
     private fun parkingQuery(destination: GeoPoint, requestedRadius: Int): String {
         val box = boundingBox(destination, requestedRadius.coerceIn(100, 10_000))
@@ -233,7 +226,13 @@ class OsmEnrichmentClient(
         )
     }
 
-    private fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
+    private suspend fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
+        val cacheKey = endpoints.joinToString("|") + query
+        val cached = responseCache[cacheKey]
+        if (cached != null && System.currentTimeMillis() - cached.first < 300_000L) {
+            RequestDebugLog.add("Overpass", kind.label, 0, "cache", "Using a recent bounded response.")
+            return OverpassBatch(cached.second, available = true)
+        }
         val preferred = lastSuccessfulEndpoint
         val splitOrder = requestEndpointOrder(endpoints, kind, splitRequests)
         val preferredOrder = if (splitRequests || preferred == null || preferred !in splitOrder) splitOrder else {
@@ -241,7 +240,7 @@ class OsmEnrichmentClient(
         }
         val now = System.currentTimeMillis()
         val orderedEndpoints = preferredOrder.filterNot {
-            it in failedEndpoints || (rateLimitCooldownUntil[it] ?: 0L) > now
+            (rateLimitCooldownUntil[it] ?: 0L) > now
         }
         if (orderedEndpoints.isEmpty()) {
             RequestDebugLog.add(
@@ -249,31 +248,27 @@ class OsmEnrichmentClient(
                 kind.label,
                 0L,
                 "skipped",
-                "All configured endpoints already failed during this loading pass. Use Retry to start a new pass."
+                "All configured endpoints are cooling down after a rate-limit response. Try again later."
             )
             return OverpassBatch(emptyList(), available = false)
         }
         for (endpoint in orderedEndpoints) {
             val started = System.nanoTime()
             var rateLimited = false
+            var cooldownMillis = RATE_LIMIT_COOLDOWN_MILLIS
             val attempt = runCatching {
-                val request = Request.Builder()
-                    .url(endpoint)
-                    .header("User-Agent", "DriveTimeNotifier/1.1 (+https://github.com/3115a083/drive-time-notifier)")
-                    .header("Accept-Encoding", "identity")
-                    .header("Connection", "close")
-                    .post(FormBody.Builder().add("data", query).build())
-                    .build()
-                client.newCall(request).execute().use { response ->
+                val request = OverpassProtocol.request(endpoint, query)
+                client.newCall(request).awaitResponse().use { response ->
                     if (!response.isSuccessful) {
-                        rateLimited = response.code == 429
+                        rateLimited = response.code in listOf(429, 406)
+                        response.header("Retry-After")?.toLongOrNull()?.let { cooldownMillis = maxOf(RATE_LIMIT_COOLDOWN_MILLIS, it.coerceIn(0, 900) * 1_000L) }
                         val detail = response.body?.readStringLimited(65_536L).orEmpty().replace(Regex("\\s+"), " ").take(1_200)
                         error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
                     }
                     val body = response.body ?: error("Overpass returned no body")
                     check(body.contentLength() <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
                     val bytes = body.readBytesLimited(MAX_RESPONSE_BYTES)
-                    val array = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
+                    val array = OverpassProtocol.parse(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
                         ?: error("Overpass response contains no elements array")
                     val elements = buildList {
                         for (i in 0 until array.length()) array.optJSONObject(i)?.let(::add)
@@ -281,12 +276,15 @@ class OsmEnrichmentClient(
                     elements to "HTTP ${response.code}, ${bytes.size} bytes, ${elements.size} elements"
                 }
             }
+            attempt.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
             val duration = (System.nanoTime() - started) / 1_000_000L
             val value = attempt.getOrNull()
             if (value != null) {
                 val (elements, detail) = value
                 RequestDebugLog.add("Overpass", "${kind.label} via $endpoint", duration, "success", detail)
                 lastSuccessfulEndpoint = endpoint
+                if (responseCache.size >= 16) responseCache.entries.minByOrNull { it.value.first }?.let { responseCache.remove(it.key) }
+                responseCache[cacheKey] = System.currentTimeMillis() to elements
                 return OverpassBatch(elements, available = true)
             }
             RequestDebugLog.add(
@@ -296,15 +294,14 @@ class OsmEnrichmentClient(
                 "failed",
                 attempt.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
             )
-            failedEndpoints += endpoint
             if (rateLimited) {
-                rateLimitCooldownUntil[endpoint] = System.currentTimeMillis() + RATE_LIMIT_COOLDOWN_MILLIS
+                rateLimitCooldownUntil[endpoint] = System.currentTimeMillis() + cooldownMillis
                 RequestDebugLog.add(
                     "Overpass cooldown",
                     endpoint,
                     0L,
                     "active",
-                    "HTTP 429: endpoint paused for ${RATE_LIMIT_COOLDOWN_MILLIS / 1_000L} seconds"
+                    "Rate limit: endpoint paused for ${cooldownMillis / 1_000L} seconds"
                 )
             }
         }
@@ -392,6 +389,7 @@ class OsmEnrichmentClient(
         private const val MAX_RESPONSE_BYTES = 4_000_000L
         private const val MAX_REMOTE_TEXT_LENGTH = 240
         private const val RATE_LIMIT_COOLDOWN_MILLIS = 60_000L
+        private val responseCache = ConcurrentHashMap<String, Pair<Long, List<JSONObject>>>()
         private val rateLimitCooldownUntil = ConcurrentHashMap<String, Long>()
         const val DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
         private val FALLBACK_OVERPASS_ENDPOINTS = listOf(

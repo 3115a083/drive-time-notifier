@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0, development
+
+- Ordered routing service list with drag handles, per-provider credentials, endpoint tests and limits.
+- Keyless routing services are preconfigured; add other providers explicitly.
+- Visible Photon and Overpass endpoint lists with ordering, addition and individual tests.
+- Move history settings before backup and match the settings style.
+- Clip offline history maps and keep captions in separate list items.
+- Save recorded history plans directly to the selected calendar without recalculation.
+- Increase Overpass budgets to include server queueing, validate runtime errors, support GET transport and cache recent results.
+
 ## 1.3.3, development
 
 - Preserve numeric and text drafts during pauses, delayed saves and settings updates.

@@ -32,8 +32,20 @@ class RouteHistoryUiTest {
         store.record {RouteHistoryEntry("ui-test",now,now,HistoryTrigger.APP_ACTION,
             RouteRequest("Teststart","Testziel",now+3_600_000),route,now+2_000_000,now+2_600_000,15)}
         try {
-            context.startActivity(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            assertTrue(device.wait(Until.hasObject(By.desc("Suchhistorie")),15_000))
+            device.wakeUp()
+            device.pressHome()
+            instrumentation.runOnMainSync {
+                context.startActivity(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            }
+            val opened=device.wait(Until.hasObject(By.desc("Suchhistorie")),15_000)
+            if(!opened) {
+                val image=java.io.File(context.getExternalFilesDir(null),"history-start-failure.png")
+                val tree=java.io.File(context.getExternalFilesDir(null),"history-start-failure.xml")
+                device.takeScreenshot(image);device.dumpWindowHierarchy(tree)
+                device.executeShellCommand("cp ${image.absolutePath} /data/local/tmp/${image.name}")
+                device.executeShellCommand("cp ${tree.absolutePath} /data/local/tmp/${tree.name}")
+            }
+            assertTrue("Main history button was not accessible",opened)
             val history=find(By.desc("Suchhistorie"))
             val settings=find(By.desc("Einstellungen"))
             assertTrue(history.visibleBounds.centerX()<settings.visibleBounds.centerX())
@@ -42,7 +54,14 @@ class RouteHistoryUiTest {
             find(By.text("Teststart → Testziel")).click()
             assertTrue(device.wait(Until.hasObject(By.text("Neu berechnen")),10_000))
             assertTrue(device.hasObject(By.text("Als Vorlage verwenden")))
+            assertTrue(device.hasObject(By.text("Im Kalender speichern")))
             assertTrue(device.hasObject(By.textContains("Gespeichertes Ergebnis.")))
+            val capture=java.io.File(context.getExternalFilesDir(null),"history-detail.png")
+            assertTrue(device.takeScreenshot(capture))
+            device.executeShellCommand("cp ${capture.absolutePath} /data/local/tmp/${capture.name}")
+            val mapBounds=find(By.desc("Gespeicherte Route, Offline-Karte")).visibleBounds
+            val captionBounds=find(By.textContains("Offline: gespeicherter Verlauf")).visibleBounds
+            assertTrue("History caption overlaps the map",captionBounds.top>=mapBounds.bottom)
             // Reading history must leave the stored calculation unchanged.
             assertEquals(now,store.flow.first().entries.single().calculatedAt)
             find(By.desc("Historie schließen")).click()

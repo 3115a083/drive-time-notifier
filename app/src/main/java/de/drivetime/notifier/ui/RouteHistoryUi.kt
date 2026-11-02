@@ -1,5 +1,14 @@
 package de.drivetime.notifier.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.FrameLayout
+import android.view.ViewGroup
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.draw.clipToBounds
+import de.drivetime.notifier.calendar.HistoryCalendarWriter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,10 +70,8 @@ fun HistoryPreferencesCard(language:AppLanguage) {
             finally {busy=false}
         }
     }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(tr(language,"Search history","Suchhistorie"),style=MaterialTheme.typography.titleMedium,
-                modifier=Modifier.semantics {heading()})
+    Box(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(0.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Text(tr(language,"Keep search history","Suchhistorie führen"),Modifier.weight(1f))
                 Switch(modifier=Modifier.semantics {contentDescription=tr(language,"Keep search history","Suchhistorie führen")},checked=state.enabled,enabled=state.ready&&!busy&&state.error==null,onCheckedChange={enabled->
@@ -111,6 +118,37 @@ fun RouteHistoryDialog(settings:AppSettings,onDismiss:()->Unit,onSettings:()->Un
     var message by remember {mutableStateOf<String?>(null)}
     val entry=state.entries.firstOrNull {it.id==selected}
     val language=settings.language
+    var saving by remember { mutableStateOf(false) }
+    var pendingSave by remember { mutableStateOf<RouteHistoryEntry?>(null) }
+    fun saveRecordedPlan(item: RouteHistoryEntry) {
+        if(saving) return
+        saving=true
+        scope.launch {
+            try {
+                HistoryCalendarWriter.save(context,settings,item)
+                message=tr(language,"Saved to calendar.","Im Kalender gespeichert.")
+            } catch(cancelled:CancellationException){throw cancelled}
+            catch(error:Exception){message=error.message?:tr(language,"Calendar save failed.","Speichern im Kalender fehlgeschlagen.")}
+            finally {saving=false}
+        }
+    }
+    val calendarPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result->
+        val item=pendingSave;pendingSave=null
+        if(result.values.all {it}&&item!=null)saveRecordedPlan(item)
+        else message=tr(language,"Calendar permission is required.","Kalenderberechtigung erforderlich.")
+    }
+    fun saveWithPermission(item:RouteHistoryEntry) {
+        if(settings.targetCalendarId<0) {
+            message=tr(language,"Select a destination calendar in Settings first.","Zuerst einen Zielkalender in den Einstellungen auswählen.")
+            return
+        }
+        if(ContextCompat.checkSelfPermission(context,Manifest.permission.READ_CALENDAR)==PackageManager.PERMISSION_GRANTED&&
+            ContextCompat.checkSelfPermission(context,Manifest.permission.WRITE_CALENDAR)==PackageManager.PERMISSION_GRANTED)saveRecordedPlan(item)
+        else {
+            pendingSave=item
+            calendarPermission.launch(arrayOf(Manifest.permission.READ_CALENDAR,Manifest.permission.WRITE_CALENDAR))
+        }
+    }
     LaunchedEffect(Unit) {try{store.prune()}catch(cancelled:CancellationException){throw cancelled}catch(_:Exception){}}
     fun remove(id:String) {
         scope.launch {
@@ -174,6 +212,12 @@ fun RouteHistoryDialog(settings:AppSettings,onDismiss:()->Unit,onSettings:()->Un
                         }
                         item {OfflineHistoryMap(entry,language)}
                         item {
+                            Surface(color=MaterialTheme.colorScheme.surface,modifier=Modifier.fillMaxWidth()) {
+                                Text(tr(language,"Offline: saved route and cached map tiles only.",
+                                    "Offline: gespeicherter Verlauf und bereits vorhandene Kartenkacheln."),style=MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        item {
                             Text(tr(language,"Appointment: ","Termin: ")+stamp(entry.request.arrivalMillis))
                             Text(tr(language,"Departure: ","Abfahrt: ")+stamp(entry.departureMillis))
                             Text(tr(language,"Arrival: ","Ankunft: ")+stamp(entry.arrivalMillis))
@@ -192,8 +236,13 @@ fun RouteHistoryDialog(settings:AppSettings,onDismiss:()->Unit,onSettings:()->Un
                             entry.route.warning?.let {Text(it,style=MaterialTheme.typography.bodySmall)}
                         }
                     }
-                    Button(onClick={onPlan(HistoryPlanningRequest(entry,true))},modifier=Modifier.fillMaxWidth()) {
-                        Text(tr(language,"Recalculate","Neu berechnen"))
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        Button(onClick={onPlan(HistoryPlanningRequest(entry,true))},enabled=!saving,modifier=Modifier.weight(1f)) {
+                            Text(tr(language,"Recalculate","Neu berechnen"))
+                        }
+                        Button(onClick={saveWithPermission(entry)},enabled=!saving,modifier=Modifier.weight(1f)) {
+                            Text(tr(language,if(saving)"Saving…" else "Save to calendar",if(saving)"Speichert…" else "Im Kalender speichern"))
+                        }
                     }
                     OutlinedButton(onClick={onPlan(HistoryPlanningRequest(entry,false))},modifier=Modifier.fillMaxWidth()) {
                         Text(tr(language,"Use as template","Als Vorlage verwenden"))
@@ -242,10 +291,14 @@ private fun OfflineHistoryMap(entry:RouteHistoryEntry,language:AppLanguage) {
         }
     }
     DisposableEffect(map){map.onResume();onDispose{map.onPause();map.onDetach()}}
-    AndroidView(factory={map},modifier=Modifier.fillMaxWidth().height(220.dp).semantics{
+    AndroidView(factory={
+        FrameLayout(context).apply {
+            contentDescription=tr(language,"Saved route, offline map","Gespeicherte Route, Offline-Karte")
+            importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            clipChildren=true;clipToPadding=true
+            addView(map,FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+    },onRelease={it.removeAllViews()},modifier=Modifier.fillMaxWidth().height(220.dp).clipToBounds().semantics{
         contentDescription=tr(language,"Saved route, offline map","Gespeicherte Route, Offline-Karte")
     })
-    Text(tr(language,"Offline: saved route and cached map tiles only.",
-        "Offline: gespeicherter Verlauf und bereits vorhandene Kartenkacheln."),
-        style=MaterialTheme.typography.bodySmall)
 }

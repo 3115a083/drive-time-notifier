@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit
 class PhotonSearchService(
     private val baseUrl: String,
     private val userAgent: String,
+    private val fallbackEndpoints: List<String> = emptyList(),
     private val client: OkHttpClient = OkHttpClient.Builder()
         .followRedirects(false)
         .followSslRedirects(false)
@@ -56,10 +57,21 @@ class PhotonSearchService(
         countryCode: String?,
         limit: Int
     ): List<AddressSuggestion> {
-        val base = baseUrl.toHttpUrl()
+        var failure: Exception? = null
+        for (endpoint in (listOf(baseUrl) + fallbackEndpoints).distinct()) {
+            try { return searchEndpoint(endpoint, query, language, countryCode, limit) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { failure = error }
+        }
+        throw failure ?: IllegalStateException("No Photon endpoint available.")
+    }
+
+    private suspend fun searchEndpoint(endpoint: String, query: String, language: String, countryCode: String?, limit: Int): List<AddressSuggestion> {
+        val base = endpoint.toHttpUrl()
         require(base.isHttps) { "Photon endpoint must use HTTPS." }
-        val builder = base.newBuilder()
-            .addPathSegment("api")
+        val builder = base.newBuilder().apply {
+            if(base.pathSegments.lastOrNull { it.isNotBlank() } != "api") addPathSegment("api")
+        }
             .addQueryParameter("q", query)
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("lang", language)
@@ -72,7 +84,7 @@ class PhotonSearchService(
             .build()
 
         client.newCall(request).awaitResponse().use { response ->
-            if (!response.isSuccessful) return emptyList()
+            check(response.isSuccessful) { "Photon HTTP ${response.code}" }
             val features = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("features") ?: return emptyList()
             return buildList {
                 for (i in 0 until features.length()) {

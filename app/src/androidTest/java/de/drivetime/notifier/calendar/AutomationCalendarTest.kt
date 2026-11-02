@@ -106,6 +106,17 @@ class AutomationCalendarTest {
             resolver.query(oldDuplicate, arrayOf(CalendarContract.Events.DELETED), null, null, null)?.use { cursor ->
                 assertTrue("Confirmed old duplicate must be removed", !cursor.moveToFirst() || cursor.getInt(0) == 1)
             } ?: fail("Could not inspect duplicate")
+            // Saving a recorded result uses its original timestamps and the same idempotent writer.
+            val recorded = de.drivetime.notifier.data.RouteHistoryEntry(
+                "history-calendar-test", revision, revision + 400, de.drivetime.notifier.data.HistoryTrigger.MANUAL,
+                de.drivetime.notifier.model.RouteRequest("Home", destination, arrival),
+                de.drivetime.notifier.model.RouteEstimate(600, 600, 1200, ""),
+                arrival - 2_000_000, arrival - 800_000, 15)
+            val historySettings = de.drivetime.notifier.data.AppSettings(targetCalendarId = calendarId, reminderLeadMinutes = 3)
+            val historySaved = HistoryCalendarWriter.save(context, historySettings, recorded)
+            assertEquals(saves.first(), historySaved)
+            assertEquals(historySaved, HistoryCalendarWriter.save(context, historySettings, recorded))
+            assertEquals(recorded.departureMillis, repo.findExistingDrive(calendarId, destination, arrival, origin = "Home")?.startMillis)
         } finally {
             resolver.delete(calendarsUri, "${CalendarContract.Calendars._ID}=?", arrayOf(calendarId.toString()))
         }
