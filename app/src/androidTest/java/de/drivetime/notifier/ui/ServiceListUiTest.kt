@@ -24,7 +24,7 @@ class ServiceListUiTest {
         first.performTouchInput {
             down(center)
             advanceEventTime(900)
-            moveBy(Offset(0f,delta),durationMillis=300)
+            moveBy(Offset(0f,delta),delayMillis=300)
             up()
         }
         compose.waitForIdle()

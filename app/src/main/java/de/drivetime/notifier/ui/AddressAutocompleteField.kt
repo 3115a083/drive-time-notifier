@@ -33,19 +33,18 @@ fun AddressAutocompleteField(
     var focused by remember { mutableStateOf(false) }
     var userEdited by remember { mutableStateOf(false) }
 
-    LaunchedEffect(value, focused, userEdited, settings.language, settings.photonBaseUrl) {
+    LaunchedEffect(value, focused, userEdited, settings.language, settings.photonBaseUrl, settings.photonEndpoints) {
         suggestions = emptyList()
         searching = false
         if (!focused || !userEdited || value.trim().length < 3) return@LaunchedEffect
 
         delay(500)
         searching = true
-        suggestions = withTimeoutOrNull(8_000) {
-            runCatching {
-                PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints)
-                    .suggest(value.trim(), settings.language.id)
-            }.getOrDefault(emptyList())
-        }.orEmpty()
+        suggestions = try {
+            PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints)
+                .suggest(value.trim(), settings.language.id)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { emptyList() }
         searching = false
     }
 
