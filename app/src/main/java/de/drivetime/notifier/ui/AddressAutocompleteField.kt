@@ -15,7 +15,7 @@ import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.routing.PhotonSearchService
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
 
 @Composable
 fun AddressAutocompleteField(
