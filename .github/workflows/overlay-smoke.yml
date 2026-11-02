@@ -4,6 +4,9 @@ on:
     paths:
       - 'app/src/main/java/de/drivetime/notifier/sharing/**'
       - 'app/src/main/java/de/drivetime/notifier/ui/**'
+      - 'app/src/main/java/de/drivetime/notifier/calendar/**'
+      - 'app/src/main/java/de/drivetime/notifier/routing/**'
+      - 'app/src/main/java/de/drivetime/notifier/data/**'
       - 'app/src/androidTest/**'
       - '.github/workflows/overlay-smoke.yml'
       - '.github/scripts/verify-device.sh'

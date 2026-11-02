@@ -15,7 +15,7 @@ object HistoryCalendarWriter {
         val eventId = CalendarRepository(context).insertDrive(settings.targetCalendarId, entry.request.origin,
             entry.request.destination, entry.departureMillis, entry.arrivalMillis, settings.reminderLeadMinutes,
             resolvedDriveEventTitle(settings), description, destinationStartMillis = entry.request.arrivalMillis,
-            calculatedAtMillis = entry.calculatedAt)
+            calculatedAtMillis = maxOf(System.currentTimeMillis(), entry.calculatedAt))
         RouteHistoryStore(context).markSafely(context, entry, HistorySaveState.CALENDAR)
         return eventId
     }

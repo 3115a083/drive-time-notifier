@@ -301,7 +301,7 @@ class OsmEnrichmentClient(
                     endpoint,
                     0L,
                     "active",
-                    "HTTP 429: endpoint paused for ${RATE_LIMIT_COOLDOWN_MILLIS / 1_000L} seconds"
+                    "Rate limit: endpoint paused for ${cooldownMillis / 1_000L} seconds"
                 )
             }
         }
