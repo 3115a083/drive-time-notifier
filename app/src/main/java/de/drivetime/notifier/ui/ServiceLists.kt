@@ -8,6 +8,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -35,6 +36,7 @@ import kotlin.math.abs
 fun OrderedServiceList(ids: List<String>, language: AppLanguage, title: (String) -> String,
     onOrder: (List<String>) -> Unit, content: @Composable (String) -> Unit) {
     val bounds = remember { mutableMapOf<String, Rect>() }
+    val drafts = rememberSaveableStateHolder()
     var dragging by remember { mutableStateOf<String?>(null) }
     var dy by remember { mutableFloatStateOf(0f) }
     var startY by remember { mutableFloatStateOf(0f) }
@@ -77,11 +79,13 @@ fun OrderedServiceList(ids: List<String>, language: AppLanguage, title: (String)
                         }
                     }
                     if(expanded) {
-                        Column(verticalArrangement=Arrangement.spacedBy(8.dp)) { content(id) }
+                        drafts.SaveableStateProvider(id) {
+                            Column(verticalArrangement=Arrangement.spacedBy(8.dp)) { content(id) }
+                        }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.End) {
                             IconButton(enabled=index>0,onClick={move(index-1)}) { Icon(Icons.Outlined.ArrowUpward,tr(language,"Move up","Nach oben")) }
                             IconButton(enabled=index<ids.lastIndex,onClick={move(index+1)}) { Icon(Icons.Outlined.ArrowDownward,tr(language,"Move down","Nach unten")) }
-                            IconButton(enabled=ids.size>1,onClick={applyOrder(latestIds.filterNot { it==id })}) { Icon(Icons.Outlined.DeleteOutline,tr(language,"Remove service","Dienst entfernen")) }
+                            IconButton(enabled=ids.size>1,onClick={drafts.removeState(id);applyOrder(latestIds.filterNot { it==id })}) { Icon(Icons.Outlined.DeleteOutline,tr(language,"Remove service","Dienst entfernen")) }
                         }
                     }
                 }

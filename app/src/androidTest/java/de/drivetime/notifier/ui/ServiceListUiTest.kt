@@ -2,6 +2,9 @@ package de.drivetime.notifier.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
@@ -16,7 +19,10 @@ class ServiceListUiTest {
     @Test fun draggingAHandlePersistsTheDisplayedOrder() {
         var order by mutableStateOf(listOf("A","B","C"))
         compose.setContent {MaterialTheme {
-            OrderedServiceList(order,AppLanguage.GERMAN,{it},{order=it}) {Text("Details $it")}
+            OrderedServiceList(order,AppLanguage.GERMAN,{it},{order=it}) {
+                val draft=rememberTextDraft("initial")
+                OutlinedTextField(draft.text,draft::edit,label={Text("Details $it")})
+            }
         }}
         val first=compose.onNodeWithContentDescription("Verschieben: A")
         val second=compose.onNodeWithContentDescription("Verschieben: B")
@@ -32,5 +38,10 @@ class ServiceListUiTest {
         compose.onNodeWithContentDescription("Einstellungen für A").performClick()
         compose.onNodeWithText("Details A").assertIsDisplayed()
         compose.onNodeWithText("Details B").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).performTextReplacement("unsaved value")
+        compose.onNodeWithContentDescription("Einstellungen für A").performClick()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Einstellungen für A").performClick()
+        compose.onNode(hasSetTextAction()).assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText,AnnotatedString("unsaved value")))
     }
 }
