@@ -56,12 +56,12 @@ class RouteHistoryUiTest {
             assertTrue(device.hasObject(By.text("Als Vorlage verwenden")))
             assertTrue(device.hasObject(By.text("Im Kalender speichern")))
             assertTrue(device.hasObject(By.textContains("Gespeichertes Ergebnis.")))
-            val mapBounds=find(By.desc("Gespeicherte Route, Offline-Karte")).visibleBounds
-            val captionBounds=find(By.textContains("Offline: gespeicherter Verlauf")).visibleBounds
-            assertTrue("History caption overlaps the map",captionBounds.top>=mapBounds.bottom)
             val capture=java.io.File(context.getExternalFilesDir(null),"history-detail.png")
             assertTrue(device.takeScreenshot(capture))
             device.executeShellCommand("cp ${capture.absolutePath} /data/local/tmp/${capture.name}")
+            val mapBounds=find(By.desc("Gespeicherte Route, Offline-Karte")).visibleBounds
+            val captionBounds=find(By.textContains("Offline: gespeicherter Verlauf")).visibleBounds
+            assertTrue("History caption overlaps the map",captionBounds.top>=mapBounds.bottom)
             // Reading history must leave the stored calculation unchanged.
             assertEquals(now,store.flow.first().entries.single().calculatedAt)
             find(By.desc("Historie schließen")).click()

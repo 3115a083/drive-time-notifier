@@ -293,6 +293,8 @@ private fun OfflineHistoryMap(entry:RouteHistoryEntry,language:AppLanguage) {
     DisposableEffect(map){map.onResume();onDispose{map.onPause();map.onDetach()}}
     AndroidView(factory={
         FrameLayout(context).apply {
+            contentDescription=tr(language,"Saved route, offline map","Gespeicherte Route, Offline-Karte")
+            importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_YES
             clipChildren=true;clipToPadding=true
             addView(map,FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         }
