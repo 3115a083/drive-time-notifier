@@ -20,4 +20,11 @@ class ServiceOrderTest {
         assertEquals(listOf(RoutingProvider.OSRM),AppSettings().withRoutingOrder(listOf(RoutingProvider.OSRM,RoutingProvider.OSRM)).routingOrder())
         assertEquals(listOf("a"),moveService(listOf("a"),0,-1))
     }
+    @Test fun legacyEmptyFallbacksGainKeylessDefaultsButExplicitRemovalsStayRemoved() {
+        val legacy = AppSettings(fallbackProviderIds=emptyList())
+        assertEquals(listOf(RoutingProvider.VALHALLA,RoutingProvider.OSRM),legacy.routingOrder())
+        val chosen = legacy.withRoutingOrder(listOf(RoutingProvider.VALHALLA))
+        assertTrue(chosen.routingServicesConfigured)
+        assertEquals(listOf(RoutingProvider.VALHALLA),chosen.routingOrder())
+    }
 }

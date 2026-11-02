@@ -32,8 +32,17 @@ class RouteHistoryUiTest {
         store.record {RouteHistoryEntry("ui-test",now,now,HistoryTrigger.APP_ACTION,
             RouteRequest("Teststart","Testziel",now+3_600_000),route,now+2_000_000,now+2_600_000,15)}
         try {
-            context.startActivity(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            assertTrue(device.wait(Until.hasObject(By.desc("Suchhistorie")),15_000))
+            device.wakeUp()
+            device.pressHome()
+            instrumentation.runOnMainSync {
+                context.startActivity(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            }
+            val opened=device.wait(Until.hasObject(By.desc("Suchhistorie")),15_000)
+            if(!opened) {
+                device.takeScreenshot(java.io.File("/data/local/tmp/history-start-failure.png"))
+                device.dumpWindowHierarchy(java.io.File("/data/local/tmp/history-start-failure.xml"))
+            }
+            assertTrue("Main history button was not accessible",opened)
             val history=find(By.desc("Suchhistorie"))
             val settings=find(By.desc("Einstellungen"))
             assertTrue(history.visibleBounds.centerX()<settings.visibleBounds.centerX())

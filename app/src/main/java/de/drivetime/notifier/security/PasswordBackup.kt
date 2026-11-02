@@ -149,6 +149,7 @@ object PasswordBackup {
         put("valhallaBaseUrl", s.valhallaBaseUrl)
         put("photonBaseUrl", s.photonBaseUrl)
         put("photonEndpoints", JSONArray(s.photonEndpoints))
+        put("routingServicesConfigured", s.routingServicesConfigured)
         put("overpassBaseUrl", s.overpassBaseUrl)
         put("overpassEndpoints", JSONArray(s.overpassEndpoints))
         put("overpassSplitRequests", s.overpassSplitRequests)
@@ -233,6 +234,7 @@ object PasswordBackup {
             valhallaBaseUrl = j.optString("valhallaBaseUrl", defaults.valhallaBaseUrl),
             photonBaseUrl = j.optString("photonBaseUrl", defaults.photonBaseUrl),
             photonEndpoints = j.stringList("photonEndpoints"),
+            routingServicesConfigured = j.optBoolean("routingServicesConfigured", false),
             overpassBaseUrl = j.optString("overpassBaseUrl", defaults.overpassBaseUrl),
             overpassEndpoints = if (j.has("overpassEndpoints")) {
                 j.stringList("overpassEndpoints").filter { it.startsWith("https://") }.distinct()

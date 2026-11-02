@@ -193,6 +193,7 @@ data class AppSettings(
     val sourceCalendarIds: Set<String> = emptySet(),
     val calendarEventTitle: String = "",
     val routingProvider: RoutingProvider = RoutingProvider.VALHALLA,
+    val routingServicesConfigured: Boolean = false,
     val osrmBaseUrl: String = "https://router.project-osrm.org",
     val valhallaBaseUrl: String = "https://valhalla1.openstreetmap.de",
     val photonBaseUrl: String = "https://photon.komoot.io",
@@ -248,6 +249,7 @@ class SettingsStore(private val context: Context) {
         val SOURCES = stringSetPreferencesKey("source_calendar_ids")
         val EVENT_TITLE = stringPreferencesKey("calendar_event_title")
         val ROUTING = stringPreferencesKey("routing_provider")
+        val SERVICE_LIST_CONFIGURED = booleanPreferencesKey("service_list_configured")
         val OSRM = stringPreferencesKey("osrm_base_url")
         val VALHALLA = stringPreferencesKey("valhalla_base_url")
         val PHOTON = stringPreferencesKey("photon_base_url")
@@ -340,6 +342,7 @@ class SettingsStore(private val context: Context) {
             sourceCalendarIds = p[K.SOURCES] ?: emptySet(),
             calendarEventTitle = p[K.EVENT_TITLE].orEmpty(),
             routingProvider = RoutingProvider.fromId(p[K.ROUTING]),
+            routingServicesConfigured = p[K.SERVICE_LIST_CONFIGURED] ?: false,
             osrmBaseUrl = p[K.OSRM] ?: "https://router.project-osrm.org",
             valhallaBaseUrl = p[K.VALHALLA] ?: "https://valhalla1.openstreetmap.de",
             photonBaseUrl = p[K.PHOTON] ?: "https://photon.komoot.io",
@@ -416,6 +419,7 @@ class SettingsStore(private val context: Context) {
         p[K.SOURCES] = s.sourceCalendarIds
         p[K.EVENT_TITLE] = s.calendarEventTitle.trim().take(120)
         p[K.ROUTING] = s.routingProvider.id
+        p[K.SERVICE_LIST_CONFIGURED] = s.routingServicesConfigured
         p[K.OSRM] = sanitizeHttpsBaseUrl(s.osrmBaseUrl, "https://router.project-osrm.org")
         p[K.VALHALLA] = sanitizeHttpsBaseUrl(s.valhallaBaseUrl, "https://valhalla1.openstreetmap.de")
         p[K.PHOTON] = sanitizeHttpsBaseUrl(s.photonBaseUrl, "https://photon.komoot.io")

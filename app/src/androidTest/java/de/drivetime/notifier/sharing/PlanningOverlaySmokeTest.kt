@@ -19,8 +19,17 @@ class PlanningOverlaySmokeTest {
         val context = instrumentation.targetContext
         val device = UiDevice.getInstance(instrumentation)
         device.executeShellCommand("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
-        context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        assertTrue(device.wait(Until.hasObject(By.pkg(context.packageName)), 15_000))
+        device.wakeUp()
+        device.pressHome()
+        instrumentation.runOnMainSync {
+            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        }
+        val opened=device.wait(Until.hasObject(By.pkg(context.packageName)), 15_000)
+        if(!opened) {
+            device.takeScreenshot(File("/data/local/tmp/overlay-start-failure.png"))
+            device.dumpWindowHierarchy(File("/data/local/tmp/overlay-start-failure.xml"))
+        }
+        assertTrue("Main activity was not accessible",opened)
         try {
             for (appearance in listOf(AppAppearance.LIGHT, AppAppearance.DARK)) {
                 SettingsStore(context).update(AppSettings(sharePopupEnabled = true, language = AppLanguage.GERMAN,

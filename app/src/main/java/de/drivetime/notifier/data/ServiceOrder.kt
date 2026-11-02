@@ -1,12 +1,16 @@
 package de.drivetime.notifier.data
 
-fun AppSettings.routingOrder(): List<RoutingProvider> =
-    (listOf(routingProvider) + fallbackProviderIds.mapNotNull { id -> RoutingProvider.entries.firstOrNull { it.id == id } }).distinct()
+fun AppSettings.routingOrder(): List<RoutingProvider> {
+    val configured = listOf(routingProvider) + fallbackProviderIds.mapNotNull { id -> RoutingProvider.entries.firstOrNull { it.id == id } }
+    // Upgrade old primary/fallback configurations without losing them. Once the list has
+    // been edited, explicit removals are preserved instead of adding defaults again.
+    return (configured + if(routingServicesConfigured) emptyList() else RoutingProvider.entries.filterNot { it.keyRequired }).distinct()
+}
 
 fun AppSettings.withRoutingOrder(order: List<RoutingProvider>): AppSettings {
     val unique = order.distinct()
     require(unique.isNotEmpty())
-    return copy(routingProvider = unique.first(), fallbackProviderIds = unique.drop(1).map { it.id })
+    return copy(routingServicesConfigured = true, routingProvider = unique.first(), fallbackProviderIds = unique.drop(1).map { it.id })
 }
 
 fun <T> moveService(items: List<T>, from: Int, to: Int): List<T> {
