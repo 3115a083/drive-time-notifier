@@ -86,6 +86,9 @@ class PhotonSearchService(
             .get()
             .build()
 
+        val diagnostics = de.drivetime.notifier.debug.NetworkStageDiagnostics(
+            "Photon", "address lookup", client.callTimeoutMillis, client.connectTimeoutMillis
+        )
         val started = System.nanoTime()
         val at = System.currentTimeMillis()
         val fingerprint = EndpointSecurity.fingerprint(endpoint)
@@ -114,10 +117,18 @@ class PhotonSearchService(
             }
         }
         ServiceMonitor.record(ServiceMonitor.endpointId("Photon", endpoint), fingerprint, true, (System.nanoTime()-started)/1_000_000, at)
+        diagnostics.success()
         return suggestions
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            diagnostics.failure(cancelled)
+            throw cancelled
+        }
         catch (error: Exception) {
+            diagnostics.failure(error)
             ServiceMonitor.record(ServiceMonitor.endpointId("Photon", endpoint), fingerprint, false, (System.nanoTime()-started)/1_000_000, at)
+            if (de.drivetime.notifier.debug.NetworkStageDiagnostics.isTimeout(error)) {
+                throw java.io.IOException("Photon: address lookup timed out (call limit ${client.callTimeoutMillis / 1000}s).", error)
+            }
             if(EndpointSecurity.configured(endpoint)) throw java.io.IOException("Photon response could not be read.")
             throw error
         }

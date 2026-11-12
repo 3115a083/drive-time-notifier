@@ -66,6 +66,10 @@ class UnifiedRoutingService(
         val dLon = points.destinationLongitude
         val started = System.nanoTime()
         val at = System.currentTimeMillis()
+        val diagnostics = de.drivetime.notifier.debug.NetworkStageDiagnostics(
+            settings.routingProvider.displayName, "route calculation",
+            client.callTimeoutMillis, client.connectTimeoutMillis
+        )
         val fingerprint = ProviderConnectivityChecker.providerFingerprint(settings.routingProvider, settings, keyStore.read(settings.routingProvider).orEmpty())
         try {
         val estimate = when (settings.routingProvider) {
@@ -78,10 +82,22 @@ class UnifiedRoutingService(
             RoutingProvider.TOMTOM -> tomTom(oLat, oLon, dLat, dLon, request.arrivalMillis)
         }
         ServiceMonitor.record(settings.routingProvider.id, fingerprint, true, (System.nanoTime()-started)/1_000_000, at)
+        diagnostics.success()
         estimate
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            diagnostics.failure(cancelled)
+            throw cancelled
+        }
         catch (error: Exception) {
+            diagnostics.failure(error)
             ServiceMonitor.record(settings.routingProvider.id, fingerprint, false, (System.nanoTime()-started)/1_000_000, at)
+            if (de.drivetime.notifier.debug.NetworkStageDiagnostics.isTimeout(error)) {
+                throw java.io.IOException(
+                    "${settings.routingProvider.displayName}: routing request timed out " +
+                        "(call limit ${client.callTimeoutMillis / 1000}s, " +
+                        "connection limit ${client.connectTimeoutMillis / 1000}s).", error
+                )
+            }
             throw error
         }
     }
