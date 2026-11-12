@@ -145,7 +145,7 @@ private fun RoutingServiceEditor(provider: RoutingProvider,settings: AppSettings
     if(provider.keyRequired) {
         OutlinedTextField(key.text,{key.edit(it);result=null},label={Text("API key")},singleLine=true,
             visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
-        TextButton(onClick={keyStore.save(provider,key.text.trim()); ServiceMonitor.invalidate(provider.id)}) {Text(tr(language,"Save API key","API-Key speichern"))}
+        TextButton(onClick={keyStore.save(provider,key.text.trim())}) {Text(tr(language,"Save API key","API-Key speichern"))}
     }
     if(endpoint!=null) {
         OutlinedTextField(address.text,address::edit,label={Text(tr(language,"HTTPS endpoint","HTTPS-Endpunkt"))},

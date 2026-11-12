@@ -50,6 +50,15 @@ class ServiceHealthUiTest {
             assertFalse(stored.contains("fixture-secret-123"))
             assertFalse(stored.contains("example.test"))
             assertEquals("[redacted]",EndpointSecurity.redact("fixture-secret-123"))
+            val keys=SecureApiKeyStore(context)
+            val original=keys.read(RoutingProvider.GOOGLE)
+            try {
+                val fingerprint=ProviderConnectivityChecker.providerFingerprint(RoutingProvider.GOOGLE,AppSettings(),original.orEmpty())
+                ServiceMonitor.record("google",fingerprint,true,10)
+                keys.save(RoutingProvider.GOOGLE,"synthetic-replacement-key")
+                assertNull(ServiceMonitor.read("google",fingerprint))
+            } finally {keys.save(RoutingProvider.GOOGLE,original.orEmpty())}
+
         } finally { EndpointSecurity.save(endpoint,null) }
     }
 
