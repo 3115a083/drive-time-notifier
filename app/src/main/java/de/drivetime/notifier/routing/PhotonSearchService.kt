@@ -90,7 +90,7 @@ class PhotonSearchService(
         try {
         val suggestions = client.newCall(request).awaitResponse().use { response ->
             check(response.isSuccessful) { "Photon HTTP ${response.code}" }
-            val features = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("features") ?: org.json.JSONArray()
+            val features = JSONObject(response.body?.readStringLimited().orEmpty()).getJSONArray("features")
             buildList {
                 for (i in 0 until features.length()) {
                     val feature = features.getJSONObject(i)

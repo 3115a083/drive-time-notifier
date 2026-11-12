@@ -32,11 +32,18 @@ class DefaultLocationPersistenceTest {
             assertEquals("Regression Home",store.flow.first().homeAddress)
             find(By.desc("Einstellungen")).click()
             val scroll=find(By.scrollable(true))
-            scroll.scrollUntil(Direction.DOWN,Until.findObject(By.text("Regression Home")))
-            find(By.text("Regression Home")).text=""
+            if(!device.hasObject(By.text("Regression Home"))) scroll.scrollUntil(Direction.DOWN,Until.findObject(By.text("Regression Home")))
+            val defaultField=find(By.text("Regression Home"))
+            defaultField.text=""
             Thread.sleep(900) // Exceeds the former destructive 500 ms autosave.
             assertEquals("Regression Home",store.flow.first().homeAddress)
-            assertTrue(device.hasObject(By.text("Standard-Standort speichern")))
+            defaultField.text="Replacement Home"
+            Thread.sleep(900)
+            assertEquals("Regression Home",store.flow.first().homeAddress)
+            scroll.scrollUntil(Direction.DOWN,Until.findObject(By.text("Standard-Standort speichern")))
+            find(By.text("Standard-Standort speichern")).click()
+            kotlinx.coroutines.withTimeout(5_000) {store.flow.first {it.homeAddress=="Replacement Home"}}
+            assertEquals("Replacement Home",store.flow.first().homeAddress)
         } finally {
             device.pressBack()
             store.update(original)
