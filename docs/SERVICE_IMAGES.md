@@ -5,7 +5,7 @@ Brand names and marks identify third-party services, without implying endorsemen
 
 - TomTom, GraphHopper and Google Maps: website favicons, retrieved 2026-11-12 through Google's favicon endpoint for tomtom.com, graphhopper.com and maps.google.com.
 - Valhalla: upstream docs/docs/images/valhalla_logo.png in https://github.com/valhalla/valhalla .
-- openrouteservice: unmodified upstream app/img/logo@2x.png in https://github.com/GIScience/openrouteservice-app . The UI uses the left square emblem from this higher-resolution wordmark, rather than enlarging the 32px favicon.
+- openrouteservice: full square symbol from upstream docs/public/ors_fav.png in https://github.com/GIScience/openrouteservice . No cropping of wordmarks.
 - OSRM: vector emblem path from images/osrm_logo.svg in https://github.com/Project-OSRM/project-osrm.github.com .
 - HERE: official solid monochrome vector, icons/core-ui/SVG/HERE-logo_solid_24px.svg in https://github.com/heremaps/here-icons . Uses the theme foreground for light/dark contrast, without a white background.
 - Valhalla's square source is clipped to a circle at render time. All nine service images are checked in light and dark Android screenshots.

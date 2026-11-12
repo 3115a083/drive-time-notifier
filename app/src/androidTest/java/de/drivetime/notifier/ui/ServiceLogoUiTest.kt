@@ -20,6 +20,10 @@ import org.junit.Test
 class ServiceLogoUiTest {
     @get:Rule val compose=createComposeRule()
     @Test fun logosRenderInBothThemesAndValhallaHasNoSquareBackground() {
+        val resources=InstrumentationRegistry.getInstrumentation().targetContext.resources
+        val ors=android.graphics.BitmapFactory.decodeResource(resources,de.drivetime.notifier.R.drawable.service_openrouteservice)
+        assertEquals("Use the full square emblem, never a cropped wordmark",ors.width,ors.height)
+        ors.recycle()
         var dark by mutableStateOf(false)
         val background=Color(0xFF443355)
         compose.setContent {

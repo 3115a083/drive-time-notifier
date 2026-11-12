@@ -356,7 +356,5 @@ internal fun ServiceImage(id:String) {
     val monochrome = id=="here"
     androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(drawable),null,
         colorFilter=if(monochrome) androidx.compose.ui.graphics.ColorFilter.tint(MaterialTheme.colorScheme.onSurface) else null,
-        alignment=if(id=="openrouteservice") Alignment.CenterStart else Alignment.Center,
-        contentScale=if(id=="openrouteservice") androidx.compose.ui.layout.ContentScale.Crop else androidx.compose.ui.layout.ContentScale.Fit,
         modifier=Modifier.size(28.dp).then(if(id=="valhalla") Modifier.graphicsLayer { shape=androidx.compose.foundation.shape.CircleShape;clip=true } else Modifier))
 }
