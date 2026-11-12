@@ -9,7 +9,8 @@ internal class NetworkStageDiagnostics(
     private val service: String,
     private val stage: String,
     timeoutMillis: Int,
-    connectTimeoutMillis: Int
+    connectTimeoutMillis: Int,
+    private val trace: de.drivetime.notifier.network.NetworkPhaseTrace? = null
 ) {
     private val started = System.nanoTime()
     private val limits = "callTimeout=${timeoutMillis}ms; connectTimeout=${connectTimeoutMillis}ms"
@@ -26,7 +27,7 @@ internal class NetworkStageDiagnostics(
             httpCode != null -> "HTTP $httpCode"
             else -> "failed"
         }
-        record(result, "$limits; exception=${error.javaClass.simpleName}")
+        record(result, "$limits; phase=${trace?.phase ?: "unknown"}; exception=${error.javaClass.simpleName}")
     }
 
     private fun record(result: String, detail: String) = RequestDebugLog.add(

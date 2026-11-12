@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
@@ -142,28 +143,34 @@ private fun RoutingServiceEditor(provider: RoutingProvider,settings: AppSettings
     val address=rememberTextDraft(endpoint.orEmpty(),provider.id)
     var testing by remember {mutableStateOf(false)}
     var result by remember {mutableStateOf<InterfaceCheckResult?>(null)}
+    var editRevision by remember {mutableLongStateOf(0L)}
     if(provider.keyRequired) {
-        OutlinedTextField(key.text,{key.edit(it);result=null},label={Text("API key")},singleLine=true,
+        OutlinedTextField(key.text,{key.edit(it);editRevision++;result=null},label={Text("API key")},singleLine=true,
             visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
         TextButton(onClick={keyStore.save(provider,key.text.trim())}) {Text(tr(language,"Save API key","API-Key speichern"))}
     }
     if(endpoint!=null) {
-        OutlinedTextField(address.text,address::edit,label={Text(tr(language,"HTTPS endpoint","HTTPS-Endpunkt"))},
+        OutlinedTextField(address.text,{
+            address.edit(it); editRevision++;result=null
+            HttpsEndpoint.normalize(it)?.takeIf { normalized -> normalized != endpoint }?.let { normalized ->
+                ServiceMonitor.invalidate(provider.id)
+                onChange(if(provider==RoutingProvider.OSRM) settings.copy(osrmBaseUrl=normalized) else settings.copy(valhallaBaseUrl=normalized))
+            }
+        },label={Text(tr(language,"HTTPS endpoint","HTTPS-Endpunkt"))},
             singleLine=true,isError=HttpsEndpoint.normalize(address.text)==null,modifier=Modifier.fillMaxWidth())
-        TextButton(enabled=HttpsEndpoint.normalize(address.text)!=null,onClick={
-            ServiceMonitor.invalidate(provider.id)
-            onChange(if(provider==RoutingProvider.OSRM) settings.copy(osrmBaseUrl=address.text) else settings.copy(valhallaBaseUrl=address.text))
-        }) {Text(tr(language,"Save endpoint","Endpunkt speichern"))}
     }
-    if(endpoint!=null) EndpointAuthEditor(endpoint,language)
+    if(endpoint!=null) HttpsEndpoint.normalize(address.text)?.let { EndpointAuthEditor(it,language) {editRevision++;result=null} }
+
     Button(enabled=!testing&&(!provider.keyRequired||key.text.isNotBlank())&&(endpoint==null||HttpsEndpoint.normalize(address.text)!=null),onClick={
         testing=true
+        val requestRevision=editRevision
         scope.launch {
             try {
                 val draft=when(provider){RoutingProvider.OSRM->settings.copy(osrmBaseUrl=address.text);RoutingProvider.VALHALLA->settings.copy(valhallaBaseUrl=address.text);else->settings}
-                result=ProviderConnectivityChecker(context,draft,keyStore).checkProvider(provider,key.text)
+                val checked=ProviderConnectivityChecker(context,draft,keyStore).checkProvider(provider,key.text)
+                if(editRevision==requestRevision) result=checked
             } catch(cancelled:CancellationException){throw cancelled}
-            catch(error:Exception){result=InterfaceCheckResult(InterfaceCheckState.INVALID,RequestDebugLog.redact(error.message.orEmpty()))}
+            catch(error:Exception){if(editRevision==requestRevision)result=InterfaceCheckResult(InterfaceCheckState.INVALID,RequestDebugLog.redact(error.message.orEmpty()))}
             finally {testing=false}
         }
     },modifier=Modifier.fillMaxWidth()) {Text(tr(language,if(testing)"Testing…" else "Test this service",if(testing)"Wird geprüft…" else "Diesen Dienst testen"))}
@@ -194,35 +201,52 @@ private fun EndpointServiceList(kind:String,endpoints:List<String>,settings:AppS
     val scope=rememberCoroutineScope()
     var adding by remember {mutableStateOf(false)}
     val newEndpoint=rememberTextDraft("")
+    val identities = rememberSaveable(kind, saver=listSaver<MutableMap<String,String>,String>(
+        save={ it.flatMap { entry -> listOf(entry.key, entry.value) } },
+        restore={ it.chunked(2).associate { pair -> pair[0] to pair[1] }.toMutableMap() }
+    )) { mutableMapOf<String,String>() }
+    fun identity(endpoint:String) = identities.getOrPut(endpoint) { java.util.UUID.randomUUID().toString() }
+    val ids = endpoints.map(::identity)
+    val latestEndpoints by rememberUpdatedState(endpoints)
+    val latestOrder by rememberUpdatedState(onOrder)
     val defaults=if(kind=="Photon")listOf("https://photon.komoot.io") else listOf(OsmEnrichmentClient.DEFAULT_OVERPASS_ENDPOINT,
         "https://overpass.private.coffee/api/interpreter","https://maps.mail.ru/osm/tools/overpass/api/interpreter")
     Text(kind,style=MaterialTheme.typography.titleMedium)
-    OrderedServiceList(endpoints,language,{endpoint->endpoint.toHttpUrlOrNull()?.host?:kind},onOrder,
-        badge={ServiceImage(kind.lowercase())}, status={endpoint ->
+    OrderedServiceList(ids,language,{id->endpoints.first { identity(it)==id }.toHttpUrlOrNull()?.host?:kind},
+        { order -> onOrder(order.map { id -> endpoints.first { identity(it)==id } }) },
+        badge={ServiceImage(kind.lowercase())}, status={id ->
+            val endpoint=endpoints.first { identity(it)==id }
             val revision by ServiceMonitor.changes.collectAsState()
             ServiceHealth(ServiceMonitor.endpointId(kind,endpoint), remember(endpoint,revision){EndpointSecurity.fingerprint(endpoint)}, false, language)
-        }) { endpoint->
-        val draft=rememberTextDraft(endpoint,endpoint)
+        }) { id->
+        val endpoint=endpoints.first { identity(it)==id }
+        val draft=rememberTextDraft(endpoint,id)
         var testing by remember {mutableStateOf(false)}
         var result by remember {mutableStateOf<InterfaceCheckResult?>(null)}
-        OutlinedTextField(draft.text,{draft.edit(it);result=null},label={Text(tr(language,"HTTPS endpoint","HTTPS-Endpunkt"))},singleLine=true,
+    var editRevision by remember {mutableLongStateOf(0L)}
+        OutlinedTextField(draft.text,{
+            draft.edit(it);editRevision++;result=null
+            HttpsEndpoint.normalize(it)?.takeIf { normalized -> normalized != endpoint &&
+                latestEndpoints.none { other -> identity(other)!=id && other==normalized } }?.let { normalized ->
+                identities[normalized]=id
+                ServiceMonitor.invalidate(ServiceMonitor.endpointId(kind,endpoint))
+                ServiceMonitor.invalidate(ServiceMonitor.endpointId(kind,normalized))
+                latestOrder(latestEndpoints.map { current -> if(identity(current)==id) normalized else current })
+            }
+        },label={Text(tr(language,"HTTPS endpoint","HTTPS-Endpunkt"))},singleLine=true,
             isError=HttpsEndpoint.normalize(draft.text)==null,modifier=Modifier.fillMaxWidth())
-        TextButton(enabled=HttpsEndpoint.normalize(draft.text)!=null,onClick={
-            val normalized=HttpsEndpoint.normalize(draft.text)!!
-            ServiceMonitor.invalidate(ServiceMonitor.endpointId(kind,endpoint))
-            ServiceMonitor.invalidate(ServiceMonitor.endpointId(kind,normalized))
-            onOrder(endpoints.map {if(it==endpoint)normalized else it}.distinct())
-        }) {Text(tr(language,"Save endpoint","Endpunkt speichern"))}
-        EndpointAuthEditor(endpoint,language)
+        HttpsEndpoint.normalize(draft.text)?.let { EndpointAuthEditor(it,language) {editRevision++;result=null} }
         Button(enabled=!testing&&HttpsEndpoint.normalize(draft.text)!=null,onClick={
             testing=true
+            val requestRevision=editRevision
             scope.launch {
                 try {
                     val tested=if(kind=="Photon")settings.copy(photonBaseUrl=draft.text) else settings.copy(overpassBaseUrl=draft.text,overpassEndpoints=listOf(draft.text))
                     val checker=ProviderConnectivityChecker(context,tested)
-                    result=if(kind=="Photon")checker.checkPhoton() else checker.checkOverpass()
+                    val checked=if(kind=="Photon")checker.checkPhoton() else checker.checkOverpass()
+                    if(editRevision==requestRevision) result=checked
                 } catch(cancelled:CancellationException){throw cancelled}
-                catch(error:Exception){result=InterfaceCheckResult(InterfaceCheckState.INVALID,RequestDebugLog.redact(error.message.orEmpty()))}
+                catch(error:Exception){if(editRevision==requestRevision)result=InterfaceCheckResult(InterfaceCheckState.INVALID,RequestDebugLog.redact(error.message.orEmpty()))}
                 finally {testing=false}
             }
         },modifier=Modifier.fillMaxWidth()) {Text(tr(language,if(testing)"Testing…" else "Test this endpoint",if(testing)"Wird geprüft…" else "Diesen Endpunkt testen"))}
@@ -270,31 +294,47 @@ private fun ServiceHealth(id:String,fingerprint:String,missingKey:Boolean,langua
 }
 
 @Composable
-private fun EndpointAuthEditor(endpoint:String,language:AppLanguage) {
-    val existing=remember(endpoint){EndpointSecurity.header(endpoint)}
-    val name=rememberTextDraft(existing?.name?:"Authorization",endpoint+"header-name")
-    val value=rememberTextDraft(existing?.value.orEmpty(),endpoint+"header-value")
-    var enabled by rememberSaveable(endpoint){mutableStateOf(EndpointSecurity.configured(endpoint))}
-    var saved by remember {mutableStateOf(false)}
-    Row(verticalAlignment=Alignment.CenterVertically) {
-        Text(tr(language,"Header authentication","Header-Authentifizierung"),Modifier.weight(1f))
-        Switch(enabled,{enabled=it;saved=false})
+internal fun EndpointAuthEditor(endpoint:String,language:AppLanguage,onEdited:()->Unit={}) {
+    val state = rememberSaveable(endpoint, saver=HeaderEditorState.Saver) {
+        HeaderEditorState(EndpointSecurity.headers(endpoint).orEmpty().map { HeaderDraft(saved=it, name=it.name, value=it.value) })
     }
-    if(enabled) {
-        OutlinedTextField(name.text,{name.edit(it);saved=false},label={Text(tr(language,"Header name","Header-Name"))},singleLine=true,modifier=Modifier.fillMaxWidth())
-        OutlinedTextField(value.text,{value.edit(it);saved=false},label={Text(tr(language,"Header value (e.g. Bearer …)","Header-Wert (z. B. Bearer …)"))},
-            singleLine=true,visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
+    fun persist() {
+        val headers=state.persistable() ?: return
+        if (headers != EndpointSecurity.headers(endpoint).orEmpty()) EndpointSecurity.saveHeaders(endpoint,headers)
+        state.committed()
     }
-    TextButton(enabled= !enabled || EndpointHeaderPolicy.valid(name.text,value.text),onClick={
-        EndpointSecurity.save(endpoint,if(enabled)EndpointHeader(name.text,value.text) else null);saved=true
-    }) {Text(tr(language,"Save authentication","Authentifizierung speichern"))}
-    if(saved) Text(tr(language,"Saved. Test the endpoint again.","Gespeichert. Endpunkt erneut testen."),style=MaterialTheme.typography.bodySmall)
-    Text(tr(language,"Stored encrypted on this device. Not included in backups; configure again after restoring.",
-        "Auf diesem Gerät verschlüsselt gespeichert. Nicht im Backup enthalten; nach Wiederherstellung erneut einrichten."),style=MaterialTheme.typography.bodySmall)
+    Text(tr(language,"Authentication headers","Authentifizierungs-Header"),style=MaterialTheme.typography.titleSmall)
+    if(EndpointSecurity.configured(endpoint) && EndpointSecurity.headers(endpoint)==null) {
+        Text(tr(language,"Saved headers cannot be read. Remove them or enter valid replacement headers.",
+            "Gespeicherte Header sind nicht lesbar. Entfernen oder durch gültige Header ersetzen."),color=MaterialTheme.colorScheme.error)
+        TextButton(onClick={EndpointSecurity.saveHeaders(endpoint,emptyList());onEdited()}) {Text(tr(language,"Remove saved headers","Gespeicherte Header entfernen"))}
+    }
+    state.rows.forEach { row -> key(row.id) {
+        Row(verticalAlignment=Alignment.CenterVertically) {
+            OutlinedTextField(row.name,{state.edit(row.id,name=it);onEdited();persist()},
+                label={Text(tr(language,"Header name","Header-Name"))},singleLine=true,
+                isError=row.name.isNotEmpty() && !EndpointHeaderPolicy.valid(row.name,"test"),modifier=Modifier.weight(1f))
+            IconButton(onClick={state.remove(row.id);onEdited();persist()}) {
+                Icon(Icons.Outlined.DeleteOutline,tr(language,"Remove header","Header entfernen"))
+            }
+        }
+        OutlinedTextField(row.value,{state.edit(row.id,value=it);onEdited();persist()},
+            label={Text(tr(language,"Header value","Header-Wert"))},singleLine=true,
+            visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
+    } }
+    if(state.rows.any { !EndpointHeaderPolicy.valid(it.name,it.value) }) Text(tr(language,
+        "Incomplete edits stay in the editor; the last valid header remains active until removed.",
+        "Unvollständige Eingaben bleiben im Editor. Der letzte gültige Header bleibt bis zum Entfernen aktiv."),style=MaterialTheme.typography.bodySmall)
+    if(state.persistable()==null) Text(tr(language,"Header names must be unique. The last valid headers remain active.",
+        "Header-Namen müssen eindeutig sein. Die letzten gültigen Header bleiben aktiv."),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)
+    OutlinedButton(onClick={state.add();onEdited()}) {Icon(Icons.Outlined.Add,null);Spacer(Modifier.width(8.dp));Text(tr(language,"Add header","Header hinzufügen"))}
+    if(state.rows.isNotEmpty()) Text(tr(language,
+        "Valid entries are saved automatically and encrypted on this device. Not included in backups. Pangolin access tokens use P-Access-Token-Id and P-Access-Token.",
+        "Gültige Eingaben werden automatisch und auf diesem Gerät verschlüsselt gespeichert. Nicht im Backup enthalten. Pangolin-Zugriffstoken verwenden P-Access-Token-Id und P-Access-Token."),style=MaterialTheme.typography.bodySmall)
 }
 
 @Composable
-private fun ServiceImage(id:String) {
+internal fun ServiceImage(id:String) {
     val drawable=when(id) {
         "tomtom" -> de.drivetime.notifier.R.drawable.service_tomtom
         "valhalla" -> de.drivetime.notifier.R.drawable.service_valhalla
@@ -306,5 +346,6 @@ private fun ServiceImage(id:String) {
         "photon" -> de.drivetime.notifier.R.drawable.service_photon
         else -> de.drivetime.notifier.R.drawable.service_overpass
     }
-    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(drawable),null,Modifier.size(28.dp))
+    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(drawable),null,
+        Modifier.size(28.dp).then(if(id=="valhalla") Modifier.graphicsLayer { shape=androidx.compose.foundation.shape.CircleShape;clip=true } else Modifier))
 }

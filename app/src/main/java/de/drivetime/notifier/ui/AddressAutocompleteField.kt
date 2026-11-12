@@ -25,7 +25,9 @@ fun AddressAutocompleteField(
     label: String,
     leadingIcon: @Composable (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    supportingText: String? = null
+    supportingText: String? = null,
+    onClear: (() -> Unit)? = null,
+    clearAvailable: Boolean = value.isNotEmpty()
 ) {
     val context = LocalContext.current
     var suggestions by remember { mutableStateOf<List<AddressSuggestion>>(emptyList()) }
@@ -59,11 +61,11 @@ fun AddressAutocompleteField(
             leadingIcon = leadingIcon,
             trailingIcon = {
                 when {
-                    searching -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    value.isNotEmpty() -> IconButton(onClick = {
+                    searching && !clearAvailable -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    clearAvailable -> IconButton(onClick = {
                         userEdited = true
                         suggestions = emptyList()
-                        onValueChange("")
+                        if (onClear != null) onClear() else onValueChange("")
                     }) {
                         Icon(Icons.Outlined.Close, contentDescription = tr(settings.language, "Clear", "Löschen"))
                     }
