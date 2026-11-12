@@ -2,6 +2,7 @@ package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
+import de.drivetime.notifier.network.*
 import de.drivetime.notifier.network.readBytesLimited
 import de.drivetime.notifier.network.awaitResponse
 import de.drivetime.notifier.network.readStringLimited
@@ -227,7 +228,7 @@ class OsmEnrichmentClient(
     }
 
     private suspend fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
-        val cacheKey = endpoints.joinToString("|") + query
+        val cacheKey = endpoints.joinToString("|") { EndpointSecurity.fingerprint(it) } + query
         val cached = responseCache[cacheKey]
         if (cached != null && System.currentTimeMillis() - cached.first < 300_000L) {
             RequestDebugLog.add("Overpass", kind.label, 0, "cache", "Using a recent bounded response.")
@@ -254,6 +255,8 @@ class OsmEnrichmentClient(
         }
         for (endpoint in orderedEndpoints) {
             val started = System.nanoTime()
+            val at=System.currentTimeMillis()
+            val fingerprint=EndpointSecurity.fingerprint(endpoint)
             var rateLimited = false
             var cooldownMillis = RATE_LIMIT_COOLDOWN_MILLIS
             val attempt = runCatching {
@@ -262,7 +265,7 @@ class OsmEnrichmentClient(
                     if (!response.isSuccessful) {
                         rateLimited = response.code in listOf(429, 406)
                         response.header("Retry-After")?.toLongOrNull()?.let { cooldownMillis = maxOf(RATE_LIMIT_COOLDOWN_MILLIS, it.coerceIn(0, 900) * 1_000L) }
-                        val detail = response.body?.readStringLimited(65_536L).orEmpty().replace(Regex("\\s+"), " ").take(1_200)
+                        val detail = (if(EndpointSecurity.configured(endpoint)) "" else response.body?.readStringLimited(65_536L).orEmpty()).replace(Regex("\\s+"), " ").take(1_200)
                         error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
                     }
                     val body = response.body ?: error("Overpass returned no body")
@@ -279,6 +282,7 @@ class OsmEnrichmentClient(
             attempt.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
             val duration = (System.nanoTime() - started) / 1_000_000L
             val value = attempt.getOrNull()
+            ServiceMonitor.record(ServiceMonitor.endpointId("Overpass",endpoint),fingerprint,value!=null,duration,at)
             if (value != null) {
                 val (elements, detail) = value
                 RequestDebugLog.add("Overpass", "${kind.label} via $endpoint", duration, "success", detail)
@@ -292,7 +296,7 @@ class OsmEnrichmentClient(
                 "${kind.label} via $endpoint",
                 duration,
                 "failed",
-                attempt.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
+                attempt.exceptionOrNull()?.let { if(EndpointSecurity.configured(endpoint)) it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
             )
             if (rateLimited) {
                 rateLimitCooldownUntil[endpoint] = System.currentTimeMillis() + cooldownMillis

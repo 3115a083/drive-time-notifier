@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.network.*
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -11,7 +12,7 @@ import java.util.concurrent.TimeUnit
 object OverpassProtocol {
     const val QUERY_SECONDS = 20
     const val CALL_SECONDS = 50L
-    val client: OkHttpClient = OkHttpClient.Builder()
+    val client: OkHttpClient = OkHttpClient.Builder().endpointSecurity()
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS)
         .callTimeout(CALL_SECONDS, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
@@ -19,7 +20,7 @@ object OverpassProtocol {
     fun request(endpoint: String, query: String): Request {
         val url = endpoint.toHttpUrl()
         require(url.isHttps && url.username.isEmpty() && url.password.isEmpty()) { "HTTPS endpoint required." }
-        val builder = Request.Builder().header("User-Agent", "DriveTimeNotifier (+https://github.com/3115a083/drive-time-notifier)")
+        val builder = Request.Builder().endpointScope(endpoint).header("User-Agent", "DriveTimeNotifier (+https://github.com/3115a083/drive-time-notifier)")
             .header("Accept", "application/json")
         // Both methods are supported by Overpass. Small queries avoid POST-only proxy failures.
         return if (query.length <= 6000) builder.url(url.newBuilder().setQueryParameter("data", query).build()).get().build()

@@ -21,6 +21,7 @@ class SecureApiKeyStore(private val context: Context) {
         val keyName = provider.id
         if (value.isBlank()) {
             prefs.edit().remove("${keyName}_cipher").remove("${keyName}_iv").apply()
+            de.drivetime.notifier.network.ServiceMonitor.invalidate(provider.id)
             return
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -29,6 +30,7 @@ class SecureApiKeyStore(private val context: Context) {
             .putString("${keyName}_cipher", Base64.encodeToString(cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP))
             .putString("${keyName}_iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .apply()
+        de.drivetime.notifier.network.ServiceMonitor.invalidate(provider.id)
     }
 
     fun read(provider: RoutingProvider): String? {

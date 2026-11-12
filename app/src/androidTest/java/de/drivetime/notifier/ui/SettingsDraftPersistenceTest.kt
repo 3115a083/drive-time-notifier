@@ -28,4 +28,18 @@ class SettingsDraftPersistenceTest {
             assertEquals(45, saved.reminderLeadMinutes)
         } finally { store.update(original) }
     }
+
+    @Test fun staleUnrelatedSettingsSavesCannotEraseANewerDefaultLocation() = runBlocking {
+        val store=SettingsStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        val original=store.flow.first()
+        val stale=original.copy(homeAddress="",bufferMinutes=15)
+        try {
+            store.update(stale)
+            store.update(stale.copy(homeAddress="Saved default"),previous=stale)
+            store.update(stale.copy(bufferMinutes=30),previous=stale)
+            val saved=store.flow.first()
+            assertEquals("Saved default",saved.homeAddress)
+            assertEquals(30,saved.bufferMinutes)
+        } finally {store.update(original)}
+    }
 }

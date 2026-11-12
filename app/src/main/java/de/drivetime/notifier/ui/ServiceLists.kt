@@ -23,7 +23,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import de.drivetime.notifier.data.*
 import de.drivetime.notifier.debug.RequestDebugLog
-import de.drivetime.notifier.network.HttpsEndpoint
+import de.drivetime.notifier.network.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import de.drivetime.notifier.routing.*
 import de.drivetime.notifier.security.SecureApiKeyStore
 import kotlinx.coroutines.CancellationException
@@ -34,7 +36,8 @@ import kotlin.math.abs
 /** Drag by the handle; commit one persistent order when dropped. Keys retain each card's draft. */
 @Composable
 fun OrderedServiceList(ids: List<String>, language: AppLanguage, title: (String) -> String,
-    onOrder: (List<String>) -> Unit, content: @Composable (String) -> Unit) {
+    onOrder: (List<String>) -> Unit, badge: @Composable (String) -> Unit = {},
+    status: @Composable (String) -> Unit = {}, content: @Composable (String) -> Unit) {
     val bounds = remember { mutableMapOf<String, Rect>() }
     val drafts = rememberSaveableStateHolder()
     var dragging by remember { mutableStateOf<String?>(null) }
@@ -47,7 +50,9 @@ fun OrderedServiceList(ids: List<String>, language: AppLanguage, title: (String)
             var expanded by rememberSaveable { mutableStateOf(false) }
             val index = ids.indexOf(id)
             fun move(to: Int) { applyOrder(moveService(latestIds, latestIds.indexOf(id), to)) }
-            Card(Modifier.fillMaxWidth().zIndex(if (dragging == id) 1f else 0f)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Text("${index+1}.", Modifier.width(28.dp).padding(top=24.dp), style=MaterialTheme.typography.labelLarge)
+            Card(Modifier.weight(1f).zIndex(if (dragging == id) 1f else 0f)
                 .graphicsLayer { if (dragging == id) { translationY = dy; alpha = .9f } }) {
                 Column(Modifier.padding(12.dp)) {
                     Row(Modifier.fillMaxWidth().onGloballyPositioned { if (dragging != id) bounds[id] = it.boundsInRoot() },
@@ -72,7 +77,10 @@ fun OrderedServiceList(ids: List<String>, language: AppLanguage, title: (String)
                                     onDrag = { change, amount -> change.consume(); dy += amount.y }
                                 )
                             })
-                        Text("${index+1}. ${title(id)}", Modifier.weight(1f), style=MaterialTheme.typography.titleSmall)
+                        badge(id)
+                        Spacer(Modifier.width(8.dp))
+                        Text(title(id), Modifier.weight(1f), style=MaterialTheme.typography.titleSmall, maxLines=2, overflow=TextOverflow.Ellipsis)
+                        status(id)
                         IconButton(onClick = { expanded = !expanded }) {
                             Icon(if(expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                                 tr(language, "Settings for ", "Einstellungen für ") + title(id))
@@ -90,6 +98,7 @@ fun OrderedServiceList(ids: List<String>, language: AppLanguage, title: (String)
                     }
                 }
             }
+            }
         } }
     }
 }
@@ -102,7 +111,13 @@ fun RoutingServiceList(settings: AppSettings, keyStore: SecureApiKeyStore, onCha
     Text(tr(language,"Drag a handle to change the query order. The first available service supplies the route.",
         "Griff gedrückt halten und ziehen, um die Abfragereihenfolge zu ändern. Der erste verfügbare Dienst liefert die Route."),style=MaterialTheme.typography.bodySmall)
     OrderedServiceList(providers.map { it.id },language,{ id-> RoutingProvider.entries.first {it.id==id}.displayName },
-        {order->onChange(settings.withRoutingOrder(order.map { id->RoutingProvider.entries.first {it.id==id} }))}) { id->
+        {order->onChange(settings.withRoutingOrder(order.map { id->RoutingProvider.entries.first {it.id==id} }))},
+        badge={ServiceImage(it)}, status={id ->
+            val revision by ServiceMonitor.changes.collectAsState()
+            val provider=RoutingProvider.entries.first {it.id==id}
+            val key=remember(id,revision){keyStore.read(provider).orEmpty()}
+            ServiceHealth(id, ProviderConnectivityChecker.providerFingerprint(provider, settings, key), provider.keyRequired && key.isBlank(), language)
+        }) { id->
         val provider=RoutingProvider.entries.first {it.id==id}
         RoutingServiceEditor(provider,settings,keyStore,onChange)
     }
@@ -136,9 +151,11 @@ private fun RoutingServiceEditor(provider: RoutingProvider,settings: AppSettings
         OutlinedTextField(address.text,address::edit,label={Text(tr(language,"HTTPS endpoint","HTTPS-Endpunkt"))},
             singleLine=true,isError=HttpsEndpoint.normalize(address.text)==null,modifier=Modifier.fillMaxWidth())
         TextButton(enabled=HttpsEndpoint.normalize(address.text)!=null,onClick={
+            ServiceMonitor.invalidate(provider.id)
             onChange(if(provider==RoutingProvider.OSRM) settings.copy(osrmBaseUrl=address.text) else settings.copy(valhallaBaseUrl=address.text))
         }) {Text(tr(language,"Save endpoint","Endpunkt speichern"))}
     }
+    if(endpoint!=null) EndpointAuthEditor(endpoint,language)
     Button(enabled=!testing&&(!provider.keyRequired||key.text.isNotBlank())&&(endpoint==null||HttpsEndpoint.normalize(address.text)!=null),onClick={
         testing=true
         scope.launch {
@@ -180,7 +197,11 @@ private fun EndpointServiceList(kind:String,endpoints:List<String>,settings:AppS
     val defaults=if(kind=="Photon")listOf("https://photon.komoot.io") else listOf(OsmEnrichmentClient.DEFAULT_OVERPASS_ENDPOINT,
         "https://overpass.private.coffee/api/interpreter","https://maps.mail.ru/osm/tools/overpass/api/interpreter")
     Text(kind,style=MaterialTheme.typography.titleMedium)
-    OrderedServiceList(endpoints,language,{endpoint->endpoint.toHttpUrlOrNull()?.host?:kind},onOrder) { endpoint->
+    OrderedServiceList(endpoints,language,{endpoint->endpoint.toHttpUrlOrNull()?.host?:kind},onOrder,
+        badge={ServiceImage(kind.lowercase())}, status={endpoint ->
+            val revision by ServiceMonitor.changes.collectAsState()
+            ServiceHealth(ServiceMonitor.endpointId(kind,endpoint), remember(endpoint,revision){EndpointSecurity.fingerprint(endpoint)}, false, language)
+        }) { endpoint->
         val draft=rememberTextDraft(endpoint,endpoint)
         var testing by remember {mutableStateOf(false)}
         var result by remember {mutableStateOf<InterfaceCheckResult?>(null)}
@@ -188,8 +209,11 @@ private fun EndpointServiceList(kind:String,endpoints:List<String>,settings:AppS
             isError=HttpsEndpoint.normalize(draft.text)==null,modifier=Modifier.fillMaxWidth())
         TextButton(enabled=HttpsEndpoint.normalize(draft.text)!=null,onClick={
             val normalized=HttpsEndpoint.normalize(draft.text)!!
+            ServiceMonitor.invalidate(ServiceMonitor.endpointId(kind,endpoint))
+            ServiceMonitor.invalidate(ServiceMonitor.endpointId(kind,normalized))
             onOrder(endpoints.map {if(it==endpoint)normalized else it}.distinct())
         }) {Text(tr(language,"Save endpoint","Endpunkt speichern"))}
+        EndpointAuthEditor(endpoint,language)
         Button(enabled=!testing&&HttpsEndpoint.normalize(draft.text)!=null,onClick={
             testing=true
             scope.launch {
@@ -214,4 +238,73 @@ private fun EndpointServiceList(kind:String,endpoints:List<String>,settings:AppS
         }},confirmButton={TextButton(enabled=HttpsEndpoint.normalize(newEndpoint.text)!=null,onClick={
             onOrder((endpoints+HttpsEndpoint.normalize(newEndpoint.text)!!).distinct());adding=false
         }) {Text(tr(language,"Add","Hinzufügen"))}},dismissButton={TextButton(onClick={adding=false}) {Text(tr(language,"Cancel","Abbrechen"))}})
+}
+
+@Composable
+private fun ServiceHealth(id:String,fingerprint:String,missingKey:Boolean,language:AppLanguage) {
+    val revision by ServiceMonitor.changes.collectAsState()
+    val observation=remember(id,fingerprint,revision){ServiceMonitor.read(id,fingerprint)}
+    val label=when {
+        missingKey -> tr(language,"API key missing","API-Key fehlt")
+        observation==null -> tr(language,"Not tested","Noch nicht getestet")
+        observation.valid -> tr(language,"API reachable","API erreichbar")
+        else -> tr(language,"API error or unreachable","API-Fehler oder nicht erreichbar")
+    }
+    val icon=when {
+        missingKey -> Icons.Outlined.KeyOff
+        observation==null -> Icons.Outlined.HelpOutline
+        observation.valid -> Icons.Outlined.CheckCircle
+        else -> Icons.Outlined.Cancel
+    }
+    val tint=when {
+        missingKey -> MaterialTheme.colorScheme.onSurfaceVariant
+        observation==null -> Color(0xFFB07800)
+        observation.valid -> Color(0xFF208344)
+        else -> MaterialTheme.colorScheme.error
+    }
+    if(observation!=null) Text(if(observation.durationMillis<1000) "${observation.durationMillis} ms" else
+        java.lang.String.format(java.util.Locale.ROOT,"%.1f s",observation.durationMillis/1000.0),
+        Modifier.padding(horizontal=4.dp).semantics { contentDescription=tr(language,"Last response time","Letzte Antwortzeit") + ": ${observation.durationMillis} ms" },
+        style=MaterialTheme.typography.labelSmall)
+    Icon(icon,label,tint=tint,modifier=Modifier.size(22.dp))
+}
+
+@Composable
+private fun EndpointAuthEditor(endpoint:String,language:AppLanguage) {
+    val existing=remember(endpoint){EndpointSecurity.header(endpoint)}
+    val name=rememberTextDraft(existing?.name?:"Authorization",endpoint+"header-name")
+    val value=rememberTextDraft(existing?.value.orEmpty(),endpoint+"header-value")
+    var enabled by rememberSaveable(endpoint){mutableStateOf(EndpointSecurity.configured(endpoint))}
+    var saved by remember {mutableStateOf(false)}
+    Row(verticalAlignment=Alignment.CenterVertically) {
+        Text(tr(language,"Header authentication","Header-Authentifizierung"),Modifier.weight(1f))
+        Switch(enabled,{enabled=it;saved=false})
+    }
+    if(enabled) {
+        OutlinedTextField(name.text,{name.edit(it);saved=false},label={Text(tr(language,"Header name","Header-Name"))},singleLine=true,modifier=Modifier.fillMaxWidth())
+        OutlinedTextField(value.text,{value.edit(it);saved=false},label={Text(tr(language,"Header value (e.g. Bearer …)","Header-Wert (z. B. Bearer …)"))},
+            singleLine=true,visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
+    }
+    TextButton(enabled= !enabled || EndpointHeaderPolicy.valid(name.text,value.text),onClick={
+        EndpointSecurity.save(endpoint,if(enabled)EndpointHeader(name.text,value.text) else null);saved=true
+    }) {Text(tr(language,"Save authentication","Authentifizierung speichern"))}
+    if(saved) Text(tr(language,"Saved. Test the endpoint again.","Gespeichert. Endpunkt erneut testen."),style=MaterialTheme.typography.bodySmall)
+    Text(tr(language,"Stored encrypted on this device. Not included in backups; configure again after restoring.",
+        "Auf diesem Gerät verschlüsselt gespeichert. Nicht im Backup enthalten; nach Wiederherstellung erneut einrichten."),style=MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun ServiceImage(id:String) {
+    val drawable=when(id) {
+        "tomtom" -> de.drivetime.notifier.R.drawable.service_tomtom
+        "valhalla" -> de.drivetime.notifier.R.drawable.service_valhalla
+        "openrouteservice" -> de.drivetime.notifier.R.drawable.service_openrouteservice
+        "osrm" -> de.drivetime.notifier.R.drawable.service_osrm
+        "graphhopper" -> de.drivetime.notifier.R.drawable.service_graphhopper
+        "google" -> de.drivetime.notifier.R.drawable.service_google
+        "here" -> de.drivetime.notifier.R.drawable.service_here
+        "photon" -> de.drivetime.notifier.R.drawable.service_photon
+        else -> de.drivetime.notifier.R.drawable.service_overpass
+    }
+    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(drawable),null,Modifier.size(28.dp))
 }

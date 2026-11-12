@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.network.*
 import android.content.Context
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
@@ -67,7 +68,7 @@ class ProviderConnectivityChecker(
 ) {
     private fun client(timeoutSeconds: Int): OkHttpClient {
         val timeout = timeoutSeconds.coerceIn(1, 300).toLong()
-        return OkHttpClient.Builder()
+        return OkHttpClient.Builder().endpointSecurity()
         .followRedirects(false)
         .followSslRedirects(false)
             .connectTimeout(minOf(timeout, 8L), TimeUnit.SECONDS)
@@ -88,36 +89,37 @@ class ProviderConnectivityChecker(
             ).also { store.save(provider.id, fingerprint, it) }
         }
 
+        val started=System.nanoTime()
+        val at=System.currentTimeMillis()
         val result = runCatching { executeProviderCheck(provider, key) }
+            .onFailure { if(it is kotlinx.coroutines.CancellationException) throw it }
             .fold(
                 onSuccess = { InterfaceCheckResult(InterfaceCheckState.VALID, "Interface reachable and credentials accepted.") },
-                onFailure = { InterfaceCheckResult(InterfaceCheckState.INVALID, it.message ?: "Interface check failed.") }
+                onFailure = { InterfaceCheckResult(InterfaceCheckState.INVALID, "Interface check failed: ${it.javaClass.simpleName}") }
             )
+        ServiceMonitor.record(provider.id,fingerprint,result.state==InterfaceCheckState.VALID,(System.nanoTime()-started)/1_000_000,at)
         store.save(provider.id, fingerprint, result)
         result
     }
 
     suspend fun checkPhoton(): InterfaceCheckResult = withContext(Dispatchers.IO) {
-        val fingerprint = photonFingerprint(settings)
-        val result = runCatching {
-            val base = settings.photonBaseUrl.trimEnd('/').toHttpUrl()
-            val url = base.newBuilder().apply {
-                if(base.pathSegments.lastOrNull { it.isNotBlank() } != "api") addPathSegment("api")
-            }
-                .addQueryParameter("q", "Berlin")
-                .addQueryParameter("limit", "1")
-                .build()
-            execute(Request.Builder().url(url).header("User-Agent", context.packageName).get().build(), "Photon")
-        }.fold(
-            onSuccess = { InterfaceCheckResult(InterfaceCheckState.VALID, "Photon endpoint reachable.") },
-            onFailure = { InterfaceCheckResult(InterfaceCheckState.INVALID, it.message ?: "Photon check failed.") }
-        )
-        store.save(PHOTON_ID, fingerprint, result)
+        val started=System.nanoTime()
+        val at=System.currentTimeMillis()
+        val fingerprint=EndpointSecurity.fingerprint(settings.photonBaseUrl)
+        val result=try {
+            PhotonSearchService(settings.photonBaseUrl,context.packageName).testEndpoint()
+            InterfaceCheckResult(InterfaceCheckState.VALID,"Photon endpoint reachable.")
+        } catch(cancelled:kotlinx.coroutines.CancellationException){throw cancelled}
+        catch(error:Exception){InterfaceCheckResult(InterfaceCheckState.INVALID,"Photon check failed.")}
+        ServiceMonitor.record(ServiceMonitor.endpointId("Photon",settings.photonBaseUrl),fingerprint,result.state==InterfaceCheckState.VALID,(System.nanoTime()-started)/1_000_000,at)
+        store.save(PHOTON_ID, photonFingerprint(settings), result)
         result
     }
 
     suspend fun checkOverpass(): InterfaceCheckResult = withContext(Dispatchers.IO) {
         val fingerprint = overpassFingerprint(settings)
+        val endpointFingerprint=EndpointSecurity.fingerprint(settings.overpassBaseUrl)
+        val at=System.currentTimeMillis()
         val started = System.nanoTime()
         val result = runCatching {
             val query = "[out:json][timeout:20];node(1);out ids;"
@@ -131,13 +133,13 @@ class ProviderConnectivityChecker(
                 val body = String(bytes, Charsets.UTF_8)
                 val duration = (System.nanoTime() - started) / 1_000_000L
                 if (!response.isSuccessful) {
-                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", body.take(1_200))
+                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", if(EndpointSecurity.configured(settings.overpassBaseUrl)) "Authenticated endpoint response omitted." else body.take(1_200))
                     error("Overpass: HTTP ${response.code}")
                 }
                 OverpassProtocol.parse(body)
                 RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "success", "HTTP ${response.code}, ${body.length} characters")
             }
-        }.fold(
+        }.onFailure { if(it is kotlinx.coroutines.CancellationException) throw it }.fold(
             onSuccess = { InterfaceCheckResult(InterfaceCheckState.VALID, "Overpass endpoint reachable.") },
             onFailure = {
                 RequestDebugLog.add(
@@ -145,11 +147,12 @@ class ProviderConnectivityChecker(
                     settings.overpassBaseUrl,
                     (System.nanoTime() - started) / 1_000_000L,
                     "failed",
-                    "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
+                    if(EndpointSecurity.configured(settings.overpassBaseUrl)) it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
                 )
-                InterfaceCheckResult(InterfaceCheckState.INVALID, it.message ?: "Overpass check failed.")
+                InterfaceCheckResult(InterfaceCheckState.INVALID, "Overpass check failed: ${it.javaClass.simpleName}")
             }
         )
+        ServiceMonitor.record(ServiceMonitor.endpointId("Overpass",settings.overpassBaseUrl),endpointFingerprint,result.state==InterfaceCheckState.VALID,(System.nanoTime()-started)/1_000_000,at)
         store.save(OVERPASS_ID, fingerprint, result)
         result
     }
@@ -183,7 +186,7 @@ class ProviderConnectivityChecker(
                     ))
                 }.toString()
                 val url = settings.valhallaBaseUrl.toHttpUrl().newBuilder().addPathSegment("route").build()
-                Request.Builder().url(url)
+                Request.Builder().endpointScope(settings.valhallaBaseUrl).url(url)
                     .header("X-Client-Id", context.packageName)
                     .header("User-Agent", context.packageName)
                     .header("Accept", "application/json")
@@ -205,7 +208,7 @@ class ProviderConnectivityChecker(
                 val url = "$base/route/v1/driving/$oLon,$oLat;$dLon,$dLat".toHttpUrl().newBuilder()
                     .addQueryParameter("overview", "false")
                     .build()
-                Request.Builder().url(url).header("User-Agent", context.packageName).get().build()
+                Request.Builder().endpointScope(settings.osrmBaseUrl).url(url).header("User-Agent", context.packageName).get().build()
             }
             RoutingProvider.GRAPHHOPPER -> {
                 val url = okhttp3.HttpUrl.Builder().scheme("https").host("graphhopper.com").addPathSegments("api/1/route")
@@ -264,8 +267,7 @@ class ProviderConnectivityChecker(
     private fun execute(request: Request, label: String, timeoutSeconds: Int = 12) {
         client(timeoutSeconds).newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                val detail = response.body?.readStringLimited(65_536L).orEmpty().replace(Regex("\\s+"), " ").take(120)
-                error("$label: HTTP ${response.code}${if (detail.isBlank()) "" else " · $detail"}")
+                error("$label: HTTP ${response.code}")
             }
         }
     }
@@ -284,7 +286,7 @@ class ProviderConnectivityChecker(
                 RoutingProvider.HERE -> "https://router.hereapi.com"
                 RoutingProvider.TOMTOM -> "https://api.tomtom.com"
             }
-            return sha256("${provider.id}|$endpoint|$key|${settings.providerTimeoutSeconds.forProvider(provider)}")
+            return sha256("${provider.id}|$endpoint|$key|${settings.providerTimeoutSeconds.forProvider(provider)}|${EndpointSecurity.fingerprint(endpoint)}")
         }
 
         fun photonFingerprint(settings: AppSettings): String = sha256("photon|${settings.photonBaseUrl}")

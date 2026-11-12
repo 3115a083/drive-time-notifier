@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.network.*
 import android.content.Context
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
@@ -33,7 +34,7 @@ class UnifiedRoutingService(
         .forProvider(settings.routingProvider)
         .coerceIn(1, 300)
         .toLong()
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = OkHttpClient.Builder().endpointSecurity()
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(minOf(timeoutSeconds, 8L), TimeUnit.SECONDS)
@@ -63,7 +64,11 @@ class UnifiedRoutingService(
         val oLon = points.originLongitude
         val dLat = points.destinationLatitude
         val dLon = points.destinationLongitude
-        when (settings.routingProvider) {
+        val started = System.nanoTime()
+        val at = System.currentTimeMillis()
+        val fingerprint = ProviderConnectivityChecker.providerFingerprint(settings.routingProvider, settings, keyStore.read(settings.routingProvider).orEmpty())
+        try {
+        val estimate = when (settings.routingProvider) {
             RoutingProvider.VALHALLA -> valhalla(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.OPENROUTESERVICE -> openRouteService(oLat, oLon, dLat, dLon)
             RoutingProvider.OSRM -> osrm(oLat, oLon, dLat, dLon)
@@ -71,6 +76,13 @@ class UnifiedRoutingService(
             RoutingProvider.GOOGLE -> google(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.HERE -> here(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.TOMTOM -> tomTom(oLat, oLon, dLat, dLon, request.arrivalMillis)
+        }
+        ServiceMonitor.record(settings.routingProvider.id, fingerprint, true, (System.nanoTime()-started)/1_000_000, at)
+        estimate
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            ServiceMonitor.record(settings.routingProvider.id, fingerprint, false, (System.nanoTime()-started)/1_000_000, at)
+            throw error
         }
     }
 
@@ -94,7 +106,7 @@ class UnifiedRoutingService(
                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
             ))
         }.toString()
-        val request = Request.Builder()
+        val request = Request.Builder().endpointScope(settings.valhallaBaseUrl)
             .url(base.newBuilder().addPathSegment("route").build())
             .header("X-Client-Id", context.packageName)
             .post(body.toRequestBody("application/json".toMediaType()))
@@ -169,7 +181,7 @@ class UnifiedRoutingService(
             .addQueryParameter("overview", "full")
             .addQueryParameter("geometries", "polyline")
             .build()
-        return client.newCall(Request.Builder().url(url).header("User-Agent", context.packageName).get().build()).execute().use { response ->
+        return client.newCall(Request.Builder().endpointScope(settings.osrmBaseUrl).url(url).header("User-Agent", context.packageName).get().build()).execute().use { response ->
             val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("OSRM: HTTP ${response.code}")
             val root = JSONObject(body)

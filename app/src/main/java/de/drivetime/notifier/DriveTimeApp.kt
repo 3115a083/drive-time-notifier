@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 class DriveTimeApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        de.drivetime.notifier.network.EndpointSecurity.initialize(this)
+        de.drivetime.notifier.network.ServiceMonitor.initialize(this)
         CoroutineScope(Dispatchers.IO).launch {
             runCatching { RouteHistoryStore(this@DriveTimeApp).prune() }
         }
