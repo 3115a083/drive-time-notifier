@@ -46,7 +46,9 @@ data class RoutePoi(
 data class OsmEnrichmentResult(
     val pois: List<RoutePoi>,
     val unavailable: Boolean,
-    val registryUnavailable: Boolean = false
+    val registryUnavailable: Boolean = false,
+    val chargingUnavailable: Boolean? = null,
+    val parkingUnavailable: Boolean? = null
 )
 
 data class ParkingSearchOptions(
@@ -62,7 +64,8 @@ private data class OverpassBatch(
 
 internal enum class OsmQueryKind(val label: String) {
     CHARGING("charging stations"),
-    PARKING("parking")
+    PARKING("parking"),
+    COMBINED("parking and charging stations")
 }
 
 internal data class PrioritizedOsmQuery(val kind: OsmQueryKind, val query: String)
@@ -178,7 +181,9 @@ class OsmEnrichmentClient(
         OsmEnrichmentResult(
             pois = chargingOut + parkingOut,
             unavailable = batches.any { !it.second.available },
-            registryUnavailable = registryResult?.isFailure == true
+            registryUnavailable = registryResult?.isFailure == true,
+            chargingUnavailable = batches.filter {it.first!=OsmQueryKind.PARKING}.any {!it.second.available},
+            parkingUnavailable = batches.filter {it.first!=OsmQueryKind.CHARGING}.any {!it.second.available}
         )
     }
 
@@ -201,7 +206,7 @@ class OsmEnrichmentClient(
         val queries=prioritizedQueries(points,parking,charging)
         if(splitRequests || queries.size<2)return queries
         val prefix="[out:json][timeout:20][maxsize:33554432];"
-        return listOf(PrioritizedOsmQuery(OsmQueryKind.CHARGING, prefix+queries.joinToString("") {it.query.removePrefix(prefix)}))
+        return listOf(PrioritizedOsmQuery(OsmQueryKind.COMBINED, prefix+queries.joinToString("") {it.query.removePrefix(prefix)}))
     }
 
     private fun wrapQuery(body: String, limit: Int) =

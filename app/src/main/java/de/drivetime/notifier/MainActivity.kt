@@ -516,12 +516,13 @@ class MainActivity : ComponentActivity() {
                 if (settings.chargingUseBNetzA) registryLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = it.message.orEmpty())
                 return
             }
+            val unavailable=result.chargingUnavailable ?: result.unavailable
             val chargingPois = result.pois.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
             pois = pois.filterNot { it.kind == RoutePoi.Kind.CHARGING_STATION } + chargingPois
             chargingLoad = PoiLoadStatus(
-                phase = if (result.unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
+                phase = if (unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
                 count = chargingPois.size,
-                detail = if (result.unavailable) tr(
+                detail = if (unavailable) tr(
                     settings.language,
                     "OpenStreetMap is unavailable or only partial.",
                     "OpenStreetMap ist nicht erreichbar oder nur teilweise verfügbar."
@@ -595,12 +596,13 @@ class MainActivity : ComponentActivity() {
                 parkingLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = it.message.orEmpty())
                 return
             }
+            val unavailable=result.parkingUnavailable ?: result.unavailable
             val parkingPois = result.pois.filter { it.kind == RoutePoi.Kind.PARKING }
             pois = pois.filterNot { it.kind == RoutePoi.Kind.PARKING } + parkingPois
             parkingLoad = PoiLoadStatus(
-                phase = if (result.unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
+                phase = if (unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
                 count = parkingPois.size,
-                detail = if (result.unavailable) tr(
+                detail = if (unavailable) tr(
                     settings.language,
                     "OpenStreetMap is unavailable or only partial.",
                     "OpenStreetMap ist nicht erreichbar oder nur teilweise verfügbar."
@@ -690,7 +692,7 @@ class MainActivity : ComponentActivity() {
                     settings.overpassEndpoints,
                     settings.overpassSplitRequests
                 )
-                val shared=if(settings.showChargingStations && settings.showParking && !settings.overpassSplitRequests) {
+                val shared=if(settings.showChargingStations && settings.showParking) {
                     chargingLoad=PoiLoadStatus(PoiLoadPhase.RUNNING)
                     registryLoad=if(settings.chargingUseBNetzA) PoiLoadStatus(PoiLoadPhase.RUNNING) else PoiLoadStatus()
                     parkingLoad=PoiLoadStatus(PoiLoadPhase.RUNNING)

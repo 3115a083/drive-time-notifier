@@ -64,4 +64,19 @@ class OverpassEfficiencyTest {
         assertTrue(queries.first().query.contains("charging_station"))
         assertTrue(queries.last().query.contains("parking"))
     }
+
+    @Test fun splitPartialFailureKeepsTheSuccessfulCategoryUsable()=runBlocking {
+        val calls=AtomicInteger()
+        val client=OkHttpClient.Builder().addInterceptor {chain ->
+            val n=calls.incrementAndGet()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(if(n==1)200 else 503).message("Synthetic")
+                .body("{\"elements\":[]}".toResponseBody()).build()
+        }.build()
+        val endpoints=listOf("https://partial-one.test/api","https://partial-two.test/api")
+        val charging=ChargingSearchOptions(connectors=emptySet(),resultLimit=5,maxDistanceMeters=1500,
+            speedPreference=de.drivetime.notifier.data.ChargingSpeedPreference.ANY,preferredOperator="",showOtherOperators=true,useBNetzA=false)
+        val result=OsmEnrichmentClient(endpoints.first(),endpoints,splitRequests=true,client=client).query(points,ParkingSearchOptions(),charging)
+        assertEquals(false,result.chargingUnavailable);assertEquals(true,result.parkingUnavailable)
+        assertEquals(2,calls.get())
+    }
 }
