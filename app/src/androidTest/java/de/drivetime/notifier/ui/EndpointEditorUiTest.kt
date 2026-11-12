@@ -32,6 +32,14 @@ class EndpointEditorUiTest {
             compose.onAllNodes(hasSetTextAction() and hasText("Header-Name"))[1].performScrollTo().performTextInput("P-Access-Token")
             compose.onAllNodes(hasSetTextAction() and hasText("Header-Wert"))[1].performScrollTo().performTextInput("fixture-token")
             compose.runOnIdle { assertEquals(2,EndpointSecurity.headers(endpoint)!!.size) }
+            val device=androidx.test.uiautomator.UiDevice.getInstance(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation())
+            device.pressBack() // Hide IME in this test host, which has no navigation handler.
+            compose.waitForIdle()
+            compose.onNodeWithText("Authentifizierungs-Header").performScrollTo()
+            val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+            val screenshot=java.io.File(context.getExternalFilesDir(null),"endpoint-headers.png")
+            assertTrue(device.takeScreenshot(screenshot))
+            device.executeShellCommand("cp ${screenshot.absolutePath} /data/local/tmp/${screenshot.name}")
             compose.onAllNodes(hasSetTextAction() and hasText("Header-Wert"))[1].performTextClearance()
             restoration.emulateSavedInstanceStateRestore()
             compose.runOnIdle { assertEquals("fixture-token",EndpointSecurity.headers(endpoint)!!.last().value) }
@@ -40,6 +48,17 @@ class EndpointEditorUiTest {
             compose.onAllNodesWithContentDescription("Header entfernen")[0].performScrollTo().performClick()
             compose.runOnIdle { assertFalse(EndpointSecurity.configured(endpoint)) }
         } finally { EndpointSecurity.saveHeaders(endpoint,emptyList()) }
+    }
+    @Test fun unreadableCredentialsCanBeRemovedWithoutLeavingAStaleWarning() {
+        val endpoint="https://corrupt-editor.invalid"
+        val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        context.getSharedPreferences("endpoint_headers",0).edit().putString(digest(endpoint),"corrupt").commit()
+        try {
+            compose.setContent { MaterialTheme { Column { EndpointAuthEditor(endpoint,AppLanguage.GERMAN) } } }
+            compose.onNodeWithText("Gespeicherte Header entfernen").performClick()
+            compose.onNodeWithText("Gespeicherte Header entfernen").assertDoesNotExist()
+            compose.runOnIdle { assertFalse(EndpointSecurity.configured(endpoint)) }
+        } finally {EndpointSecurity.saveHeaders(endpoint,emptyList())}
     }
     @Test fun endpointAutosaveKeepsItsEditorIdentityAndEmptyDraftAcrossOldEchoAndCollapse() {
         var settings by mutableStateOf(AppSettings(language=AppLanguage.GERMAN,photonBaseUrl="https://original.invalid",photonEndpoints=listOf("https://original.invalid")))

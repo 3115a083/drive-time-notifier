@@ -295,19 +295,26 @@ private fun ServiceHealth(id:String,fingerprint:String,missingKey:Boolean,langua
 
 @Composable
 internal fun EndpointAuthEditor(endpoint:String,language:AppLanguage,onEdited:()->Unit={}) {
+    val initialHeaders=remember(endpoint) { EndpointSecurity.headers(endpoint) }
+    var storedHeaders by remember(endpoint) { mutableStateOf(initialHeaders) }
+    var unreadable by remember(endpoint) { mutableStateOf(EndpointSecurity.configured(endpoint) && initialHeaders==null) }
     val state = rememberSaveable(endpoint, saver=HeaderEditorState.Saver) {
-        HeaderEditorState(EndpointSecurity.headers(endpoint).orEmpty().map { HeaderDraft(saved=it, name=it.name, value=it.value) })
+        HeaderEditorState(initialHeaders.orEmpty().map { HeaderDraft(saved=it, name=it.name, value=it.value) })
     }
     fun persist() {
         val headers=state.persistable() ?: return
-        if (headers != EndpointSecurity.headers(endpoint).orEmpty()) EndpointSecurity.saveHeaders(endpoint,headers)
+        if (headers != storedHeaders.orEmpty() || (unreadable && headers.isNotEmpty())) {
+            EndpointSecurity.saveHeaders(endpoint,headers)
+            storedHeaders=headers
+            unreadable=false
+        }
         state.committed()
     }
     Text(tr(language,"Authentication headers","Authentifizierungs-Header"),style=MaterialTheme.typography.titleSmall)
-    if(EndpointSecurity.configured(endpoint) && EndpointSecurity.headers(endpoint)==null) {
+    if(unreadable) {
         Text(tr(language,"Saved headers cannot be read. Remove them or enter valid replacement headers.",
             "Gespeicherte Header sind nicht lesbar. Entfernen oder durch gültige Header ersetzen."),color=MaterialTheme.colorScheme.error)
-        TextButton(onClick={EndpointSecurity.saveHeaders(endpoint,emptyList());onEdited()}) {Text(tr(language,"Remove saved headers","Gespeicherte Header entfernen"))}
+        TextButton(onClick={EndpointSecurity.saveHeaders(endpoint,emptyList());storedHeaders=emptyList();unreadable=false;onEdited()}) {Text(tr(language,"Remove saved headers","Gespeicherte Header entfernen"))}
     }
     state.rows.forEach { row -> key(row.id) {
         Row(verticalAlignment=Alignment.CenterVertically) {
