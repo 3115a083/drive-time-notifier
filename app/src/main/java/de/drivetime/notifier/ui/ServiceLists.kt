@@ -274,7 +274,7 @@ private fun EndpointAuthEditor(endpoint:String,language:AppLanguage) {
     val existing=remember(endpoint){EndpointSecurity.header(endpoint)}
     val name=rememberTextDraft(existing?.name?:"Authorization",endpoint+"header-name")
     val value=rememberTextDraft(existing?.value.orEmpty(),endpoint+"header-value")
-    var enabled by rememberSaveable(endpoint){mutableStateOf(existing!=null)}
+    var enabled by rememberSaveable(endpoint){mutableStateOf(EndpointSecurity.configured(endpoint))}
     var saved by remember {mutableStateOf(false)}
     Row(verticalAlignment=Alignment.CenterVertically) {
         Text(tr(language,"Header authentication","Header-Authentifizierung"),Modifier.weight(1f))

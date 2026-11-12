@@ -38,11 +38,13 @@ object EndpointSecurity {
     private fun rememberSecret(value:String) { secrets.add(value); value.substringAfter(' ',"").takeIf { it.length>=4 }?.let {secrets.add(it)} }
     fun initialize(context: Context) { app = context.applicationContext }
     private val prefs get() = requireNotNull(app).getSharedPreferences("endpoint_headers", Context.MODE_PRIVATE)
+    private fun storageKey(endpoint:String)=digest(HttpsEndpoint.normalize(endpoint) ?: endpoint)
+    fun configured(endpoint:String)=app!=null && prefs.contains(storageKey(endpoint))
     fun fingerprint(endpoint: String): String = digest(endpoint + "|" + header(endpoint)?.let { it.name + ":" + it.value }.orEmpty() + "|" +
-        (if(app==null)0 else prefs.getLong(digest(endpoint)+":revision",0)))
+        (if(app==null)0 else prefs.getLong(storageKey(endpoint)+":revision",0)))
     fun header(endpoint: String): EndpointHeader? {
         if (app == null) return null
-        val raw = prefs.getString(digest(endpoint), null) ?: return null
+        val raw = prefs.getString(storageKey(endpoint), null) ?: return null
         return runCatching {
             val parts = raw.split(':', limit = 2)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -52,17 +54,17 @@ object EndpointSecurity {
         }.getOrNull()
     }
     fun save(endpoint: String, header: EndpointHeader?) {
-        require(HttpsEndpoint.normalize(endpoint) == endpoint)
-        if (header == null) prefs.edit().remove(digest(endpoint)).apply()
+        require(HttpsEndpoint.normalize(endpoint) != null)
+        if (header == null) prefs.edit().remove(storageKey(endpoint)).apply()
         else {
             require(EndpointHeaderPolicy.valid(header.name, header.value))
             rememberSecret(header.value)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key())
             val plain = JSONObject().put("name", header.name).put("value", header.value).toString().toByteArray()
             val raw = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(plain), Base64.NO_WRAP)
-            prefs.edit().putString(digest(endpoint), raw).apply()
+            prefs.edit().putString(storageKey(endpoint), raw).apply()
         }
-        prefs.edit().putLong(digest(endpoint)+":revision", prefs.getLong(digest(endpoint)+":revision",0)+1).apply()
+        prefs.edit().putLong(storageKey(endpoint)+":revision", prefs.getLong(storageKey(endpoint)+":revision",0)+1).apply()
         ServiceMonitor.changed()
     }
     private fun key(): SecretKey {
@@ -78,11 +80,13 @@ object EndpointSecurity {
     val interceptor = Interceptor { chain ->
         val request = chain.request()
         val endpoint = request.tag(Scope::class.java)?.endpoint
-        val header = endpoint?.takeIf { EndpointHeaderPolicy.applies(it, request.url.toString()) }?.let(::header)
+        if(endpoint!=null && !EndpointHeaderPolicy.applies(endpoint,request.url.toString())) throw java.io.IOException("Endpoint scope mismatch.")
+        val header = endpoint?.let(::header)
+        if(endpoint!=null && configured(endpoint) && header==null) throw java.io.IOException("Endpoint credentials unavailable. Save authentication again.")
         chain.proceed(if (header == null) request else request.newBuilder().header(header.name, header.value).build())
     }
 }
-fun OkHttpClient.Builder.endpointSecurity(): OkHttpClient.Builder = addInterceptor(EndpointSecurity.interceptor)
+fun OkHttpClient.Builder.endpointSecurity(): OkHttpClient.Builder = followRedirects(false).followSslRedirects(false).addInterceptor(EndpointSecurity.interceptor)
 fun okhttp3.Request.Builder.endpointScope(endpoint: String): okhttp3.Request.Builder = tag(EndpointSecurity.Scope::class.java, EndpointSecurity.Scope(endpoint))
 fun digest(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
 

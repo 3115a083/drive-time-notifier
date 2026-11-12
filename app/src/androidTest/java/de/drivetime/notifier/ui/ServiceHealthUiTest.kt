@@ -20,7 +20,7 @@ class ServiceHealthUiTest {
         val fp=ProviderConnectivityChecker.providerFingerprint(RoutingProvider.OSRM,settings,"")
         ServiceMonitor.record("osrm",fp,true,1234)
         try {
-            compose.setContent { MaterialTheme { RoutingServiceList(settings,SecureApiKeyStore(context),{}) } }
+            compose.setContent { MaterialTheme { androidx.compose.foundation.layout.Column { RoutingServiceList(settings,SecureApiKeyStore(context),{}) } } }
             compose.onNodeWithText("1.").assertExists()
             compose.onNodeWithText("1.2 s").assertExists()
             compose.onNodeWithContentDescription("API erreichbar").assertExists()
@@ -30,6 +30,10 @@ class ServiceHealthUiTest {
             compose.runOnIdle { ServiceMonitor.record("osrm",fp,false,2500) }
             compose.onNodeWithContentDescription("API-Fehler oder nicht erreichbar").assertExists()
             compose.onNodeWithText("2.5 s").assertExists()
+            val device=androidx.test.uiautomator.UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            val image=java.io.File(context.getExternalFilesDir(null),"service-list.png")
+            assertTrue(device.takeScreenshot(image))
+            device.executeShellCommand("cp ${image.absolutePath} /data/local/tmp/${image.name}")
             assertFalse(ServiceMonitor.read("osrm",fp)!!.valid)
             assertNull(ServiceMonitor.read("osrm","changed-config"))
         } finally { ServiceMonitor.invalidate("osrm") }
@@ -47,5 +51,27 @@ class ServiceHealthUiTest {
             assertFalse(stored.contains("example.test"))
             assertEquals("[redacted]",EndpointSecurity.redact("fixture-secret-123"))
         } finally { EndpointSecurity.save(endpoint,null) }
+    }
+
+    @Test fun interceptorAttachesAuthOnlyWithinItsExplicitScopeAndNeverFollowsRedirects() {
+        val endpoint="https://example.test/private"
+        EndpointSecurity.save(endpoint,EndpointHeader("X-Test-Key","synthetic-test-secret"))
+        try {
+            var captured:String?=null
+            val client=okhttp3.OkHttpClient.Builder().endpointSecurity().addInterceptor { chain ->
+                captured=chain.request().header("X-Test-Key")
+                okhttp3.Response.Builder().request(chain.request()).protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200).message("OK").body(okhttp3.ResponseBody.create(null,"{}")).build()
+            }.build()
+            assertFalse(client.followRedirects)
+            client.newCall(okhttp3.Request.Builder().endpointScope(endpoint).url(endpoint+"/route").build()).execute().close()
+            assertEquals("synthetic-test-secret",captured)
+            captured=null
+            try {
+                client.newCall(okhttp3.Request.Builder().endpointScope(endpoint).url("https://attacker.invalid/private").build()).execute().close()
+                fail("Scope mismatch must fail before any request is sent")
+            } catch(expected:java.io.IOException) {assertEquals("Endpoint scope mismatch.",expected.message)}
+            assertNull(captured)
+        } finally {EndpointSecurity.save(endpoint,null)}
     }
 }
