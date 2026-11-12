@@ -98,7 +98,7 @@ class OsmEnrichmentClient(
             async { runCatching { BNetzAChargingClient().query(destination, options.maxDistanceMeters) } }
         }
         val batches = mutableListOf<Pair<OsmQueryKind, OverpassBatch>>()
-        val requestBudget=OverpassRequestBudget()
+        val requestBudget=OverpassRequestBudget {android.os.SystemClock.elapsedRealtime()}
         plannedQueries(points, parking, charging).forEach { request ->
             batches += request.kind to fetchElements(request.query, request.kind, requestBudget)
         }
@@ -282,6 +282,7 @@ class OsmEnrichmentClient(
                         error("HTTP ${response.code}")
                     }
                     val bytes=response.body.readBytesLimited(MAX_RESPONSE_BYTES)
+                    check(requestBudget.remaining()>0) { "Overpass budget elapsed" }
                     OverpassProtocol.parse(String(bytes,Charsets.UTF_8))
                     bytes
                 }
@@ -382,8 +383,8 @@ class OsmEnrichmentClient(
     companion object {
         private const val MAX_RESPONSE_BYTES = 4_000_000L
         private const val MAX_REMOTE_TEXT_LENGTH = 240
-        private val responseCache = OverpassResponseCache()
-        private val endpointPolicy = OverpassEndpointPolicy()
+        private val responseCache = OverpassResponseCache(now={android.os.SystemClock.elapsedRealtime()})
+        private val endpointPolicy = OverpassEndpointPolicy {android.os.SystemClock.elapsedRealtime()}
         const val DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
         private val FALLBACK_OVERPASS_ENDPOINTS = listOf(
             "https://overpass.private.coffee/api/interpreter",
