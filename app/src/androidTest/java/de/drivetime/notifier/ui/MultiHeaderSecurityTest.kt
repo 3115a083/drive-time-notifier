@@ -7,6 +7,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MultiHeaderSecurityTest {
+    @Test fun shortAutosavePrefixesCannotCorruptTechnicalDiagnostics() {
+        val endpoint="https://redaction-prefix.invalid"
+        try {
+            for(value in listOf("o","ou","out","outside-fixture-credential")) EndpointSecurity.saveHeaders(endpoint,listOf(EndpointHeader("X-Fixture",value)))
+            assertEquals("Photon timeout callTimeout=8000ms",EndpointSecurity.redact("Photon timeout callTimeout=8000ms"))
+            assertEquals("[redacted]",EndpointSecurity.redact("outside-fixture-credential"))
+        } finally { EndpointSecurity.saveHeaders(endpoint,emptyList()) }
+    }
     @Test fun legacyHeadersMigrateAndPangolinPairPlusApiAuthAreEncryptedAndSentTogether() {
         val endpoint="https://headers-fixture.invalid/private"
         val context=InstrumentationRegistry.getInstrumentation().targetContext

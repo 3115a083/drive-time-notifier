@@ -36,9 +36,15 @@ object EndpointHeaderPolicy {
 
 object EndpointSecurity {
     private var app: android.app.Application? = null
-    private val secrets=java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val secrets=java.util.Collections.synchronizedSet(linkedSetOf<String>())
     fun redact(value:String):String = synchronized(secrets) { secrets.sortedByDescending { it.length }.fold(value) { text,secret -> text.replace(secret,"[redacted]") } }
-    private fun rememberSecret(value:String) { secrets.add(value); value.substringAfter(' ',"").takeIf { it.length>=4 }?.let {secrets.add(it)} }
+    private fun rememberSecret(value:String) = synchronized(secrets) {
+        // Header values never enter logs. Do not let short autosave prefixes erase technical labels.
+        listOf(value,value.substringAfter(' ',"")).filter { it.length>=4 }.forEach {
+            secrets.remove(it);secrets.add(it)
+        }
+        while(secrets.size>128) secrets.remove(secrets.first())
+    }
     fun initialize(context: Context) { app = context.applicationContext as android.app.Application }
     private val prefs get() = requireNotNull(app).getSharedPreferences("endpoint_headers", Context.MODE_PRIVATE)
     private fun storageKey(endpoint:String)=digest(HttpsEndpoint.normalize(endpoint) ?: endpoint)

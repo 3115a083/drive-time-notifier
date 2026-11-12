@@ -134,7 +134,7 @@ class ProviderConnectivityChecker(
                 val body = String(bytes, Charsets.UTF_8)
                 val duration = (System.nanoTime() - started) / 1_000_000L
                 if (!response.isSuccessful) {
-                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", if(EndpointSecurity.configured(settings.overpassBaseUrl)) "Authenticated endpoint response omitted." else body.take(1_200))
+                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", "Response body omitted.")
                     error("Overpass: HTTP ${response.code}")
                 }
                 OverpassProtocol.parse(body)

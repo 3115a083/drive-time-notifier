@@ -20,9 +20,10 @@ class EndpointEditorUiTest {
     @Test fun multiHeadersAutosaveRemoveAndRestoreIncompleteDraftsWithoutSaveButtons() {
         val endpoint="https://editor-fixture.invalid/private"
         val restoration=StateRestorationTester(compose)
+        var keyboard:androidx.compose.ui.platform.SoftwareKeyboardController?=null
         EndpointSecurity.saveHeaders(endpoint,emptyList())
         try {
-            restoration.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) { EndpointAuthEditor(endpoint,AppLanguage.GERMAN) } } }
+            restoration.setContent { keyboard=androidx.compose.ui.platform.LocalSoftwareKeyboardController.current; MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) { EndpointAuthEditor(endpoint,AppLanguage.GERMAN) } } }
             compose.onNodeWithText("Authentifizierung speichern").assertDoesNotExist()
             compose.onNodeWithText("Header hinzufügen").performClick()
             compose.onAllNodes(hasSetTextAction() and hasText("Header-Name"))[0].performTextInput("P-Access-Token-Id")
@@ -33,7 +34,7 @@ class EndpointEditorUiTest {
             compose.onAllNodes(hasSetTextAction() and hasText("Header-Wert"))[1].performScrollTo().performTextInput("fixture-token")
             compose.runOnIdle { assertEquals(2,EndpointSecurity.headers(endpoint)!!.size) }
             val device=androidx.test.uiautomator.UiDevice.getInstance(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation())
-            device.pressBack() // Hide IME in this test host, which has no navigation handler.
+            compose.runOnIdle { keyboard?.hide() }
             compose.waitForIdle()
             compose.onNodeWithText("Authentifizierungs-Header").performScrollTo()
             val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
@@ -42,6 +43,8 @@ class EndpointEditorUiTest {
             device.executeShellCommand("cp ${screenshot.absolutePath} /data/local/tmp/${screenshot.name}")
             compose.onAllNodes(hasSetTextAction() and hasText("Header-Wert"))[1].performTextClearance()
             restoration.emulateSavedInstanceStateRestore()
+            compose.onAllNodes(hasSetTextAction() and hasText("Header-Wert"))[1].assert(
+                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.EditableText,androidx.compose.ui.text.AnnotatedString("")))
             compose.runOnIdle { assertEquals("fixture-token",EndpointSecurity.headers(endpoint)!!.last().value) }
             compose.onAllNodesWithContentDescription("Header entfernen")[1].performScrollTo().performClick()
             compose.runOnIdle { assertEquals(1,EndpointSecurity.headers(endpoint)!!.size) }
