@@ -26,6 +26,8 @@ class PhotonSearchService(
         .retryOnConnectionFailure(true)
         .build()
 ) {
+    internal suspend fun testEndpoint() { searchEndpoint(baseUrl,"Berlin","en",null,1) }
+
     suspend fun suggest(query: String, language: String): List<AddressSuggestion> = withContext(Dispatchers.IO) {
         val clean = query.trim()
         if (clean.length < 3) return@withContext emptyList()

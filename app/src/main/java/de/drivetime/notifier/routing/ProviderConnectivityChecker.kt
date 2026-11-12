@@ -107,7 +107,7 @@ class ProviderConnectivityChecker(
         val at=System.currentTimeMillis()
         val fingerprint=EndpointSecurity.fingerprint(settings.photonBaseUrl)
         val result=try {
-            PhotonSearchService(settings.photonBaseUrl,context.packageName).geocode("Berlin")
+            PhotonSearchService(settings.photonBaseUrl,context.packageName).testEndpoint()
             InterfaceCheckResult(InterfaceCheckState.VALID,"Photon endpoint reachable.")
         } catch(cancelled:kotlinx.coroutines.CancellationException){throw cancelled}
         catch(error:Exception){InterfaceCheckResult(InterfaceCheckState.INVALID,"Photon check failed.")}
