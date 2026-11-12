@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.2, development
+
+- Batch parking and charging Overpass selectors when split mode is off, retaining category limits.
+- Share identical in-flight requests and cancel HTTP work when its final consumer leaves.
+- Bound successful raw response caching to 16 entries, 8 MiB including keys and five minutes using atomic LRU operations.
+- Preserve endpoint order, skip temporarily failing endpoints and bound enrichment to two sequential HTTP attempts within 60 seconds.
+
+
 ## 1.4.1, development
 
 - Display service order outside cards, bundled service images, persistent health and last response time.

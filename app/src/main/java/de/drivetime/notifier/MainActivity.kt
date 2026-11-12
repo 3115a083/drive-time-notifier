@@ -486,7 +486,8 @@ class MainActivity : ComponentActivity() {
             route: RouteEstimate,
             request: RouteRequest,
             generation: Int,
-            enrichmentClient: OsmEnrichmentClient
+            enrichmentClient: OsmEnrichmentClient,
+            preloaded: Result<OsmEnrichmentResult>? = null
         ) {
             if (!settings.showChargingStations) return
             chargingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
@@ -502,7 +503,7 @@ class MainActivity : ComponentActivity() {
                 if (settings.chargingUseBNetzA) registryLoad = chargingLoad
                 return
             }
-            val attempt = runCatching {
+            val attempt = preloaded ?: runCatching {
                 enrichmentClient.query(
                     points = points,
                     parking = null,
@@ -562,7 +563,8 @@ class MainActivity : ComponentActivity() {
         suspend fun loadParkingData(
             route: RouteEstimate,
             generation: Int,
-            enrichmentClient: OsmEnrichmentClient
+            enrichmentClient: OsmEnrichmentClient,
+            preloaded: Result<OsmEnrichmentResult>? = null
         ) {
             if (!settings.showParking) return
             parkingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
@@ -577,7 +579,7 @@ class MainActivity : ComponentActivity() {
                 }
                 return
             }
-            val attempt = runCatching {
+            val attempt = preloaded ?: runCatching {
                 enrichmentClient.query(
                     points,
                     parking = ParkingSearchOptions(
@@ -688,10 +690,19 @@ class MainActivity : ComponentActivity() {
                     settings.overpassEndpoints,
                     settings.overpassSplitRequests
                 )
+                val shared=if(settings.showChargingStations && settings.showParking && !settings.overpassSplitRequests) {
+                    chargingLoad=PoiLoadStatus(PoiLoadPhase.RUNNING)
+                    registryLoad=if(settings.chargingUseBNetzA) PoiLoadStatus(PoiLoadPhase.RUNNING) else PoiLoadStatus()
+                    parkingLoad=PoiLoadStatus(PoiLoadPhase.RUNNING)
+                    runCatching {
+                        val points=PolylineDecoder.decode(calculation.route.encodedPolyline)
+                        enrichmentClient.query(points,ParkingSearchOptions(settings.parkingResultLimit,settings.parkingMaxDistanceMeters,settings.parkingFreeOnly),ChargingSearchOptions.from(settings))
+                    }.also {result -> result.exceptionOrNull()?.let {if(it is kotlinx.coroutines.CancellationException)throw it}}
+                } else null
                 if (settings.showChargingStations) {
-                    loadChargingData(calculation.route, calculation.request, generation, enrichmentClient)
+                    loadChargingData(calculation.route, calculation.request, generation, enrichmentClient,shared)
                 }
-                if (settings.showParking) loadParkingData(calculation.route, generation, enrichmentClient)
+                if (settings.showParking) loadParkingData(calculation.route, generation, enrichmentClient,shared)
             }
         }
 
