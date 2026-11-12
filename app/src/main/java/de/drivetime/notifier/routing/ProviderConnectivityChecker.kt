@@ -133,7 +133,7 @@ class ProviderConnectivityChecker(
                 val body = String(bytes, Charsets.UTF_8)
                 val duration = (System.nanoTime() - started) / 1_000_000L
                 if (!response.isSuccessful) {
-                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", body.take(1_200))
+                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", if(EndpointSecurity.configured(settings.overpassBaseUrl)) "Authenticated endpoint response omitted." else body.take(1_200))
                     error("Overpass: HTTP ${response.code}")
                 }
                 OverpassProtocol.parse(body)
@@ -147,7 +147,7 @@ class ProviderConnectivityChecker(
                     settings.overpassBaseUrl,
                     (System.nanoTime() - started) / 1_000_000L,
                     "failed",
-                    "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
+                    if(EndpointSecurity.configured(settings.overpassBaseUrl)) it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
                 )
                 InterfaceCheckResult(InterfaceCheckState.INVALID, "Overpass check failed: ${it.javaClass.simpleName}")
             }

@@ -118,6 +118,7 @@ class PhotonSearchService(
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) {
             ServiceMonitor.record(ServiceMonitor.endpointId("Photon", endpoint), fingerprint, false, (System.nanoTime()-started)/1_000_000, at)
+            if(EndpointSecurity.configured(endpoint)) throw java.io.IOException("Photon response could not be read.")
             throw error
         }
     }

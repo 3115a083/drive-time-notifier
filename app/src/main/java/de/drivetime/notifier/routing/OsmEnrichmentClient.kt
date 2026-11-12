@@ -265,7 +265,7 @@ class OsmEnrichmentClient(
                     if (!response.isSuccessful) {
                         rateLimited = response.code in listOf(429, 406)
                         response.header("Retry-After")?.toLongOrNull()?.let { cooldownMillis = maxOf(RATE_LIMIT_COOLDOWN_MILLIS, it.coerceIn(0, 900) * 1_000L) }
-                        val detail = response.body?.readStringLimited(65_536L).orEmpty().replace(Regex("\\s+"), " ").take(1_200)
+                        val detail = (if(EndpointSecurity.configured(endpoint)) "" else response.body?.readStringLimited(65_536L).orEmpty()).replace(Regex("\\s+"), " ").take(1_200)
                         error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
                     }
                     val body = response.body ?: error("Overpass returned no body")
@@ -296,7 +296,7 @@ class OsmEnrichmentClient(
                 "${kind.label} via $endpoint",
                 duration,
                 "failed",
-                attempt.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
+                attempt.exceptionOrNull()?.let { if(EndpointSecurity.configured(endpoint)) it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
             )
             if (rateLimited) {
                 rateLimitCooldownUntil[endpoint] = System.currentTimeMillis() + cooldownMillis

@@ -74,4 +74,23 @@ class ServiceHealthUiTest {
             assertNull(captured)
         } finally {EndpointSecurity.save(endpoint,null)}
     }
+
+    @Test fun authenticatedEndpointErrorBodiesCannotLeakEscapedCredentialsIntoDiagnostics() = kotlinx.coroutines.runBlocking {
+        val endpoint="https://example.test/overpass"
+        EndpointSecurity.save(endpoint,EndpointHeader("X-Test-Key","sensitive/test-key"))
+        de.drivetime.notifier.debug.RequestDebugLog.clear()
+        try {
+            val client=okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+                okhttp3.Response.Builder().request(chain.request()).protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(500).message("Failure").body(okhttp3.ResponseBody.create(null,"sensitive"+"\\/test-key")).build()
+            }.build()
+            val result=de.drivetime.notifier.routing.OsmEnrichmentClient(endpoint,listOf(endpoint),client=client)
+                .query(listOf(org.osmdroid.util.GeoPoint(52.52,13.40)),parking=de.drivetime.notifier.routing.ParkingSearchOptions())
+            assertTrue(result.unavailable)
+            assertFalse(de.drivetime.notifier.debug.RequestDebugLog.format().contains("sensitive"))
+        } finally {
+            EndpointSecurity.save(endpoint,null)
+            de.drivetime.notifier.debug.RequestDebugLog.clear()
+        }
+    }
 }
