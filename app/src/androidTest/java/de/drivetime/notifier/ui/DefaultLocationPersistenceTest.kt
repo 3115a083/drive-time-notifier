@@ -47,7 +47,10 @@ class DefaultLocationPersistenceTest {
             compose.onNode(hasClickAction() and hasText("Standard-Standort speichern"))
                 .performScrollTo().assertIsDisplayed().assertIsEnabled()
                 .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {click -> assertTrue(click())}
-            kotlinx.coroutines.withTimeout(5_000) {store.flow.first {it.homeAddress=="Replacement Home"}}
+            compose.waitForIdle()
+            compose.waitUntil(timeoutMillis=5_000) {
+                runBlocking {store.flow.first().homeAddress=="Replacement Home"}
+            }
             assertEquals("Replacement Home",store.flow.first().homeAddress)
         } catch(error:Throwable) {
             val device=androidx.test.uiautomator.UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
