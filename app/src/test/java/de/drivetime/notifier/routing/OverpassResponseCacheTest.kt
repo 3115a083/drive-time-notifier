@@ -56,6 +56,6 @@ class OverpassResponseCacheTest {
         policy.failed("a",retryAfterSeconds=90,rateLimited=true);time+=60_000;assertFalse(policy.available("a"))
         time+=30_000;assertTrue(policy.available("a"));policy.success("a")
         val budget=OverpassRequestBudget {time};assertEquals(45_000L,budget.claim()!!);time+=45_000
-        assertEquals(15_000L,budget.claim()!!);assertNull(budget.claim()!!);time+=15_000;assertEquals(0L,budget.remaining())
+        assertEquals(15_000L,budget.claim()!!);assertNull(budget.claim());time+=15_000;assertEquals(0L,budget.remaining())
     }
 }
