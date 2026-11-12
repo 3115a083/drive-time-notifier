@@ -4,12 +4,17 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
+/** The Android application supplies elapsedRealtime; JVM tests keep an SDK-free monotonic clock. */
+internal object OverpassClock {
+    @Volatile var elapsedMillis:()->Long={System.nanoTime()/1_000_000}
+}
+
 /** Raw successful responses only. Every cache mutation, LRU touch and byte count shares one lock. */
 internal class OverpassResponseCache(
     private val maxEntries: Int = 16,
     private val maxBytes: Int = 8 * 1024 * 1024,
     private val ttlMillis: Long = 300_000,
-    private val now: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val now: () -> Long = { OverpassClock.elapsedMillis() },
     private val timeoutMillis: Long = 60_000,
     private val maxFlights: Int = 8
 ) {
@@ -86,7 +91,7 @@ internal class OverpassResponseCache(
     }
 }
 
-internal class OverpassEndpointPolicy(private val now:()->Long={System.nanoTime()/1_000_000}) {
+internal class OverpassEndpointPolicy(private val now:()->Long={OverpassClock.elapsedMillis()}) {
     private data class Failure(val until:Long,val count:Int)
     private val failures=LinkedHashMap<String,Failure>(16,.75f,true)
     @Synchronized fun available(endpoint:String):Boolean=(failures[endpoint]?.until?:0)<=now()
@@ -100,7 +105,7 @@ internal class OverpassEndpointPolicy(private val now:()->Long={System.nanoTime(
 }
 
 
-internal class OverpassRequestBudget(private val now:()->Long={System.nanoTime()/1_000_000}) {
+internal class OverpassRequestBudget(private val now:()->Long={OverpassClock.elapsedMillis()}) {
     private val deadline=now()+60_000
     private var attempts=0
     fun remaining():Long=(deadline-now()).coerceAtLeast(0)
