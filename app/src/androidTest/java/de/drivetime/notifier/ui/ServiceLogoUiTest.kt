@@ -41,9 +41,11 @@ class ServiceLogoUiTest {
         for(theme in listOf("light","dark")) {
             compose.runOnIdle { dark=theme=="dark" }
             compose.waitForIdle()
-            val pixels=compose.onNodeWithTag("logo-valhalla").captureToImage().toPixelMap()
-            assertEquals(background,pixels[0,0])
-            assertEquals(background,pixels[pixels.width-1,0])
+            for(id in listOf("valhalla","here","osrm")) {
+                val pixels=compose.onNodeWithTag("logo-$id").captureToImage().toPixelMap()
+                assertEquals("$id top-left",background,pixels[0,0])
+                assertEquals("$id top-right",background,pixels[pixels.width-1,0])
+            }
             val file=java.io.File(context.getExternalFilesDir(null),"service-logos-$theme.png")
             file.outputStream().use { compose.onNodeWithTag("logo-gallery").captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
             device.executeShellCommand("cp ${file.absolutePath} /data/local/tmp/${file.name}")

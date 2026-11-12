@@ -346,13 +346,17 @@ internal fun ServiceImage(id:String) {
         "tomtom" -> de.drivetime.notifier.R.drawable.service_tomtom
         "valhalla" -> de.drivetime.notifier.R.drawable.service_valhalla
         "openrouteservice" -> de.drivetime.notifier.R.drawable.service_openrouteservice
-        "osrm" -> de.drivetime.notifier.R.drawable.service_osrm
+        "osrm" -> de.drivetime.notifier.R.drawable.service_osrm_vector
         "graphhopper" -> de.drivetime.notifier.R.drawable.service_graphhopper
         "google" -> de.drivetime.notifier.R.drawable.service_google
-        "here" -> de.drivetime.notifier.R.drawable.service_here
+        "here" -> de.drivetime.notifier.R.drawable.service_here_vector
         "photon" -> de.drivetime.notifier.R.drawable.service_photon
         else -> de.drivetime.notifier.R.drawable.service_overpass
     }
+    val monochrome = id=="here"
     androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(drawable),null,
-        Modifier.size(28.dp).then(if(id=="valhalla") Modifier.graphicsLayer { shape=androidx.compose.foundation.shape.CircleShape;clip=true } else Modifier))
+        colorFilter=if(monochrome) androidx.compose.ui.graphics.ColorFilter.tint(MaterialTheme.colorScheme.onSurface) else null,
+        alignment=if(id=="openrouteservice") Alignment.CenterStart else Alignment.Center,
+        contentScale=if(id=="openrouteservice") androidx.compose.ui.layout.ContentScale.Crop else androidx.compose.ui.layout.ContentScale.Fit,
+        modifier=Modifier.size(28.dp).then(if(id=="valhalla") Modifier.graphicsLayer { shape=androidx.compose.foundation.shape.CircleShape;clip=true } else Modifier))
 }
