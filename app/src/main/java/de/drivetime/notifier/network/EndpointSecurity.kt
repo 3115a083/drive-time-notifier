@@ -32,11 +32,11 @@ object EndpointHeaderPolicy {
 }
 
 object EndpointSecurity {
-    private var app: Context? = null
+    private var app: android.app.Application? = null
     private val secrets=java.util.Collections.synchronizedSet(mutableSetOf<String>())
     fun redact(value:String):String = synchronized(secrets) { secrets.sortedByDescending { it.length }.fold(value) { text,secret -> text.replace(secret,"[redacted]") } }
     private fun rememberSecret(value:String) { secrets.add(value); value.substringAfter(' ',"").takeIf { it.length>=4 }?.let {secrets.add(it)} }
-    fun initialize(context: Context) { app = context.applicationContext }
+    fun initialize(context: Context) { app = context.applicationContext as android.app.Application }
     private val prefs get() = requireNotNull(app).getSharedPreferences("endpoint_headers", Context.MODE_PRIVATE)
     private fun storageKey(endpoint:String)=digest(HttpsEndpoint.normalize(endpoint) ?: endpoint)
     fun configured(endpoint:String)=app!=null && prefs.contains(storageKey(endpoint))
@@ -93,10 +93,10 @@ fun digest(value: String): String = MessageDigest.getInstance("SHA-256").digest(
 /** Persistent health never contains URLs, credentials, response bodies or calendar contents. */
 data class ServiceObservation(val valid: Boolean, val durationMillis: Long, val checkedAt: Long)
 object ServiceMonitor {
-    private var app: Context? = null
+    private var app: android.app.Application? = null
     private val revision = MutableStateFlow(0L)
     val changes = revision.asStateFlow()
-    fun initialize(context: Context) { app = context.applicationContext }
+    fun initialize(context: Context) { app = context.applicationContext as android.app.Application }
     @Synchronized fun changed() { revision.value++ }
     private val prefs get() = app?.getSharedPreferences("service_observations", Context.MODE_PRIVATE)
     fun endpointId(kind: String, endpoint: String) = kind.lowercase() + ":" + digest(endpoint)
