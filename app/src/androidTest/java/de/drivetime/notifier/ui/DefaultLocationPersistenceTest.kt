@@ -44,7 +44,9 @@ class DefaultLocationPersistenceTest {
                     .hideSoftInputFromWindow(activity.window.decorView.windowToken,0)
             }
             compose.waitForIdle()
-            compose.onNodeWithText("Standard-Standort speichern").performScrollTo().performClick()
+            compose.onNode(hasClickAction() and hasText("Standard-Standort speichern"))
+                .performScrollTo().assertIsDisplayed().assertIsEnabled()
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {click -> assertTrue(click())}
             kotlinx.coroutines.withTimeout(5_000) {store.flow.first {it.homeAddress=="Replacement Home"}}
             assertEquals("Replacement Home",store.flow.first().homeAddress)
         } catch(error:Throwable) {
