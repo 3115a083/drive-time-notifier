@@ -1706,12 +1706,6 @@ class MainActivity : ComponentActivity() {
                 onChange(latestSettings.copy(homeName = homeNameDraft))
             }
         }
-        LaunchedEffect(homeDraft) {
-            delay(500)
-            if (homeDraftState.edited && homeDraft != latestSettings.homeAddress) {
-                onChange(latestSettings.copy(homeAddress = homeDraft))
-            }
-        }
         LaunchedEffect(calendarTitleDraft) {
             delay(500)
             if (calendarTitleDraftState.edited && calendarTitleDraft != latestSettings.calendarEventTitle) {
@@ -1819,6 +1813,14 @@ class MainActivity : ComponentActivity() {
                     label = tr(settings.language, "Default start location", "Standard-Startort"),
                     leadingIcon = { Icon(Icons.Outlined.Home, null) }
                 )
+                TextButton(enabled = homeDraft.isNotBlank() && homeDraft != settings.homeAddress,
+                    onClick = { onChange(latestSettings.copy(homeAddress = homeDraft.trim())) }) {
+                    Text(tr(settings.language, "Save default location", "Standard-Standort speichern"))
+                }
+                Text(tr(settings.language, "Only Save changes your default. Clearing the editor does not delete the saved location.",
+                    "Erst Speichern ändert den Standard. Leeren des Eingabefelds löscht den gespeicherten Standort nicht."),
+                    style = MaterialTheme.typography.bodySmall)
+
 
                 Spacer(Modifier.height(6.dp))
                 Text(tr(settings.language, "Saved start locations", "Weitere Startpunkte"), style = MaterialTheme.typography.labelLarge)

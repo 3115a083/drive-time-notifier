@@ -2,6 +2,7 @@ package de.drivetime.notifier.routing
 
 import de.drivetime.notifier.data.ChargingConnectorPreference
 import de.drivetime.notifier.debug.RequestDebugLog
+import de.drivetime.notifier.network.*
 import de.drivetime.notifier.network.readBytesLimited
 import de.drivetime.notifier.network.awaitResponse
 import de.drivetime.notifier.network.readStringLimited
@@ -227,7 +228,7 @@ class OsmEnrichmentClient(
     }
 
     private suspend fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
-        val cacheKey = endpoints.joinToString("|") + query
+        val cacheKey = endpoints.joinToString("|") { EndpointSecurity.fingerprint(it) } + query
         val cached = responseCache[cacheKey]
         if (cached != null && System.currentTimeMillis() - cached.first < 300_000L) {
             RequestDebugLog.add("Overpass", kind.label, 0, "cache", "Using a recent bounded response.")
@@ -254,6 +255,8 @@ class OsmEnrichmentClient(
         }
         for (endpoint in orderedEndpoints) {
             val started = System.nanoTime()
+            val at=System.currentTimeMillis()
+            val fingerprint=EndpointSecurity.fingerprint(endpoint)
             var rateLimited = false
             var cooldownMillis = RATE_LIMIT_COOLDOWN_MILLIS
             val attempt = runCatching {
@@ -279,6 +282,7 @@ class OsmEnrichmentClient(
             attempt.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
             val duration = (System.nanoTime() - started) / 1_000_000L
             val value = attempt.getOrNull()
+            ServiceMonitor.record(ServiceMonitor.endpointId("Overpass",endpoint),fingerprint,value!=null,duration,at)
             if (value != null) {
                 val (elements, detail) = value
                 RequestDebugLog.add("Overpass", "${kind.label} via $endpoint", duration, "success", detail)

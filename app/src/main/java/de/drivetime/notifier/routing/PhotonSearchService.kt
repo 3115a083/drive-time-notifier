@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.network.*
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.network.readStringLimited
 import de.drivetime.notifier.network.awaitResponse
@@ -16,7 +17,7 @@ class PhotonSearchService(
     private val baseUrl: String,
     private val userAgent: String,
     private val fallbackEndpoints: List<String> = emptyList(),
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = OkHttpClient.Builder().endpointSecurity()
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -77,16 +78,20 @@ class PhotonSearchService(
             .addQueryParameter("lang", language)
         if (!countryCode.isNullOrBlank()) builder.addQueryParameter("countrycode", countryCode)
 
-        val request = Request.Builder()
+        val request = Request.Builder().endpointScope(endpoint)
             .url(builder.build())
             .header("User-Agent", userAgent)
             .get()
             .build()
 
-        client.newCall(request).awaitResponse().use { response ->
+        val started = System.nanoTime()
+        val at = System.currentTimeMillis()
+        val fingerprint = EndpointSecurity.fingerprint(endpoint)
+        try {
+        val suggestions = client.newCall(request).awaitResponse().use { response ->
             check(response.isSuccessful) { "Photon HTTP ${response.code}" }
-            val features = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("features") ?: return emptyList()
-            return buildList {
+            val features = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("features") ?: org.json.JSONArray()
+            buildList {
                 for (i in 0 until features.length()) {
                     val feature = features.getJSONObject(i)
                     val coords = feature.optJSONObject("geometry")?.optJSONArray("coordinates") ?: continue
@@ -105,6 +110,13 @@ class PhotonSearchService(
                     }
                 }
             }
+        }
+        ServiceMonitor.record(ServiceMonitor.endpointId("Photon", endpoint), fingerprint, true, (System.nanoTime()-started)/1_000_000, at)
+        return suggestions
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            ServiceMonitor.record(ServiceMonitor.endpointId("Photon", endpoint), fingerprint, false, (System.nanoTime()-started)/1_000_000, at)
+            throw error
         }
     }
 }

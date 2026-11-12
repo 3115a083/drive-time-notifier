@@ -11,8 +11,8 @@ android {
         applicationId = "de.drivetime.notifier"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.4.0"
+        versionCode = 16
+        versionName = "1.4.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         manifestPlaceholders["appLabel"] = "Drive Time Notifier"

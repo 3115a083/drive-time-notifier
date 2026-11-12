@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.1, development
+
+- Display service order outside cards, bundled service images, persistent health and last response time.
+- Add optional encrypted, endpoint-scoped header authentication for Photon, Overpass, OSRM and Valhalla.
+- Keep default-location drafts separate from the saved location until explicit Save.
+- Pin release Actions to immutable commits and avoid persisted checkout credentials.
+
+
 ## 1.4.0, development
 
 - Ordered routing service list with drag handles, per-provider credentials, endpoint tests and limits.
