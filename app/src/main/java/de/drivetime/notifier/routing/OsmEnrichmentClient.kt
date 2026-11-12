@@ -46,7 +46,9 @@ data class RoutePoi(
 data class OsmEnrichmentResult(
     val pois: List<RoutePoi>,
     val unavailable: Boolean,
-    val registryUnavailable: Boolean = false
+    val registryUnavailable: Boolean = false,
+    val chargingUnavailable: Boolean? = null,
+    val parkingUnavailable: Boolean? = null
 )
 
 data class ParkingSearchOptions(
@@ -62,7 +64,8 @@ private data class OverpassBatch(
 
 internal enum class OsmQueryKind(val label: String) {
     CHARGING("charging stations"),
-    PARKING("parking")
+    PARKING("parking"),
+    COMBINED("parking and charging stations")
 }
 
 internal data class PrioritizedOsmQuery(val kind: OsmQueryKind, val query: String)
@@ -78,7 +81,7 @@ class OsmEnrichmentClient(
     } else {
         normalizeConfiguredEndpoints(configuredEndpoints)
     }
-    private var lastSuccessfulEndpoint: String? = null
+
 
 
     suspend fun query(
@@ -95,8 +98,9 @@ class OsmEnrichmentClient(
             async { runCatching { BNetzAChargingClient().query(destination, options.maxDistanceMeters) } }
         }
         val batches = mutableListOf<Pair<OsmQueryKind, OverpassBatch>>()
-        prioritizedQueries(points, parking, charging).forEach { request ->
-            batches += request.kind to fetchElements(request.query, request.kind)
+        val requestBudget=OverpassRequestBudget()
+        plannedQueries(points, parking, charging).forEach { request ->
+            batches += request.kind to fetchElements(request.query, request.kind, requestBudget)
         }
         val registryResult = registryDeferred?.await()
         val osmResults = buildList {
@@ -177,7 +181,9 @@ class OsmEnrichmentClient(
         OsmEnrichmentResult(
             pois = chargingOut + parkingOut,
             unavailable = batches.any { !it.second.available },
-            registryUnavailable = registryResult?.isFailure == true
+            registryUnavailable = registryResult?.isFailure == true,
+            chargingUnavailable = batches.filter {it.first!=OsmQueryKind.PARKING}.any {!it.second.available},
+            parkingUnavailable = batches.filter {it.first!=OsmQueryKind.CHARGING}.any {!it.second.available}
         )
     }
 
@@ -194,6 +200,13 @@ class OsmEnrichmentClient(
             val limit = (it.resultLimit.coerceIn(1, 50) * if (it.freeOnly) 8 else 4).coerceIn(30, 200)
             add(PrioritizedOsmQuery(OsmQueryKind.PARKING, wrapQuery(parkingQuery(points.last(), it.maxDistanceMeters), limit)))
         }
+    }
+
+    internal fun plannedQueries(points:List<GeoPoint>,parking:ParkingSearchOptions?,charging:ChargingSearchOptions?):List<PrioritizedOsmQuery> {
+        val queries=prioritizedQueries(points,parking,charging)
+        if(splitRequests || queries.size<2)return queries
+        val prefix="[out:json][timeout:20][maxsize:33554432];"
+        return listOf(PrioritizedOsmQuery(OsmQueryKind.COMBINED, prefix+queries.joinToString("") {it.query.removePrefix(prefix)}))
     }
 
     private fun wrapQuery(body: String, limit: Int) =
@@ -227,89 +240,67 @@ class OsmEnrichmentClient(
         )
     }
 
-    private suspend fun fetchElements(query: String, kind: OsmQueryKind): OverpassBatch {
-        val cacheKey = endpoints.joinToString("|") { EndpointSecurity.fingerprint(it) } + query
-        val cached = responseCache[cacheKey]
-        if (cached != null && System.currentTimeMillis() - cached.first < 300_000L) {
-            RequestDebugLog.add("Overpass", kind.label, 0, "cache", "Using a recent bounded response.")
-            return OverpassBatch(cached.second, available = true)
+    private suspend fun fetchElements(query:String,kind:OsmQueryKind,requestBudget:OverpassRequestBudget):OverpassBatch {
+        val cacheKey=endpoints.joinToString("|") {EndpointSecurity.fingerprint(it)}+"|split=$splitRequests|$kind|"+query
+        val cached=responseCache.get(cacheKey)
+        if(cached!=null) {
+            RequestDebugLog.add("Overpass",kind.label,0,"cache","Using a recent bounded response.")
+            return batch(cached)
         }
-        val preferred = lastSuccessfulEndpoint
-        val splitOrder = requestEndpointOrder(endpoints, kind, splitRequests)
-        val preferredOrder = if (splitRequests || preferred == null || preferred !in splitOrder) splitOrder else {
-            listOf(preferred) + endpoints.filterNot { it == preferred }
+        val remaining=requestBudget.remaining()
+        if(remaining==0L)return OverpassBatch(emptyList(),false)
+        val bytes=kotlinx.coroutines.withTimeoutOrNull(remaining) {
+            responseCache.getOrLoad(cacheKey) { fetchResponse(query,kind,requestBudget) }
         }
-        val now = System.currentTimeMillis()
-        val orderedEndpoints = preferredOrder.filterNot {
-            (rateLimitCooldownUntil[it] ?: 0L) > now
-        }
-        if (orderedEndpoints.isEmpty()) {
-            RequestDebugLog.add(
-                "Overpass",
-                kind.label,
-                0L,
-                "skipped",
-                "All configured endpoints are cooling down after a rate-limit response. Try again later."
-            )
-            return OverpassBatch(emptyList(), available = false)
-        }
-        for (endpoint in orderedEndpoints) {
-            val started = System.nanoTime()
-            val at=System.currentTimeMillis()
+        return if(bytes==null) OverpassBatch(emptyList(),false) else batch(bytes)
+    }
+
+    private fun batch(bytes:ByteArray):OverpassBatch {
+        val array=OverpassProtocol.parse(String(bytes,Charsets.UTF_8)).getJSONArray("elements")
+        return OverpassBatch(buildList {for(i in 0 until array.length())array.optJSONObject(i)?.let(::add)},true)
+    }
+
+    private suspend fun fetchResponse(query:String,kind:OsmQueryKind,requestBudget:OverpassRequestBudget):ByteArray? {
+        // Preserve the explicit list order. Never probe or fan out to the other servers.
+        val ordered=requestEndpointOrder(endpoints,kind,splitRequests)
+        for(endpoint in ordered) {
             val fingerprint=EndpointSecurity.fingerprint(endpoint)
-            var rateLimited = false
-            var cooldownMillis = RATE_LIMIT_COOLDOWN_MILLIS
-            val attempt = runCatching {
-                val request = OverpassProtocol.request(endpoint, query)
-                client.newCall(request).awaitResponse().use { response ->
-                    if (!response.isSuccessful) {
-                        rateLimited = response.code in listOf(429, 406)
-                        response.header("Retry-After")?.toLongOrNull()?.let { cooldownMillis = maxOf(RATE_LIMIT_COOLDOWN_MILLIS, it.coerceIn(0, 900) * 1_000L) }
-                        val detail = (if(EndpointSecurity.configured(endpoint)) "" else response.body?.readStringLimited(65_536L).orEmpty()).replace(Regex("\\s+"), " ").take(1_200)
-                        error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
+            if(!endpointPolicy.available(fingerprint))continue
+            val timeout=requestBudget.claim() ?: break
+            val started=System.nanoTime()
+            val at=System.currentTimeMillis()
+            var rateLimited=false
+            var retryAfter:Long?=null
+            val attempt=runCatching {
+                val request=OverpassProtocol.request(endpoint,query)
+                val boundedClient=client.newBuilder().callTimeout(timeout,TimeUnit.MILLISECONDS).build()
+                boundedClient.newCall(request).awaitResponse().use {response ->
+                    if(!response.isSuccessful) {
+                        rateLimited=response.code in listOf(429,406)
+                        retryAfter=response.header("Retry-After")?.toLongOrNull()
+                        // A server can reflect encoded credentials. Keep all response bodies out of error logs.
+                        error("HTTP ${response.code}")
                     }
-                    val body = response.body ?: error("Overpass returned no body")
-                    check(body.contentLength() <= MAX_RESPONSE_BYTES) { "Overpass response too large" }
-                    val bytes = body.readBytesLimited(MAX_RESPONSE_BYTES)
-                    val array = OverpassProtocol.parse(String(bytes, Charsets.UTF_8)).optJSONArray("elements")
-                        ?: error("Overpass response contains no elements array")
-                    val elements = buildList {
-                        for (i in 0 until array.length()) array.optJSONObject(i)?.let(::add)
-                    }
-                    elements to "HTTP ${response.code}, ${bytes.size} bytes, ${elements.size} elements"
+                    val bytes=response.body.readBytesLimited(MAX_RESPONSE_BYTES)
+                    check(requestBudget.remaining()>0) { "Overpass budget elapsed" }
+                    OverpassProtocol.parse(String(bytes,Charsets.UTF_8))
+                    bytes
                 }
             }
-            attempt.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
-            val duration = (System.nanoTime() - started) / 1_000_000L
-            val value = attempt.getOrNull()
+            attempt.exceptionOrNull()?.let {if(it is kotlinx.coroutines.CancellationException)throw it}
+            val duration=(System.nanoTime()-started)/1_000_000
+            val value=attempt.getOrNull()
             ServiceMonitor.record(ServiceMonitor.endpointId("Overpass",endpoint),fingerprint,value!=null,duration,at)
-            if (value != null) {
-                val (elements, detail) = value
-                RequestDebugLog.add("Overpass", "${kind.label} via $endpoint", duration, "success", detail)
-                lastSuccessfulEndpoint = endpoint
-                if (responseCache.size >= 16) responseCache.entries.minByOrNull { it.value.first }?.let { responseCache.remove(it.key) }
-                responseCache[cacheKey] = System.currentTimeMillis() to elements
-                return OverpassBatch(elements, available = true)
+            if(value!=null) {
+                endpointPolicy.success(fingerprint)
+                RequestDebugLog.add("Overpass","${kind.label} via $endpoint",duration,"success","${value.size} bytes")
+                return value
             }
-            RequestDebugLog.add(
-                "Overpass",
-                "${kind.label} via $endpoint",
-                duration,
-                "failed",
-                attempt.exceptionOrNull()?.let { if(EndpointSecurity.configured(endpoint)) it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}" } ?: "unknown error"
-            )
-            if (rateLimited) {
-                rateLimitCooldownUntil[endpoint] = System.currentTimeMillis() + cooldownMillis
-                RequestDebugLog.add(
-                    "Overpass cooldown",
-                    endpoint,
-                    0L,
-                    "active",
-                    "Rate limit: endpoint paused for ${cooldownMillis / 1_000L} seconds"
-                )
-            }
+            endpointPolicy.failed(fingerprint,retryAfter,rateLimited)
+            RequestDebugLog.add("Overpass","${kind.label} via $endpoint",duration,"failed",
+                attempt.exceptionOrNull()?.let {if(EndpointSecurity.configured(endpoint))it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}"}.orEmpty())
         }
-        return OverpassBatch(emptyList(), available = false)
+        return null
     }
 
     private fun isCharging(tags: JSONObject): Boolean =
@@ -392,9 +383,8 @@ class OsmEnrichmentClient(
     companion object {
         private const val MAX_RESPONSE_BYTES = 4_000_000L
         private const val MAX_REMOTE_TEXT_LENGTH = 240
-        private const val RATE_LIMIT_COOLDOWN_MILLIS = 60_000L
-        private val responseCache = ConcurrentHashMap<String, Pair<Long, List<JSONObject>>>()
-        private val rateLimitCooldownUntil = ConcurrentHashMap<String, Long>()
+        private val responseCache = OverpassResponseCache()
+        private val endpointPolicy = OverpassEndpointPolicy()
         const val DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
         private val FALLBACK_OVERPASS_ENDPOINTS = listOf(
             "https://overpass.private.coffee/api/interpreter",

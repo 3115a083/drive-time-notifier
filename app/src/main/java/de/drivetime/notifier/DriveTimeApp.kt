@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 class DriveTimeApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        de.drivetime.notifier.routing.OverpassClock.elapsedMillis = { android.os.SystemClock.elapsedRealtime() }
         de.drivetime.notifier.network.EndpointSecurity.initialize(this)
         de.drivetime.notifier.network.ServiceMonitor.initialize(this)
         CoroutineScope(Dispatchers.IO).launch {
