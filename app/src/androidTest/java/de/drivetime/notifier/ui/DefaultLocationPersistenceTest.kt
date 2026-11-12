@@ -36,22 +36,21 @@ class DefaultLocationPersistenceTest {
             Thread.sleep(900) // Exceeds the former destructive 500 ms autosave.
             assertEquals("Regression Home",store.flow.first().homeAddress)
             defaultField.performTextInput("Replacement Home")
-            Thread.sleep(900)
-            assertEquals("Regression Home",store.flow.first().homeAddress)
-            // Hide the actual IME without a Back event that could leave Settings.
-            scenario.onActivity { activity ->
-                activity.getSystemService(InputMethodManager::class.java)
-                    .hideSoftInputFromWindow(activity.window.decorView.windowToken,0)
-            }
             compose.waitForIdle()
-            compose.onNode(hasClickAction() and hasText("Standard-Standort speichern"))
-                .performScrollTo().assertIsDisplayed().assertIsEnabled()
-                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) {click -> assertTrue(click())}
             compose.waitForIdle()
             compose.waitUntil(timeoutMillis=5_000) {
                 runBlocking {store.flow.first().homeAddress=="Replacement Home"}
             }
             assertEquals("Replacement Home",store.flow.first().homeAddress)
+            compose.onNodeWithText("Standard-Standort speichern").assertDoesNotExist()
+            compose.onNodeWithText("Gespeicherten Standard-Standort entfernen").assertDoesNotExist()
+            compose.onNode(hasSetTextAction() and hasText("Standard-Startort"))
+                .performTextClearance()
+            compose.waitForIdle()
+            assertEquals("Replacement Home",store.flow.first().homeAddress)
+            compose.onNodeWithContentDescription("Löschen").performScrollTo().performClick()
+            compose.waitUntil(timeoutMillis=5_000) { runBlocking {store.flow.first().homeAddress.isEmpty()} }
+            assertEquals("",store.flow.first().homeAddress)
         } catch(error:Throwable) {
             val device=androidx.test.uiautomator.UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
             val tree=java.io.File(context.getExternalFilesDir(null),"default-location-failure.xml")

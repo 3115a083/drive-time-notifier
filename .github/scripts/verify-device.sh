@@ -22,7 +22,7 @@ for path in Path("app/build/outputs/androidTest-results").rglob("*.xml"):
 PY
 fi
 mkdir -p overlay-screenshots
-for capture_name in default-location-failure.png default-location-failure.xml service-list.png overlay-light.png overlay-dark.png overlay-start-failure.png overlay-start-failure.xml history-detail.png history-start-failure.png history-start-failure.xml; do
+for capture_name in endpoint-headers.png service-logos-light.png service-logos-dark.png default-location-failure.png default-location-failure.xml service-list.png overlay-light.png overlay-dark.png overlay-start-failure.png overlay-start-failure.xml history-detail.png history-start-failure.png history-start-failure.xml; do
   if adb shell test -f "/data/local/tmp/$capture_name"; then
     adb pull "/data/local/tmp/$capture_name" overlay-screenshots/ || true
   fi

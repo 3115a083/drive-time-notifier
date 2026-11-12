@@ -18,6 +18,7 @@ class PhotonSearchService(
     private val userAgent: String,
     private val fallbackEndpoints: List<String> = emptyList(),
     private val client: OkHttpClient = OkHttpClient.Builder().endpointSecurity()
+        .eventListenerFactory(NetworkPhaseTrace.factory)
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -80,14 +81,15 @@ class PhotonSearchService(
             .addQueryParameter("lang", language)
         if (!countryCode.isNullOrBlank()) builder.addQueryParameter("countrycode", countryCode)
 
-        val request = Request.Builder().endpointScope(endpoint)
+        val trace = NetworkPhaseTrace()
+        val request = Request.Builder().endpointScope(endpoint).tag(NetworkPhaseTrace::class.java,trace)
             .url(builder.build())
             .header("User-Agent", userAgent)
             .get()
             .build()
 
         val diagnostics = de.drivetime.notifier.debug.NetworkStageDiagnostics(
-            "Photon", "address lookup", client.callTimeoutMillis, client.connectTimeoutMillis
+            "Photon", "address lookup", client.callTimeoutMillis, client.connectTimeoutMillis, trace
         )
         val started = System.nanoTime()
         val at = System.currentTimeMillis()

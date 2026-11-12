@@ -10,6 +10,7 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
+import org.json.JSONArray
 import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.Cipher
@@ -17,12 +18,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** One optional credential header per exact configured HTTPS base URL. Never exported or logged. */
+/** Credential headers for an exact configured HTTPS base URL. Never exported or logged. */
 data class EndpointHeader(val name: String, val value: String)
 object EndpointHeaderPolicy {
     fun valid(name: String, value: String): Boolean = name.matches(Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]{1,80}")) &&
         name.lowercase() !in setOf("host", "connection", "content-length", "content-type", "transfer-encoding", "cookie", "proxy-authorization", "user-agent", "accept-encoding") &&
         value.isNotBlank() && value.length in 1..4096 && value.all { it.code in 32..126 }
+    fun valid(headers: List<EndpointHeader>): Boolean = headers.all { valid(it.name, it.value) } &&
+        headers.map { it.name.lowercase(java.util.Locale.ROOT) }.distinct().size == headers.size
     fun applies(base: String, target: String): Boolean {
         val a = base.toHttpUrl(); val b = target.toHttpUrl()
         return a.isHttps && b.isHttps && a.host == b.host && a.port == b.port &&
@@ -33,39 +36,62 @@ object EndpointHeaderPolicy {
 
 object EndpointSecurity {
     private var app: android.app.Application? = null
-    private val secrets=java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val secrets=java.util.Collections.synchronizedSet(linkedSetOf<String>())
     fun redact(value:String):String = synchronized(secrets) { secrets.sortedByDescending { it.length }.fold(value) { text,secret -> text.replace(secret,"[redacted]") } }
-    private fun rememberSecret(value:String) { secrets.add(value); value.substringAfter(' ',"").takeIf { it.length>=4 }?.let {secrets.add(it)} }
+    private fun rememberSecret(value:String) = synchronized(secrets) {
+        // Header values never enter logs. Do not let short autosave prefixes erase technical labels.
+        listOf(value,value.substringAfter(' ',"")).filter { it.length>=4 }.forEach {
+            secrets.remove(it);secrets.add(it)
+        }
+        while(secrets.size>128) secrets.remove(secrets.first())
+    }
     fun initialize(context: Context) { app = context.applicationContext as android.app.Application }
     private val prefs get() = requireNotNull(app).getSharedPreferences("endpoint_headers", Context.MODE_PRIVATE)
     private fun storageKey(endpoint:String)=digest(HttpsEndpoint.normalize(endpoint) ?: endpoint)
     fun configured(endpoint:String)=app!=null && prefs.contains(storageKey(endpoint))
-    fun fingerprint(endpoint: String): String = digest(endpoint + "|" + header(endpoint)?.let { it.name + ":" + it.value }.orEmpty() + "|" +
+    fun fingerprint(endpoint: String): String = digest(endpoint + "|" + headers(endpoint).orEmpty().joinToString("|") { it.name + ":" + it.value } + "|" +
         (if(app==null)0 else prefs.getLong(storageKey(endpoint)+":revision",0)))
-    fun header(endpoint: String): EndpointHeader? {
+    // Compatibility reader for callers written before multiple headers were supported.
+    fun header(endpoint: String): EndpointHeader? = headers(endpoint)?.firstOrNull()
+    fun headers(endpoint: String): List<EndpointHeader>? {
         if (app == null) return null
         val raw = prefs.getString(storageKey(endpoint), null) ?: return null
         return runCatching {
-            val parts = raw.split(':', limit = 2)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
-            val json = JSONObject(String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8))
-            EndpointHeader(json.getString("name"), json.getString("value")).also { rememberSecret(it.value) }
+            val json = JSONObject(decryptDraft(raw))
+            val array = json.optJSONArray("headers")
+            val result = if (array == null) listOf(EndpointHeader(json.getString("name"), json.getString("value")))
+                else (0 until array.length()).map { index ->
+                    val item = array.getJSONObject(index)
+                    EndpointHeader(item.getString("name"), item.getString("value"))
+                }
+            require(result.isNotEmpty() && EndpointHeaderPolicy.valid(result))
+            result.onEach { rememberSecret(it.value) }
         }.getOrNull()
     }
-    fun save(endpoint: String, header: EndpointHeader?) {
+    fun save(endpoint: String, header: EndpointHeader?) = saveHeaders(endpoint, listOfNotNull(header))
+    @Synchronized fun saveHeaders(endpoint: String, headers: List<EndpointHeader>) {
         require(HttpsEndpoint.normalize(endpoint) != null)
-        if (header == null) prefs.edit().remove(storageKey(endpoint)).apply()
+        require(EndpointHeaderPolicy.valid(headers))
+        if (headers.isEmpty()) prefs.edit().remove(storageKey(endpoint)).apply()
         else {
-            require(EndpointHeaderPolicy.valid(header.name, header.value))
-            rememberSecret(header.value)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key())
-            val plain = JSONObject().put("name", header.name).put("value", header.value).toString().toByteArray()
-            val raw = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(plain), Base64.NO_WRAP)
-            prefs.edit().putString(storageKey(endpoint), raw).apply()
+            headers.forEach { rememberSecret(it.value) }
+            val array = JSONArray().apply { headers.forEach { put(JSONObject().put("name", it.name).put("value", it.value)) } }
+            prefs.edit().putString(storageKey(endpoint), encryptDraft(JSONObject().put("headers", array).toString())).apply()
         }
         prefs.edit().putLong(storageKey(endpoint)+":revision", prefs.getLong(storageKey(endpoint)+":revision",0)+1).apply()
         ServiceMonitor.changed()
+    }
+    // Also used for Compose saved-state drafts so credentials never enter a plain Bundle.
+    internal fun encryptDraft(plain: String): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key())
+        return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
+            Base64.encodeToString(cipher.doFinal(plain.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+    }
+    internal fun decryptDraft(raw: String): String {
+        val parts = raw.split(':', limit=2)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
+        return String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)
     }
     private fun key(): SecretKey {
         val alias = "endpoint_header_auth_v1"
@@ -81,9 +107,11 @@ object EndpointSecurity {
         val request = chain.request()
         val endpoint = request.tag(Scope::class.java)?.endpoint
         if(endpoint!=null && !EndpointHeaderPolicy.applies(endpoint,request.url.toString())) throw java.io.IOException("Endpoint scope mismatch.")
-        val header = endpoint?.let(::header)
-        if(endpoint!=null && configured(endpoint) && header==null) throw java.io.IOException("Endpoint credentials unavailable. Save authentication again.")
-        chain.proceed(if (header == null) request else request.newBuilder().header(header.name, header.value).build())
+        val headers = endpoint?.let(::headers)
+        if(endpoint!=null && configured(endpoint) && headers==null) throw java.io.IOException("Endpoint credentials unavailable. Save authentication again.")
+        val builder = request.newBuilder()
+        headers.orEmpty().forEach { builder.header(it.name, it.value) }
+        chain.proceed(builder.build())
     }
 }
 fun OkHttpClient.Builder.endpointSecurity(): OkHttpClient.Builder = followRedirects(false).followSslRedirects(false).addInterceptor(EndpointSecurity.interceptor)

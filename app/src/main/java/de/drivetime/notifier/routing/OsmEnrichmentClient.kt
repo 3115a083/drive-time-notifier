@@ -271,8 +271,9 @@ class OsmEnrichmentClient(
             val at=System.currentTimeMillis()
             var rateLimited=false
             var retryAfter:Long?=null
+            val trace=NetworkPhaseTrace()
             val attempt=runCatching {
-                val request=OverpassProtocol.request(endpoint,query)
+                val request=OverpassProtocol.request(endpoint,query).newBuilder().tag(NetworkPhaseTrace::class.java,trace).build()
                 val boundedClient=client.newBuilder().callTimeout(timeout,TimeUnit.MILLISECONDS).build()
                 boundedClient.newCall(request).awaitResponse().use {response ->
                     if(!response.isSuccessful) {
@@ -298,7 +299,10 @@ class OsmEnrichmentClient(
             }
             endpointPolicy.failed(fingerprint,retryAfter,rateLimited)
             RequestDebugLog.add("Overpass","${kind.label} via $endpoint",duration,"failed",
-                attempt.exceptionOrNull()?.let {if(EndpointSecurity.configured(endpoint))it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}"}.orEmpty())
+                attempt.exceptionOrNull()?.let {
+                    val http=Regex("\\bHTTP [1-5][0-9]{2}\\b").find(it.message.orEmpty())?.value.orEmpty()
+                    "${it.javaClass.simpleName}; phase=${trace.phase}; $http"
+                }.orEmpty())
         }
         return null
     }

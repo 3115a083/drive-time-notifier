@@ -1620,7 +1620,6 @@ class MainActivity : ComponentActivity() {
         var automationToken by remember { mutableStateOf(AutomationTokenStore(context).token()) }
         val homeNameDraftState = rememberTextDraft(settings.homeName)
         var homeNameDraft by homeNameDraftState
-        var confirmClearDefault by remember { mutableStateOf(false) }
         val homeDraftState = rememberTextDraft(settings.homeAddress)
         var homeDraft by homeDraftState
         val calendarTitleDraftState = rememberTextDraft(settings.calendarEventTitle)
@@ -1823,27 +1822,19 @@ class MainActivity : ComponentActivity() {
                 AddressAutocompleteField(
                     settings = settings,
                     value = homeDraft,
-                    onValueChange = { homeDraft = it },
+                    onValueChange = {
+                        homeDraft = it
+                        // Empty keyboard drafts must never erase a saved default.
+                        if (it.isNotBlank()) onChange(latestSettings.copy(homeAddress = it.trim()))
+                    },
                     label = tr(settings.language, "Default start location", "Standard-Startort"),
-                    leadingIcon = { Icon(Icons.Outlined.Home, null) }
+                    leadingIcon = { Icon(Icons.Outlined.Home, null) },
+                    clearAvailable = homeDraft.isNotEmpty() || settings.homeAddress.isNotBlank(),
+                    onClear = {
+                        homeDraftState.reset("")
+                        onChange(latestSettings.copy(homeAddress = ""))
+                    }
                 )
-                TextButton(enabled = homeDraft.isNotBlank() && homeDraft != settings.homeAddress,
-                    onClick = { onChange(latestSettings.copy(homeAddress = homeDraft.trim())) }) {
-                    Text(tr(settings.language, "Save default location", "Standard-Standort speichern"))
-                }
-                if(settings.homeAddress.isNotBlank()) TextButton(onClick={confirmClearDefault=true}) {
-                    Text(tr(settings.language,"Remove saved default location","Gespeicherten Standard-Standort entfernen"))
-                }
-                if(confirmClearDefault) AlertDialog(onDismissRequest={confirmClearDefault=false},
-                    title={Text(tr(settings.language,"Remove default location?","Standard-Standort entfernen?"))},
-                    text={Text(tr(settings.language,"Automatic planning will need another start location.","Automatische Planung benötigt dann einen anderen Startort."))},
-                    confirmButton={TextButton(onClick={
-                        homeDraftState.reset("");onChange(latestSettings.copy(homeAddress=""));confirmClearDefault=false
-                    }) {Text(tr(settings.language,"Remove","Entfernen"))}},
-                    dismissButton={TextButton(onClick={confirmClearDefault=false}) {Text(tr(settings.language,"Cancel","Abbrechen"))}})
-                Text(tr(settings.language, "Only Save changes your default. Clearing the editor does not delete the saved location.",
-                    "Erst Speichern ändert den Standard. Leeren des Eingabefelds löscht den gespeicherten Standort nicht."),
-                    style = MaterialTheme.typography.bodySmall)
 
 
                 Spacer(Modifier.height(6.dp))

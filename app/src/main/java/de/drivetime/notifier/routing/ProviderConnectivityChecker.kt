@@ -121,9 +121,10 @@ class ProviderConnectivityChecker(
         val endpointFingerprint=EndpointSecurity.fingerprint(settings.overpassBaseUrl)
         val at=System.currentTimeMillis()
         val started = System.nanoTime()
+        val trace = NetworkPhaseTrace()
         val result = runCatching {
             val query = "[out:json][timeout:20];node(1);out ids;"
-            val request = OverpassProtocol.request(settings.overpassBaseUrl, query)
+            val request = OverpassProtocol.request(settings.overpassBaseUrl, query).newBuilder().tag(NetworkPhaseTrace::class.java,trace).build()
             OverpassProtocol.client.newCall(request).awaitResponse().use { response ->
                 val responseBody = response.body
                 require(responseBody == null || responseBody.contentLength() <= 65_536L) {
@@ -133,7 +134,7 @@ class ProviderConnectivityChecker(
                 val body = String(bytes, Charsets.UTF_8)
                 val duration = (System.nanoTime() - started) / 1_000_000L
                 if (!response.isSuccessful) {
-                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", if(EndpointSecurity.configured(settings.overpassBaseUrl)) "Authenticated endpoint response omitted." else body.take(1_200))
+                    RequestDebugLog.add("Overpass test", settings.overpassBaseUrl, duration, "HTTP ${response.code}", "Response body omitted.")
                     error("Overpass: HTTP ${response.code}")
                 }
                 OverpassProtocol.parse(body)
@@ -147,7 +148,7 @@ class ProviderConnectivityChecker(
                     settings.overpassBaseUrl,
                     (System.nanoTime() - started) / 1_000_000L,
                     "failed",
-                    if(EndpointSecurity.configured(settings.overpassBaseUrl)) it.javaClass.simpleName else "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
+                    "phase=${trace.phase}; ${it.javaClass.simpleName}"
                 )
                 InterfaceCheckResult(InterfaceCheckState.INVALID, "Overpass check failed: ${it.javaClass.simpleName}")
             }
