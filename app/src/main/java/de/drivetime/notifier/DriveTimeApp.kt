@@ -12,6 +12,13 @@ import kotlinx.coroutines.launch
 class DriveTimeApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        val mapDirectory = java.io.File(cacheDir, "osmdroid")
+        org.osmdroid.config.Configuration.getInstance().apply {
+            osmdroidBasePath = mapDirectory
+            osmdroidTileCache = java.io.File(mapDirectory, "tiles").also { it.mkdirs() }
+            userAgentValue = "DriveTimeNotifier/" + BuildConfig.VERSION_NAME +
+                " (+https://github.com/3115a083/drive-time-notifier)"
+        }
         de.drivetime.notifier.routing.OverpassClock.elapsedMillis = { android.os.SystemClock.elapsedRealtime() }
         de.drivetime.notifier.network.EndpointSecurity.initialize(this)
         de.drivetime.notifier.network.ServiceMonitor.initialize(this)

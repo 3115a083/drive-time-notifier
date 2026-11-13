@@ -72,7 +72,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import org.osmdroid.config.Configuration
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
@@ -118,7 +117,6 @@ class MainActivity : ComponentActivity() {
             return
         }
         enableEdgeToEdge()
-        Configuration.getInstance().userAgentValue = packageName
 
         val settingsStore = SettingsStore(this)
         setContent {
@@ -1415,11 +1413,10 @@ class MainActivity : ComponentActivity() {
         Surface(shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
             androidx.compose.ui.viewinterop.AndroidView(
                 modifier = Modifier.fillMaxWidth().height(280.dp),
-                factory = { ctx ->
-                    MapView(ctx).apply {
-                        setMultiTouchControls(true)
-                        controller.setZoom(12.0)
-                    }
+                factory = { ctx -> de.drivetime.notifier.ui.createPlannerMap(ctx) },
+                onRelease = { map ->
+                    map.onPause()
+                    map.onDetach()
                 },
                 update = { map ->
                     runCatching {
@@ -1461,19 +1458,23 @@ class MainActivity : ComponentActivity() {
                             })
                         }
                         map.invalidate()
-                        map.post {
+                        if (map.tag !== points) {
+                            map.tag = points
+                            map.post {
                             runCatching {
                                 map.zoomToBoundingBox(
                                     org.osmdroid.util.BoundingBox.fromGeoPoints(points),
-                                    true,
+                                    false,
                                     72
                                 )
+                            }
                             }
                         }
                     }
                 }
             )
         }
+        Text("© OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall)
         selectedPoi?.let { poi ->
             PoiDetailsDialog(settings, poi) { selectedPoi = null }
         }

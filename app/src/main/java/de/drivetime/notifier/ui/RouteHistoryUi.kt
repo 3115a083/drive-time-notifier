@@ -185,9 +185,14 @@ fun RouteHistoryDialog(settings:AppSettings,onDismiss:()->Unit,onSettings:()->Un
                             Card(Modifier.fillMaxWidth().clickable {selected=item.id}) {
                                 Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
+                                        Text(tr(language,"Planned arrival ","Geplante Ankunft ") + stamp(item.request.arrivalMillis),
+                                            style=MaterialTheme.typography.titleMedium)
+                                        Text(tr(language,"Searched on ","Gesucht am ") + stamp(item.calculatedAt),
+                                            style=MaterialTheme.typography.bodySmall,
+                                            color=MaterialTheme.colorScheme.onSurfaceVariant)
                                         Text(item.request.origin+" → "+item.request.destination,
                                             style=MaterialTheme.typography.titleSmall)
-                                        Text(stamp(item.calculatedAt)+" · "+((item.route.durationSeconds+59)/60)+" min")
+                                        Text(((item.route.durationSeconds+59)/60).toString()+" min", style=MaterialTheme.typography.bodySmall)
                                         Text(if(item.trigger==HistoryTrigger.MANUAL)tr(language,"Manual","Manuell")
                                             else tr(language,"App action / requested processing","App-Aktion / angeforderte Verarbeitung"),
                                             style=MaterialTheme.typography.bodySmall)

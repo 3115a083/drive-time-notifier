@@ -1,5 +1,8 @@
 package de.drivetime.notifier.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -126,11 +129,25 @@ fun RoutingServiceList(settings: AppSettings, keyStore: SecureApiKeyStore, onCha
         Icon(Icons.Outlined.Add,null); Spacer(Modifier.width(8.dp));Text(tr(language,"Add routing service","Routingdienst hinzufügen"))
     }
     if(adding) AlertDialog(onDismissRequest={adding=false},title={Text(tr(language,"Add routing service","Routingdienst hinzufügen"))},
-        text={Column { RoutingProvider.entries.filterNot {it in providers}.forEach { provider->
-            TextButton(onClick={onChange(settings.withRoutingOrder(providers+provider));adding=false}) {
-                Text(provider.displayName + if(provider.keyRequired) tr(language," · API key required"," · API-Key erforderlich") else tr(language," · no key"," · ohne Schlüssel"))
+        text={Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            RoutingProvider.entries.filterNot { it in providers }.forEach { provider ->
+                Surface(shape=MaterialTheme.shapes.medium,color=MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Row(Modifier.fillMaxWidth().clickable {
+                        onChange(settings.withRoutingOrder(providers + provider))
+                        adding=false
+                    }.heightIn(min=56.dp).padding(horizontal=14.dp,vertical=8.dp),
+                        verticalAlignment=Alignment.CenterVertically) {
+                        ServiceImage(provider.id)
+                        Spacer(Modifier.width(12.dp))
+                        Text(provider.displayName,Modifier.weight(1f),style=MaterialTheme.typography.bodyLarge)
+                        if(provider.keyRequired) Icon(Icons.Outlined.Key,
+                            tr(language,"API key required","API-Key erforderlich"),
+                            tint=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(20.dp))
+                    }
+                }
             }
-        } }},confirmButton={},dismissButton={TextButton(onClick={adding=false}) {Text(tr(language,"Cancel","Abbrechen"))}})
+        }},confirmButton={},dismissButton={TextButton(onClick={adding=false}) {Text(tr(language,"Cancel","Abbrechen"))}})
 }
 
 @Composable
@@ -255,13 +272,28 @@ private fun EndpointServiceList(kind:String,endpoints:List<String>,settings:AppS
     OutlinedButton(enabled=endpoints.size<8,onClick={newEndpoint.reset("");adding=true},modifier=Modifier.fillMaxWidth()) {
         Icon(Icons.Outlined.Add,null);Spacer(Modifier.width(8.dp));Text(tr(language,"Add $kind endpoint","$kind-Endpunkt hinzufügen"))
     }
-    if(adding) AlertDialog(onDismissRequest={adding=false},title={Text(tr(language,"Add $kind endpoint","$kind-Endpunkt hinzufügen"))},
-        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            defaults.filterNot {it in endpoints}.forEach { endpoint->TextButton(onClick={onOrder(endpoints+endpoint);adding=false}) {Text(endpoint.toHttpUrlOrNull()?.host.orEmpty())} }
-            OutlinedTextField(newEndpoint.text,newEndpoint::edit,label={Text(tr(language,"Custom HTTPS endpoint","Eigener HTTPS-Endpunkt"))},singleLine=true)
-        }},confirmButton={TextButton(enabled=HttpsEndpoint.normalize(newEndpoint.text)!=null,onClick={
-            onOrder((endpoints+HttpsEndpoint.normalize(newEndpoint.text)!!).distinct());adding=false
-        }) {Text(tr(language,"Add","Hinzufügen"))}},dismissButton={TextButton(onClick={adding=false}) {Text(tr(language,"Cancel","Abbrechen"))}})
+    if(adding) {
+        val candidate = HttpsEndpoint.normalize(newEndpoint.text)
+        val headerDraft = rememberSaveable(saver=HeaderEditorState.Saver) { HeaderEditorState(emptyList()) }
+        val headers = headerDraft.persistable()
+        val complete = headerDraft.rows.all { EndpointHeaderPolicy.valid(it.name,it.value) }
+        AlertDialog(onDismissRequest={adding=false},title={Text(tr(language,"Add $kind endpoint","$kind-Endpunkt hinzufügen"))},
+            text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                defaults.filterNot {it in endpoints}.forEach { endpoint ->
+                    TextButton(onClick={newEndpoint.edit(endpoint)}) { Text(endpoint.toHttpUrlOrNull()?.host.orEmpty()) }
+                }
+                OutlinedTextField(newEndpoint.text,newEndpoint::edit,label={Text(tr(language,"HTTPS endpoint","HTTPS-Endpunkt"))},singleLine=true)
+                HeaderFields(headerDraft,language,{})
+            }},
+            confirmButton={TextButton(enabled=candidate!=null && candidate !in endpoints && headers!=null && complete,onClick={
+                if(candidate!=null && headers!=null) {
+                    if(headers.isNotEmpty()) EndpointSecurity.saveHeaders(candidate,headers)
+                    onOrder(endpoints+candidate)
+                    adding=false
+                }
+            }) {Text(tr(language,"Add","Hinzufügen"))}},
+            dismissButton={TextButton(onClick={adding=false}) {Text(tr(language,"Cancel","Abbrechen"))}})
+    }
 }
 
 @Composable
@@ -316,16 +348,24 @@ internal fun EndpointAuthEditor(endpoint:String,language:AppLanguage,onEdited:()
             "Gespeicherte Header sind nicht lesbar. Entfernen oder durch gültige Header ersetzen."),color=MaterialTheme.colorScheme.error)
         TextButton(onClick={EndpointSecurity.saveHeaders(endpoint,emptyList());storedHeaders=emptyList();unreadable=false;onEdited()}) {Text(tr(language,"Remove saved headers","Gespeicherte Header entfernen"))}
     }
+    HeaderFields(state,language) { onEdited(); persist() }
+    if(state.rows.isNotEmpty()) Text(tr(language,
+        "Valid entries are saved automatically and encrypted on this device. Not included in backups. Pangolin access tokens use P-Access-Token-Id and P-Access-Token.",
+        "Gültige Eingaben werden automatisch und auf diesem Gerät verschlüsselt gespeichert. Nicht im Backup enthalten. Pangolin-Zugriffstoken verwenden P-Access-Token-Id und P-Access-Token."),style=MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun HeaderFields(state:HeaderEditorState,language:AppLanguage,changed:()->Unit) {
     state.rows.forEach { row -> key(row.id) {
         Row(verticalAlignment=Alignment.CenterVertically) {
-            OutlinedTextField(row.name,{state.edit(row.id,name=it);onEdited();persist()},
+            OutlinedTextField(row.name,{state.edit(row.id,name=it);changed()},
                 label={Text(tr(language,"Header name","Header-Name"))},singleLine=true,
                 isError=row.name.isNotEmpty() && !EndpointHeaderPolicy.valid(row.name,"test"),modifier=Modifier.weight(1f))
-            IconButton(onClick={state.remove(row.id);onEdited();persist()}) {
+            IconButton(onClick={state.remove(row.id);changed()}) {
                 Icon(Icons.Outlined.DeleteOutline,tr(language,"Remove header","Header entfernen"))
             }
         }
-        OutlinedTextField(row.value,{state.edit(row.id,value=it);onEdited();persist()},
+        OutlinedTextField(row.value,{state.edit(row.id,value=it);changed()},
             label={Text(tr(language,"Header value","Header-Wert"))},singleLine=true,
             visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
     } }
@@ -334,10 +374,7 @@ internal fun EndpointAuthEditor(endpoint:String,language:AppLanguage,onEdited:()
         "Unvollständige Eingaben bleiben im Editor. Der letzte gültige Header bleibt bis zum Entfernen aktiv."),style=MaterialTheme.typography.bodySmall)
     if(state.persistable()==null) Text(tr(language,"Header names must be unique. The last valid headers remain active.",
         "Header-Namen müssen eindeutig sein. Die letzten gültigen Header bleiben aktiv."),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)
-    OutlinedButton(onClick={state.add();onEdited()}) {Icon(Icons.Outlined.Add,null);Spacer(Modifier.width(8.dp));Text(tr(language,"Add header","Header hinzufügen"))}
-    if(state.rows.isNotEmpty()) Text(tr(language,
-        "Valid entries are saved automatically and encrypted on this device. Not included in backups. Pangolin access tokens use P-Access-Token-Id and P-Access-Token.",
-        "Gültige Eingaben werden automatisch und auf diesem Gerät verschlüsselt gespeichert. Nicht im Backup enthalten. Pangolin-Zugriffstoken verwenden P-Access-Token-Id und P-Access-Token."),style=MaterialTheme.typography.bodySmall)
+    OutlinedButton(onClick={state.add();changed()}) {Icon(Icons.Outlined.Add,null);Spacer(Modifier.width(8.dp));Text(tr(language,"Add header","Header hinzufügen"))}
 }
 
 @Composable
