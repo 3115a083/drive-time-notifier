@@ -7,9 +7,13 @@ internal val plannerTiles = XYTileSource(
     arrayOf("https://tile.openstreetmap.org/")
 )
 
-internal fun createPlannerMap(context: android.content.Context) =
-    org.osmdroid.views.MapView(context).apply {
-        setTileSource(plannerTiles)
+internal fun createPlannerMap(
+    context: android.content.Context,
+    source: XYTileSource = plannerTiles,
+    transport: org.osmdroid.tileprovider.modules.TileDownloader? = null
+) =
+    org.osmdroid.views.MapView(context, PlannerTileProvider(context, source, transport)).apply {
+        setTileSource(source)
         setUseDataConnection(true)
         setMultiTouchControls(true)
         controller.setZoom(12.0)
