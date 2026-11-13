@@ -63,6 +63,27 @@ class EndpointEditorUiTest {
             compose.runOnIdle { assertFalse(EndpointSecurity.configured(endpoint)) }
         } finally {EndpointSecurity.saveHeaders(endpoint,emptyList())}
     }
+    @Test fun newEndpointSavesHeadersOnlyWhenAdded() {
+        val endpoint="https://new-endpoint.invalid"
+        var settings by mutableStateOf(AppSettings(language=AppLanguage.GERMAN))
+        compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) { MapServiceLists(settings) { settings=it } } } }
+        try {
+            for(confirm in listOf(false,true)) {
+                compose.onNodeWithText("Photon-Endpunkt hinzufügen").performScrollTo().performClick()
+                compose.onNode(hasSetTextAction() and hasText("HTTPS-Endpunkt")).performTextReplacement(endpoint)
+                compose.onNodeWithText("Header hinzufügen").performScrollTo().performClick()
+                compose.onNodeWithText("Hinzufügen").assertIsNotEnabled()
+                compose.onNode(hasSetTextAction() and hasText("Header-Name")).performScrollTo().performTextInput("X-Access")
+                compose.onNode(hasSetTextAction() and hasText("Header-Wert")).performScrollTo().performTextInput("fixture-value")
+                compose.runOnIdle { assertFalse(EndpointSecurity.configured(endpoint)) }
+                compose.onNodeWithText(if(confirm) "Hinzufügen" else "Abbrechen").performClick()
+                compose.runOnIdle {
+                    assertEquals(confirm,endpoint in settings.photonEndpoints)
+                    assertEquals(confirm,EndpointSecurity.configured(endpoint))
+                }
+            }
+        } finally { EndpointSecurity.saveHeaders(endpoint,emptyList()) }
+    }
     @Test fun endpointAutosaveKeepsItsEditorIdentityAndEmptyDraftAcrossOldEchoAndCollapse() {
         var settings by mutableStateOf(AppSettings(language=AppLanguage.GERMAN,photonBaseUrl="https://original.invalid",photonEndpoints=listOf("https://original.invalid")))
         compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) { MapServiceLists(settings) { settings=it } } } }
