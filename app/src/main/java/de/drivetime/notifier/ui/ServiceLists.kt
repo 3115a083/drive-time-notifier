@@ -1,5 +1,8 @@
 package de.drivetime.notifier.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -126,11 +129,25 @@ fun RoutingServiceList(settings: AppSettings, keyStore: SecureApiKeyStore, onCha
         Icon(Icons.Outlined.Add,null); Spacer(Modifier.width(8.dp));Text(tr(language,"Add routing service","Routingdienst hinzufügen"))
     }
     if(adding) AlertDialog(onDismissRequest={adding=false},title={Text(tr(language,"Add routing service","Routingdienst hinzufügen"))},
-        text={Column { RoutingProvider.entries.filterNot {it in providers}.forEach { provider->
-            TextButton(onClick={onChange(settings.withRoutingOrder(providers+provider));adding=false}) {
-                Text(provider.displayName + if(provider.keyRequired) tr(language," · API key required"," · API-Key erforderlich") else tr(language," · no key"," · ohne Schlüssel"))
+        text={Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            RoutingProvider.entries.filterNot { it in providers }.forEach { provider ->
+                Surface(shape=MaterialTheme.shapes.medium,color=MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Row(Modifier.fillMaxWidth().clickable {
+                        onChange(settings.withRoutingOrder(providers + provider))
+                        adding=false
+                    }.heightIn(min=56.dp).padding(horizontal=14.dp,vertical=8.dp),
+                        verticalAlignment=Alignment.CenterVertically) {
+                        ServiceImage(provider.id)
+                        Spacer(Modifier.width(12.dp))
+                        Text(provider.displayName,Modifier.weight(1f),style=MaterialTheme.typography.bodyLarge)
+                        if(provider.keyRequired) Icon(Icons.Outlined.Key,
+                            tr(language,"API key required","API-Key erforderlich"),
+                            tint=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(20.dp))
+                    }
+                }
             }
-        } }},confirmButton={},dismissButton={TextButton(onClick={adding=false}) {Text(tr(language,"Cancel","Abbrechen"))}})
+        }},confirmButton={},dismissButton={TextButton(onClick={adding=false}) {Text(tr(language,"Cancel","Abbrechen"))}})
 }
 
 @Composable
