@@ -1,0 +1,1 @@
+Öffentliche Version des vollständigen getesteten Entwicklungsstands: Suchhistorie, verbesserte Kalenderautomatik, stabile Eingabefelder, geordnete Dienstelisten und verschlüsselte Header. Zuverlässigere Overpass-Abfragen und private Netzwerkdiagnose. Kartenfix mit korrekter Einpassung nach dem Layout. Fuß- und Radwege sind für die nächste große Version geplant.

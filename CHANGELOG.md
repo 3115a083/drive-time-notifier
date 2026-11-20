@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0
+
+Public release of the complete tested development line, including the planner map fix.
+
+- Add optional local route history with retention settings, planned journey times, map details and direct calendar saving without recalculation.
+- Improve hands-off shortcuts, calendar automation, duplicate handling and daily scheduling.
+- Preserve user-entered drafts across delayed saves, settings updates and asynchronous location results.
+- Add ordered routing, Photon and Overpass service lists with endpoint tests, persistent health indicators and request limits.
+- Support multiple encrypted authentication headers scoped to the configured endpoint.
+- Autosave endpoint fields while preserving explicit saving of the default location.
+- Bound and deduplicate Overpass requests, cache recent successful results and preserve partial parking/charging results.
+- Improve routing/geocoding timeout diagnostics while redacting private request information.
+- Fix planner map fitting before layout, retain direct tile delivery and use the original OpenStreetMap source policy.
+- Keep all existing routing, parking, charging, sharing, overlay, backup and calendar features.
+- Preserve the official package identity and existing release signing key.
+
+Walking and cycling are planned for the next major feature release and are not enabled in 1.4.0. See docs/WALKING_CYCLING_PLAN.md.
+
 ## 1.4.2, development
 
 - Batch parking and charging Overpass selectors when split mode is off, retaining category limits.
