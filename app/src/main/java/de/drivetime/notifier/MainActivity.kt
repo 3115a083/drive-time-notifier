@@ -1458,18 +1458,7 @@ class MainActivity : ComponentActivity() {
                             })
                         }
                         map.invalidate()
-                        if (map.tag !== points) {
-                            map.tag = points
-                            map.post {
-                            runCatching {
-                                map.zoomToBoundingBox(
-                                    org.osmdroid.util.BoundingBox.fromGeoPoints(points),
-                                    false,
-                                    72
-                                )
-                            }
-                            }
-                        }
+                        de.drivetime.notifier.ui.fitPlannerRoute(map, points)
                     }
                 }
             )

@@ -10,6 +10,15 @@ import org.osmdroid.tileprovider.modules.SqlTileWriter
 import org.osmdroid.util.MapTileIndex
 
 class PlannerTilesTest {
+    @Test fun plannerUsesThePublicOsmSourcePolicy() {
+        assertSame(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK, plannerTiles)
+        val policy = plannerTiles.tileSourcePolicy
+        assertEquals(2, policy.maxConcurrent)
+        assertFalse(policy.acceptsBulkDownload())
+        assertFalse(policy.acceptsPreventive())
+        assertTrue(policy.normalizesUserAgent())
+    }
+
     @Test fun plannerTileRoundTripsThroughTheConfiguredAndroidCache() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = Configuration.getInstance().osmdroidTileCache
