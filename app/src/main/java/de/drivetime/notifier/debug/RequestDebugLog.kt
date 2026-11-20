@@ -62,7 +62,7 @@ object RequestDebugLog {
         }
     }.trimEnd()
 
-    fun redact(value: String): String = Regex("https://[^\\s<>]+", RegexOption.IGNORE_CASE).replace(value) { match ->
+    fun redact(value: String): String = Regex("https://[^\\s<>]+", RegexOption.IGNORE_CASE).replace(de.drivetime.notifier.network.EndpointSecurity.redact(value)) { match ->
         val uri = runCatching { java.net.URI(match.value) }.getOrNull()
         if (uri?.host == null) "[URL redacted]" else {
             val path = uri.path.orEmpty()

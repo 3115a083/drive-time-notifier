@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.network.*
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.network.readStringLimited
 import de.drivetime.notifier.network.awaitResponse
@@ -15,7 +16,9 @@ import java.util.concurrent.TimeUnit
 class PhotonSearchService(
     private val baseUrl: String,
     private val userAgent: String,
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val fallbackEndpoints: List<String> = emptyList(),
+    private val client: OkHttpClient = OkHttpClient.Builder().endpointSecurity()
+        .eventListenerFactory(NetworkPhaseTrace.factory)
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -24,6 +27,8 @@ class PhotonSearchService(
         .retryOnConnectionFailure(true)
         .build()
 ) {
+    internal suspend fun testEndpoint() { searchEndpoint(baseUrl,"Berlin","en",null,1) }
+
     suspend fun suggest(query: String, language: String): List<AddressSuggestion> = withContext(Dispatchers.IO) {
         val clean = query.trim()
         if (clean.length < 3) return@withContext emptyList()
@@ -56,25 +61,44 @@ class PhotonSearchService(
         countryCode: String?,
         limit: Int
     ): List<AddressSuggestion> {
-        val base = baseUrl.toHttpUrl()
+        var failure: Exception? = null
+        for (endpoint in (listOf(baseUrl) + fallbackEndpoints).distinct()) {
+            try { return searchEndpoint(endpoint, query, language, countryCode, limit) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { failure = error }
+        }
+        throw failure ?: IllegalStateException("No Photon endpoint available.")
+    }
+
+    private suspend fun searchEndpoint(endpoint: String, query: String, language: String, countryCode: String?, limit: Int): List<AddressSuggestion> {
+        val base = endpoint.toHttpUrl()
         require(base.isHttps) { "Photon endpoint must use HTTPS." }
-        val builder = base.newBuilder()
-            .addPathSegment("api")
+        val builder = base.newBuilder().apply {
+            if(base.pathSegments.lastOrNull { it.isNotBlank() } != "api") addPathSegment("api")
+        }
             .addQueryParameter("q", query)
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("lang", language)
         if (!countryCode.isNullOrBlank()) builder.addQueryParameter("countrycode", countryCode)
 
-        val request = Request.Builder()
+        val trace = NetworkPhaseTrace()
+        val request = Request.Builder().endpointScope(endpoint).tag(NetworkPhaseTrace::class.java,trace)
             .url(builder.build())
             .header("User-Agent", userAgent)
             .get()
             .build()
 
-        client.newCall(request).awaitResponse().use { response ->
-            if (!response.isSuccessful) return emptyList()
-            val features = JSONObject(response.body?.readStringLimited().orEmpty()).optJSONArray("features") ?: return emptyList()
-            return buildList {
+        val diagnostics = de.drivetime.notifier.debug.NetworkStageDiagnostics(
+            "Photon", "address lookup", client.callTimeoutMillis, client.connectTimeoutMillis, trace
+        )
+        val started = System.nanoTime()
+        val at = System.currentTimeMillis()
+        val fingerprint = EndpointSecurity.fingerprint(endpoint)
+        try {
+        val suggestions = client.newCall(request).awaitResponse().use { response ->
+            check(response.isSuccessful) { "Photon HTTP ${response.code}" }
+            val features = JSONObject(response.body?.readStringLimited().orEmpty()).getJSONArray("features")
+            buildList {
                 for (i in 0 until features.length()) {
                     val feature = features.getJSONObject(i)
                     val coords = feature.optJSONObject("geometry")?.optJSONArray("coordinates") ?: continue
@@ -93,6 +117,22 @@ class PhotonSearchService(
                     }
                 }
             }
+        }
+        ServiceMonitor.record(ServiceMonitor.endpointId("Photon", endpoint), fingerprint, true, (System.nanoTime()-started)/1_000_000, at)
+        diagnostics.success()
+        return suggestions
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            diagnostics.failure(cancelled)
+            throw cancelled
+        }
+        catch (error: Exception) {
+            diagnostics.failure(error)
+            ServiceMonitor.record(ServiceMonitor.endpointId("Photon", endpoint), fingerprint, false, (System.nanoTime()-started)/1_000_000, at)
+            if (de.drivetime.notifier.debug.NetworkStageDiagnostics.isTimeout(error)) {
+                throw java.io.IOException("Photon: address lookup timed out (call limit ${client.callTimeoutMillis / 1000}s).", error)
+            }
+            if(EndpointSecurity.configured(endpoint)) throw java.io.IOException("Photon response could not be read.")
+            throw error
         }
     }
 }

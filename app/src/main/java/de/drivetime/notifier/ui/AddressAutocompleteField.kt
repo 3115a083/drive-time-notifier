@@ -15,7 +15,7 @@ import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.model.AddressSuggestion
 import de.drivetime.notifier.routing.PhotonSearchService
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
 
 @Composable
 fun AddressAutocompleteField(
@@ -25,7 +25,9 @@ fun AddressAutocompleteField(
     label: String,
     leadingIcon: @Composable (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    supportingText: String? = null
+    supportingText: String? = null,
+    onClear: (() -> Unit)? = null,
+    clearAvailable: Boolean = value.isNotEmpty()
 ) {
     val context = LocalContext.current
     var suggestions by remember { mutableStateOf<List<AddressSuggestion>>(emptyList()) }
@@ -33,19 +35,18 @@ fun AddressAutocompleteField(
     var focused by remember { mutableStateOf(false) }
     var userEdited by remember { mutableStateOf(false) }
 
-    LaunchedEffect(value, focused, userEdited, settings.language, settings.photonBaseUrl) {
+    LaunchedEffect(value, focused, userEdited, settings.language, settings.photonBaseUrl, settings.photonEndpoints) {
         suggestions = emptyList()
         searching = false
         if (!focused || !userEdited || value.trim().length < 3) return@LaunchedEffect
 
         delay(500)
         searching = true
-        suggestions = withTimeoutOrNull(8_000) {
-            runCatching {
-                PhotonSearchService(settings.photonBaseUrl, context.packageName)
-                    .suggest(value.trim(), settings.language.id)
-            }.getOrDefault(emptyList())
-        }.orEmpty()
+        suggestions = try {
+            PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints)
+                .suggest(value.trim(), settings.language.id)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { emptyList() }
         searching = false
     }
 
@@ -60,11 +61,11 @@ fun AddressAutocompleteField(
             leadingIcon = leadingIcon,
             trailingIcon = {
                 when {
-                    searching -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    value.isNotEmpty() -> IconButton(onClick = {
+                    searching && !clearAvailable -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    clearAvailable -> IconButton(onClick = {
                         userEdited = true
                         suggestions = emptyList()
-                        onValueChange("")
+                        if (onClear != null) onClear() else onValueChange("")
                     }) {
                         Icon(Icons.Outlined.Close, contentDescription = tr(settings.language, "Clear", "Löschen"))
                     }

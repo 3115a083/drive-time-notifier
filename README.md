@@ -10,11 +10,11 @@ Drive Time Notifier ist eine native Android-App zur manuellen und automatischen 
 
 ## Download
 
-Aktuelle öffentliche Version: **1.3.1** (`versionCode 12`).
+Aktuelle öffentliche Version: **1.4.0** (`versionCode 23`).
 
 - Release-Paket: `de.drivetime.notifier`
 - Mindestversion: Android 8.0
-- Download, Prüfsumme und Signaturprüfung: [GitHub Release v1.3.1](https://github.com/3115a083/drive-time-notifier/releases/tag/v1.3.1)
+- Download, Prüfsumme und Signaturprüfung: [GitHub Release v1.4.0](https://github.com/3115a083/drive-time-notifier/releases/tag/v1.4.0)
 
 ## Apple Kurzbefehle
 
@@ -289,3 +289,8 @@ Drittanbieter-Hinweise: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 ## Haftungsausschluss
 
 Die App wird **AS IS** bereitgestellt. Es gibt keine Garantie für Routen, Fahrzeiten, Verkehrsdaten, Parkplätze, Ladesäulen, Kalenderdaten oder die dauerhafte Verfügbarkeit externer APIs. Nutzer bleiben für Provider-Verträge, API-Nutzung und entstehende Kosten verantwortlich.
+
+
+## Nächste große Version
+
+Fuß- und Radwege mit eigenen Zeitpuffern und optionaler entfernungsabhängiger Automatik sind vorbereitet, aber in 1.4.0 noch nicht implementiert. [Anforderungen, Architektur und Abnahmetests](docs/WALKING_CYCLING_PLAN.md).

@@ -68,7 +68,7 @@ class PlanningOverlayService : Service() {
         if (intent?.action == "close") { stopSelf(); return START_NOT_STICKY }
         if (intent?.action == "location") {
             if (panel == null) { stopSelf(); return START_NOT_STICKY }
-            if (intent.getStringExtra("request_id") != requestId) return START_NOT_STICKY
+            if (requestId == null || intent.getStringExtra("request_id") != requestId) return START_NOT_STICKY
             locationDeadline?.cancel(); locationDeadline = null
             locating = false
             val value = intent.getStringExtra("coordinates")
@@ -90,6 +90,13 @@ class PlanningOverlayService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+    private fun editField(field: String, value: String) {
+        if (pendingField == field) {
+            locationDeadline?.cancel(); locationDeadline = null
+            requestId = null; pendingField = null; locating = false
+        }
+        if (field == "origin") origin = value else destination = value
     }
     private fun openPlanner(target: String, start: String?, arrival: LocalDateTime?, buffer: Int?) {
         startActivity(Intent(this, MainActivity::class.java).apply {
@@ -153,10 +160,10 @@ class PlanningOverlayService : Service() {
                         Button(onClick = { arrival = arrival.withHour(time.hour).withMinute(time.minute); picker = null }, modifier = Modifier.fillMaxWidth()) { Text(label("Done", "Fertig")) }
                         TextButton(onClick = { picker = null }) { Text(label("Cancel", "Abbrechen")) }
                     } else {
-                        AddressAutocompleteField(settings, origin, { origin = it.take(8192) }, label("Start location", "Startort"))
-                        SavedChips(settings, "origin") { origin = it }
-                        AddressAutocompleteField(settings, destination, { destination = it.take(8192) }, label("Destination", "Ziel"))
-                        SavedChips(settings, "destination") { destination = it }
+                        AddressAutocompleteField(settings, origin, { editField("origin", it.take(8192)) }, label("Start location", "Startort"))
+                        SavedChips(settings, "origin") { editField("origin", it) }
+                        AddressAutocompleteField(settings, destination, { editField("destination", it.take(8192)) }, label("Destination", "Ziel"))
+                        SavedChips(settings, "destination") { editField("destination", it) }
                         Text(label("Arrival time", "Ankunftszeit"), style = MaterialTheme.typography.titleSmall)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { picker = "date" }, modifier = Modifier.weight(1f)) { Text(arrival.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))) }

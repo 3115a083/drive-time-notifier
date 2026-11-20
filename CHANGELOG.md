@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.4.0
+
+Public release of the complete tested development line, including the planner map fix.
+
+- Add optional local route history with retention settings, planned journey times, map details and direct calendar saving without recalculation.
+- Improve hands-off shortcuts, calendar automation, duplicate handling and daily scheduling.
+- Preserve user-entered drafts across delayed saves, settings updates and asynchronous location results.
+- Add ordered routing, Photon and Overpass service lists with endpoint tests, persistent health indicators and request limits.
+- Support multiple encrypted authentication headers scoped to the configured endpoint.
+- Autosave endpoint fields while preserving explicit saving of the default location.
+- Bound and deduplicate Overpass requests, cache recent successful results and preserve partial parking/charging results.
+- Improve routing/geocoding timeout diagnostics while redacting private request information.
+- Fix planner map fitting before layout, retain direct tile delivery and use the original OpenStreetMap source policy.
+- Keep all existing routing, parking, charging, sharing, overlay, backup and calendar features.
+- Preserve the official package identity and existing release signing key.
+
+Walking and cycling are planned for the next major feature release and are not enabled in 1.4.0. See docs/WALKING_CYCLING_PLAN.md.
+
+## 1.4.2, development
+
+- Batch parking and charging Overpass selectors when split mode is off, retaining category limits.
+- Share identical in-flight requests and cancel HTTP work when its final consumer leaves.
+- Bound successful raw response caching to 16 entries, 8 MiB including keys and five minutes using atomic LRU operations.
+- Preserve endpoint order, skip temporarily failing endpoints and bound enrichment to two sequential HTTP attempts within 60 seconds.
+
+
+## 1.4.1, development
+
+- Display service order outside cards, bundled service images, persistent health and last response time.
+- Add optional encrypted, endpoint-scoped header authentication for Photon, Overpass, OSRM and Valhalla.
+- Keep default-location drafts separate from the saved location until explicit Save.
+- Pin release Actions to immutable commits and avoid persisted checkout credentials.
+
+
+## 1.4.0, development
+
+- Ordered routing service list with drag handles, per-provider credentials, endpoint tests and limits.
+- Keyless routing services are preconfigured; add other providers explicitly.
+- Visible Photon and Overpass endpoint lists with ordering, addition and individual tests.
+- Move history settings before backup and match the settings style.
+- Clip offline history maps and keep captions in separate list items.
+- Save recorded history plans directly to the selected calendar without recalculation.
+- Increase Overpass budgets to include server queueing, validate runtime errors, support GET transport and cache recent results.
+
+## 1.3.3, development
+
+- Preserve numeric and text drafts during pauses, delayed saves and settings updates.
+- Keep blank and invalid intermediate input visible; save only validated numeric values.
+- Preserve edited history limits and endpoint lists during background updates.
+- Prevent delayed location/calendar responses from replacing newer edits.
+- Add editor ownership rules and Compose regression coverage.
+
 ## 1.3.1
 
 Planning popup styling and timeout reliability fixes.

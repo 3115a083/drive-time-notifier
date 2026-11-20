@@ -1,5 +1,6 @@
 package de.drivetime.notifier.routing
 
+import de.drivetime.notifier.network.*
 import android.content.Context
 import de.drivetime.notifier.data.AppSettings
 import de.drivetime.notifier.data.RoutingProvider
@@ -33,7 +34,7 @@ class UnifiedRoutingService(
         .forProvider(settings.routingProvider)
         .coerceIn(1, 300)
         .toLong()
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = OkHttpClient.Builder().endpointSecurity()
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(minOf(timeoutSeconds, 8L), TimeUnit.SECONDS)
@@ -44,7 +45,7 @@ class UnifiedRoutingService(
 
 
     override suspend fun route(request: RouteRequest): RouteEstimate = withContext(Dispatchers.IO) {
-        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName)
+        val geocoder = PhotonSearchService(settings.photonBaseUrl, context.packageName, settings.photonEndpoints)
         val origin = geocoder.geocode(request.origin)
         val destination = geocoder.geocode(request.destination)
         routeResolved(
@@ -63,7 +64,15 @@ class UnifiedRoutingService(
         val oLon = points.originLongitude
         val dLat = points.destinationLatitude
         val dLon = points.destinationLongitude
-        when (settings.routingProvider) {
+        val started = System.nanoTime()
+        val at = System.currentTimeMillis()
+        val diagnostics = de.drivetime.notifier.debug.NetworkStageDiagnostics(
+            settings.routingProvider.displayName, "route calculation",
+            client.callTimeoutMillis, client.connectTimeoutMillis
+        )
+        val fingerprint = ProviderConnectivityChecker.providerFingerprint(settings.routingProvider, settings, keyStore.read(settings.routingProvider).orEmpty())
+        try {
+        val estimate = when (settings.routingProvider) {
             RoutingProvider.VALHALLA -> valhalla(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.OPENROUTESERVICE -> openRouteService(oLat, oLon, dLat, dLon)
             RoutingProvider.OSRM -> osrm(oLat, oLon, dLat, dLon)
@@ -71,6 +80,25 @@ class UnifiedRoutingService(
             RoutingProvider.GOOGLE -> google(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.HERE -> here(oLat, oLon, dLat, dLon, request.arrivalMillis)
             RoutingProvider.TOMTOM -> tomTom(oLat, oLon, dLat, dLon, request.arrivalMillis)
+        }
+        ServiceMonitor.record(settings.routingProvider.id, fingerprint, true, (System.nanoTime()-started)/1_000_000, at)
+        diagnostics.success()
+        estimate
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            diagnostics.failure(cancelled)
+            throw cancelled
+        }
+        catch (error: Exception) {
+            diagnostics.failure(error)
+            ServiceMonitor.record(settings.routingProvider.id, fingerprint, false, (System.nanoTime()-started)/1_000_000, at)
+            if (de.drivetime.notifier.debug.NetworkStageDiagnostics.isTimeout(error)) {
+                throw java.io.IOException(
+                    "${settings.routingProvider.displayName}: routing request timed out " +
+                        "(call limit ${client.callTimeoutMillis / 1000}s, " +
+                        "connection limit ${client.connectTimeoutMillis / 1000}s).", error
+                )
+            }
+            throw error
         }
     }
 
@@ -94,7 +122,7 @@ class UnifiedRoutingService(
                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
             ))
         }.toString()
-        val request = Request.Builder()
+        val request = Request.Builder().endpointScope(settings.valhallaBaseUrl)
             .url(base.newBuilder().addPathSegment("route").build())
             .header("X-Client-Id", context.packageName)
             .post(body.toRequestBody("application/json".toMediaType()))
@@ -169,7 +197,7 @@ class UnifiedRoutingService(
             .addQueryParameter("overview", "full")
             .addQueryParameter("geometries", "polyline")
             .build()
-        return client.newCall(Request.Builder().url(url).header("User-Agent", context.packageName).get().build()).execute().use { response ->
+        return client.newCall(Request.Builder().endpointScope(settings.osrmBaseUrl).url(url).header("User-Agent", context.packageName).get().build()).execute().use { response ->
             val body = response.body?.readStringLimited().orEmpty()
             if (!response.isSuccessful) error("OSRM: HTTP ${response.code}")
             val root = JSONObject(body)

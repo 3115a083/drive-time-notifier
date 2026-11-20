@@ -1,0 +1,1 @@
+Public release of the complete tested development line: local route history, improved calendar automation, stable input drafts, ordered service lists and encrypted headers. More reliable Overpass requests and private network diagnostics. Planner map fitting now waits for layout. Walking and cycling are planned for the next major feature release.

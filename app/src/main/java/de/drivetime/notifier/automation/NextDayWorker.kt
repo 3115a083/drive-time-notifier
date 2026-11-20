@@ -8,16 +8,13 @@ import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.calendar.DriveEventDescriptionBuilder
 import de.drivetime.notifier.core.DrivePlanner
 import de.drivetime.notifier.core.DynamicArrivalBuffer
-import de.drivetime.notifier.data.SettingsStore
+import de.drivetime.notifier.data.*
 import de.drivetime.notifier.data.excludesLocation
 import de.drivetime.notifier.data.startLocationForCalendar
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
 import de.drivetime.notifier.routing.ChargingRoutePlanner
-import de.drivetime.notifier.routing.ChargingSearchOptions
-import de.drivetime.notifier.routing.OsmEnrichmentClient
-import de.drivetime.notifier.routing.PolylineDecoder
 import de.drivetime.notifier.routing.RoutingService
 import de.drivetime.notifier.routing.RoutingServiceFactory
 import de.drivetime.notifier.ui.resolvedDriveEventTitle
@@ -25,80 +22,106 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
-import java.time.ZoneId
+import java.time.ZonedDateTime
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 class NextDayWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
+        val forced = inputData.getBoolean("force", false)
+        try {
+            return process(forced)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val settings = SettingsStore(applicationContext).flow.first()
+            AutomationRunLog.add(applicationContext, if (forced) "manual-next-day" else "scheduled", "failed", error.javaClass.simpleName)
+            AutomationNotifier.notifyBackgroundActionProblem(applicationContext, settings.language,
+                "Calendar processing could not finish. Check calendar access and the diagnostic log.",
+                "Die Kalenderverarbeitung konnte nicht abgeschlossen werden. Prüfe Kalenderzugriff und Diagnoseprotokoll.")
+            return Result.failure()
+        } finally {
+            if (!forced) withContext(NonCancellable) {
+                val latest = SettingsStore(applicationContext).flow.first()
+                AutomationScheduler.configure(applicationContext, latest.automaticEnabled, latest.autoHour, latest.autoMinute)
+            }
+        }
+    }
+
+    private suspend fun process(forced: Boolean): Result {
+        val calculationRevision = System.currentTimeMillis()
         val settings = SettingsStore(applicationContext).flow.first()
-        if (!settings.automaticEnabled && inputData.getBoolean("force", false).not()) return Result.success()
+        val now = ZonedDateTime.now()
+        val scheduled = inputData.getLong("scheduled_for", -1L)
+        val trigger = if (forced) "manual-next-day" else "scheduled"
+        if (!forced && (!settings.automaticEnabled ||
+                !AutomationTiming.mayRun(now, scheduled, settings.autoHour, settings.autoMinute))) {
+            AutomationRunLog.add(applicationContext, trigger, "skipped-outside-window",
+                "scheduled=$scheduled configured=${settings.autoHour}:${settings.autoMinute}")
+            return Result.success()
+        }
+        val requestedAt = inputData.getLong("requested_at", -1L)
+        if (forced && !AutomationTiming.mayRunManual(now.toInstant().toEpochMilli(), requestedAt)) {
+            AutomationRunLog.add(applicationContext, trigger, "skipped-stale-manual-request")
+            return Result.success()
+        }
+        val zone = now.zone
+        val day = if (forced) inputData.getString("planning_day")?.let(LocalDate::parse)
+            ?: now.toLocalDate().plusDays(1)
+        else AutomationTiming.planningDay(scheduled, now)
+        AutomationRunLog.add(applicationContext, trigger, "started", "day=$day scheduled=$scheduled")
         setForeground(AutomationNotifier.processingForegroundInfo(applicationContext, settings.language, id))
 
-        val zone = ZoneId.systemDefault()
-        val day = LocalDate.now(zone).plusDays(1)
         val from = day.atStartOfDay(zone).toInstant().toEpochMilli()
         val to = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         val sourceIds = settings.sourceCalendarIds.mapNotNull { it.toLongOrNull() }.toSet()
 
         val calendar = CalendarRepository(applicationContext)
-        val events = runCatching { calendar.events(from, to, sourceIds) }.getOrElse { return Result.retry() }
-        if (events.isEmpty()) return Result.success()
+        val allEvents = calendar.events(from - 86_400_000L, to, sourceIds, includeWithoutLocation = true)
+        val events = allEvents.filter {it.startMillis >= from && it.startMillis < to && it.location.isNotBlank()}
+        if (events.isEmpty()) {
+            AutomationRunLog.add(applicationContext, trigger, "finished", "appointments=0")
+            return Result.success()
+        }
 
         val routes = RoutingServiceFactory.create(applicationContext, settings, automated = true)
-        var previousEnd: Long? = null
 
         for (event in events) {
+            val previousEnd = de.drivetime.notifier.calendar.CalendarConflicts.previousEnd(allEvents, event)
             if (isStopped) return Result.failure()
+            if (!forced) {
+                val latest = SettingsStore(applicationContext).flow.first()
+                if (!latest.automaticEnabled || !AutomationTiming.mayRun(ZonedDateTime.now(), scheduled, latest.autoHour, latest.autoMinute)) {
+                    AutomationRunLog.add(applicationContext, trigger, "stopped-settings-or-window-changed")
+                    return Result.success()
+                }
+            }
             if (settings.excludesLocation(event.location)) {
-                previousEnd = event.endMillis
                 continue
             }
 
             val origin = settings.startLocationForCalendar(event.calendarId)
             if (origin.isBlank()) {
-                previousEnd = event.endMillis
                 continue
             }
 
             val identityKey = DriveEntryIdentity.key(event.location, event.startMillis)
-            if (!settings.outputIcs) {
-                val duplicate = runCatching {
-                    calendar.findExistingDrive(
-                        settings.targetCalendarId,
-                        event.location,
-                        event.startMillis,
-                        identityKey
-                    )
-                }.getOrNull()
-                if (duplicate != null) {
-                    AutomationNotifier.notifyDuplicateDecision(
-                        applicationContext,
-                        settings.language,
-                        origin,
-                        event.location,
-                        event.startMillis,
-                        previousEnd,
-                        identityKey
-                    )
-                    previousEnd = event.endMillis
-                    continue
-                }
-            }
-
             val request = RouteRequest(origin, event.location, event.startMillis)
             val initialEstimate = routeWithRetry(routes, request)
             if (initialEstimate == null) {
+                AutomationRunLog.add(applicationContext, trigger, "routing-failed", identityKey)
                 AutomationNotifier.notifyRoutingFailure(
                     applicationContext,
                     settings.language,
                     origin,
                     event.location,
                     event.startMillis,
-                    previousEnd
+                    previousEnd,
+                    trigger = trigger
                 )
-                previousEnd = event.endMillis
                 continue
             }
 
@@ -120,6 +143,11 @@ class NextDayWorker(
                 ),
                 previousEventEndMillis = previousEnd
             )
+            val historyEntry = if (forced) RouteHistoryStore(applicationContext).recordSafely(applicationContext) {
+                val historyId = java.util.UUID.nameUUIDFromBytes((id.toString()+":"+identityKey).toByteArray()).toString()
+                RouteHistoryEntry.create(historyId, inputData.getLong("requested_at", calculationRevision),
+                    HistoryTrigger.APP_ACTION, request, estimate, plan, enriched.walkingDurationSeconds)
+            } else null
             val pois = enriched.pois
             val description = DriveEntryIdentity.attach(
                 DriveEventDescriptionBuilder.build(
@@ -146,7 +174,9 @@ class NextDayWorker(
                         plan.departureMillis,
                         plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                         title,
-                        description
+                        description,
+                        appointmentMillis = event.startMillis,
+                        calculatedAtMillis = calculationRevision
                     )
                 } else {
                     calendar.insertDrive(
@@ -157,18 +187,21 @@ class NextDayWorker(
                         plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                         settings.reminderLeadMinutes,
                         title,
-                        description
+                        description,
+                        destinationStartMillis = event.startMillis,
+                        calculatedAtMillis = calculationRevision
                     )
                 }
+                RouteHistoryStore(applicationContext).markSafely(applicationContext, historyEntry,
+                    if (settings.outputIcs) HistorySaveState.ICS else HistorySaveState.CALENDAR)
+                AutomationRunLog.add(applicationContext, trigger, "saved-or-newer-plan-preserved", identityKey)
             }.onFailure {
-                AutomationNotifier.notifyRoutingFailure(
-                    applicationContext,
-                    settings.language,
-                    origin,
-                    event.location,
-                    event.startMillis,
-                    previousEnd
-                )
+                if (it is CancellationException) throw it
+                RouteHistoryStore(applicationContext).markSafely(applicationContext, historyEntry, HistorySaveState.FAILED)
+                AutomationRunLog.add(applicationContext, trigger, "save-failed", it.javaClass.simpleName)
+                AutomationNotifier.notifyBackgroundActionProblem(applicationContext, settings.language,
+                    "The planned drive could not be saved. Check the destination calendar or ICS output.",
+                    "Die geplante Fahrt konnte nicht gespeichert werden. Prüfe Zielkalender oder ICS-Ausgabe.")
             }
 
             if (overlapsPrevious) {
@@ -179,8 +212,8 @@ class NextDayWorker(
                     plan.departureMillis
                 )
             }
-            previousEnd = event.endMillis
         }
+        AutomationRunLog.add(applicationContext, trigger, "finished", "appointments=${events.size}")
         return Result.success()
     }
 

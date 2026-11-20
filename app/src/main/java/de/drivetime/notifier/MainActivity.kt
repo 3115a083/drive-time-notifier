@@ -63,6 +63,8 @@ import de.drivetime.notifier.security.AutomationTokenStore
 import de.drivetime.notifier.security.PasswordBackup
 import de.drivetime.notifier.security.SecureApiKeyStore
 import de.drivetime.notifier.ui.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import de.drivetime.notifier.update.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -70,7 +72,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import org.osmdroid.config.Configuration
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
@@ -116,11 +117,11 @@ class MainActivity : ComponentActivity() {
             return
         }
         enableEdgeToEdge()
-        Configuration.getInstance().userAgentValue = packageName
 
         val settingsStore = SettingsStore(this)
         setContent {
-            val settings by settingsStore.flow.collectAsState(initial = AppSettings())
+            val loadedSettings by settingsStore.flow.collectAsState(initial = null)
+            val settings = loadedSettings ?: return@setContent
             val dark = resolvedDarkMode(settings.appearance)
             val view = LocalView.current
             SideEffect {
@@ -144,6 +145,9 @@ class MainActivity : ComponentActivity() {
         val calendarRepo = remember { CalendarRepository(context) }
         val keyStore = remember { SecureApiKeyStore(context) }
         var showSettings by rememberSaveable { mutableStateOf(false) }
+        var showHistory by rememberSaveable { mutableStateOf(false) }
+        var historySettingsRequested by rememberSaveable { mutableStateOf(false) }
+        var historyPlanningRequest by remember { mutableStateOf<HistoryPlanningRequest?>(null) }
         var permissionTick by remember { mutableIntStateOf(0) }
         var lastBackPress by remember { mutableLongStateOf(0L) }
 
@@ -176,7 +180,7 @@ class MainActivity : ComponentActivity() {
 
         fun updateSettings(newSettings: AppSettings) {
             scope.launch {
-                settingsStore.update(newSettings)
+                settingsStore.update(newSettings, previous = settings)
                 if (newSettings.automaticEnabled != settings.automaticEnabled ||
                     newSettings.autoHour != settings.autoHour ||
                     newSettings.autoMinute != settings.autoMinute
@@ -213,7 +217,10 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     actions = {
-                        IconButton(onClick = { showSettings = !showSettings }) {
+                        IconButton(onClick = { showHistory = true }) {
+                            Icon(Icons.Outlined.History, contentDescription = tr(settings.language, "Search history", "Suchhistorie"))
+                        }
+                        IconButton(onClick = { historySettingsRequested = false; showSettings = !showSettings }) {
                             Icon(
                                 if (showSettings) Icons.Outlined.Close else Icons.Outlined.Settings,
                                 contentDescription = tr(settings.language, "Settings", "Einstellungen")
@@ -230,6 +237,7 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     keyStore = keyStore,
                     calendarRepo = calendarRepo,
+                    historySettingsRequested = historySettingsRequested,
                     hasCalendarPermission = hasCalendarPermission,
                     onRequestCalendarPermission = {
                         permissionLauncher.launch(arrayOf(
@@ -250,6 +258,8 @@ class MainActivity : ComponentActivity() {
                     keyStore = keyStore,
                     calendarRepo = calendarRepo,
                     initialIntent = initialIntent,
+                    historyRequest = historyPlanningRequest,
+                    onHistoryRequestHandled = { historyPlanningRequest = null },
                     hasCalendarPermission = hasCalendarPermission,
                     onRequestCalendarPermission = {
                         permissionLauncher.launch(arrayOf(
@@ -260,6 +270,16 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        if (showHistory) RouteHistoryDialog(
+            settings = settings,
+            onDismiss = { showHistory = false },
+            onSettings = { showHistory = false; historySettingsRequested = true; showSettings = true },
+            onPlan = { request ->
+                historyPlanningRequest = request
+                showSettings = false
+                showHistory = false
+            }
+        )
     }
 
     @Composable
@@ -269,6 +289,8 @@ class MainActivity : ComponentActivity() {
         keyStore: SecureApiKeyStore,
         calendarRepo: CalendarRepository,
         initialIntent: Intent,
+        historyRequest: HistoryPlanningRequest?,
+        onHistoryRequestHandled: () -> Unit,
         hasCalendarPermission: Boolean,
         onRequestCalendarPermission: () -> Unit
     ) {
@@ -281,6 +303,8 @@ class MainActivity : ComponentActivity() {
         }
 
         var origin by rememberSaveable { mutableStateOf(initialIntent.getStringExtra("origin").orEmpty()) }
+        var originEditRevision by rememberSaveable { mutableLongStateOf(0L) }
+        var destinationEditRevision by rememberSaveable { mutableLongStateOf(0L) }
         var originInitialized by rememberSaveable { mutableStateOf(origin.isNotBlank()) }
         var destination by rememberSaveable { mutableStateOf(initialIntent.getStringExtra("destination").orEmpty()) }
         var appointmentDate by remember { mutableStateOf(defaultDateTime.toLocalDate()) }
@@ -288,9 +312,17 @@ class MainActivity : ComponentActivity() {
         var previousEndMillis by rememberSaveable {
             mutableStateOf(initialIntent.getLongExtra("previous_end_millis", -1L).takeIf { it > 0 })
         }
+        var explicitPreviousEndMillis by rememberSaveable { mutableStateOf(previousEndMillis) }
+        var selectedTargetEvent by remember { mutableStateOf<CalendarEventRef?>(null) }
         var estimate by remember { mutableStateOf<RouteEstimate?>(null) }
         var baseRoute by remember { mutableStateOf<RouteEstimate?>(null) }
         var activeRequest by remember { mutableStateOf<RouteRequest?>(null) }
+        val historyStore = remember { RouteHistoryStore(context) }
+        var activeHistoryEntry by remember { mutableStateOf<RouteHistoryEntry?>(null) }
+        var historyNeedsNewTime by remember { mutableStateOf(false) }
+        var calculationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+        var activeRoutingService by remember { mutableStateOf<CancelableRoutingService?>(null) }
+
         var pois by remember { mutableStateOf<List<RoutePoi>>(emptyList()) }
         var chargingLoad by remember { mutableStateOf(PoiLoadStatus()) }
         var registryLoad by remember { mutableStateOf(PoiLoadStatus()) }
@@ -300,6 +332,7 @@ class MainActivity : ComponentActivity() {
         var planWarning by remember { mutableStateOf<String?>(null) }
         var planConflict by remember { mutableStateOf(false) }
         var duplicateExists by remember { mutableStateOf(false) }
+        var calculationRevision by remember { mutableLongStateOf(0L) }
         var driveIdentityKey by remember { mutableStateOf("") }
         var plannedStart by remember { mutableStateOf<Long?>(null) }
         var plannedEnd by remember { mutableStateOf<Long?>(null) }
@@ -320,6 +353,7 @@ class MainActivity : ComponentActivity() {
         val saveIcsLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("text/calendar")
         ) { uri ->
+            val outputHistory = activeHistoryEntry
             val route = estimate
             val start = plannedStart
             val end = plannedEnd
@@ -344,9 +378,15 @@ class MainActivity : ComponentActivity() {
                             start,
                             end,
                             resolvedDriveEventTitle(settings),
-                            description
+                            description,
+                            appointmentMillis = activeRequest?.arrivalMillis,
+                            calculatedAtMillis = calculationRevision
                         )
+                    }.onSuccess {
+                        historyStore.markSafely(context, outputHistory, HistorySaveState.ICS)
                     }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        historyStore.markSafely(context, outputHistory, HistorySaveState.FAILED)
                         error = it.message ?: tr(
                             settings.language,
                             "Could not save the ICS file.",
@@ -401,7 +441,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun applyRoutePlan(
+        suspend fun applyRoutePlan(
             route: RouteEstimate,
             effectiveArrivalMillis: Long,
             walkingDurationSeconds: Long,
@@ -425,19 +465,27 @@ class MainActivity : ComponentActivity() {
             planWarning = listOfNotNull(
                 if (duplicate) tr(
                     settings.language,
-                    "A Drive Time Notifier entry already exists for this destination and appointment time. You can still save another drive if you want to.",
-                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Du kannst die Fahrt auf Wunsch trotzdem erneut speichern."
+                    "A Drive Time Notifier entry already exists for this destination and appointment time. Saving updates the existing drive with the latest calculation.",
+                    "Für dieses Ziel und diese Terminzeit existiert bereits ein Drive-Time-Notifier-Eintrag. Beim Speichern wird die vorhandene Fahrt mit der aktuellen Berechnung aktualisiert."
                 ) else null,
                 planWarningText(settings.language, plan, effectiveBufferMinutes),
                 routeWarningText(settings.language, settings.routingProvider, route.warning)
             ).joinToString(" ").ifBlank { null }
+            val request = activeRequest
+            if (request != null) {
+                val id = activeHistoryEntry?.id ?: java.util.UUID.randomUUID().toString()
+                activeHistoryEntry = historyStore.recordSafely(context) {
+                    RouteHistoryEntry.create(id, calculationRevision, HistoryTrigger.MANUAL, request, route, plan, walkingDurationSeconds)
+                }
+            }
         }
 
         suspend fun loadChargingData(
             route: RouteEstimate,
             request: RouteRequest,
             generation: Int,
-            enrichmentClient: OsmEnrichmentClient
+            enrichmentClient: OsmEnrichmentClient,
+            preloaded: Result<OsmEnrichmentResult>? = null
         ) {
             if (!settings.showChargingStations) return
             chargingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
@@ -453,7 +501,7 @@ class MainActivity : ComponentActivity() {
                 if (settings.chargingUseBNetzA) registryLoad = chargingLoad
                 return
             }
-            val attempt = runCatching {
+            val attempt = preloaded ?: runCatching {
                 enrichmentClient.query(
                     points = points,
                     parking = null,
@@ -466,12 +514,13 @@ class MainActivity : ComponentActivity() {
                 if (settings.chargingUseBNetzA) registryLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = it.message.orEmpty())
                 return
             }
+            val unavailable=result.chargingUnavailable ?: result.unavailable
             val chargingPois = result.pois.filter { it.kind == RoutePoi.Kind.CHARGING_STATION }
             pois = pois.filterNot { it.kind == RoutePoi.Kind.CHARGING_STATION } + chargingPois
             chargingLoad = PoiLoadStatus(
-                phase = if (result.unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
+                phase = if (unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
                 count = chargingPois.size,
-                detail = if (result.unavailable) tr(
+                detail = if (unavailable) tr(
                     settings.language,
                     "OpenStreetMap is unavailable or only partial.",
                     "OpenStreetMap ist nicht erreichbar oder nur teilweise verfügbar."
@@ -513,7 +562,8 @@ class MainActivity : ComponentActivity() {
         suspend fun loadParkingData(
             route: RouteEstimate,
             generation: Int,
-            enrichmentClient: OsmEnrichmentClient
+            enrichmentClient: OsmEnrichmentClient,
+            preloaded: Result<OsmEnrichmentResult>? = null
         ) {
             if (!settings.showParking) return
             parkingLoad = PoiLoadStatus(PoiLoadPhase.RUNNING)
@@ -528,7 +578,7 @@ class MainActivity : ComponentActivity() {
                 }
                 return
             }
-            val attempt = runCatching {
+            val attempt = preloaded ?: runCatching {
                 enrichmentClient.query(
                     points,
                     parking = ParkingSearchOptions(
@@ -544,12 +594,13 @@ class MainActivity : ComponentActivity() {
                 parkingLoad = PoiLoadStatus(PoiLoadPhase.FAILED, detail = it.message.orEmpty())
                 return
             }
+            val unavailable=result.parkingUnavailable ?: result.unavailable
             val parkingPois = result.pois.filter { it.kind == RoutePoi.Kind.PARKING }
             pois = pois.filterNot { it.kind == RoutePoi.Kind.PARKING } + parkingPois
             parkingLoad = PoiLoadStatus(
-                phase = if (result.unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
+                phase = if (unavailable) PoiLoadPhase.FAILED else PoiLoadPhase.SUCCESS,
                 count = parkingPois.size,
-                detail = if (result.unavailable) tr(
+                detail = if (unavailable) tr(
                     settings.language,
                     "OpenStreetMap is unavailable or only partial.",
                     "OpenStreetMap ist nicht erreichbar oder nur teilweise verfügbar."
@@ -558,8 +609,13 @@ class MainActivity : ComponentActivity() {
         }
 
         fun calculateRoute() {
+            if (historyNeedsNewTime) { showDatePicker = true; return }
             if (origin.isBlank() || destination.isBlank() || loading) return
+            calculationJob?.cancel()
+            activeRoutingService?.cancelActiveCalls()
+            activeHistoryEntry = null
             calculationGeneration += 1
+            calculationRevision = System.currentTimeMillis()
             val generation = calculationGeneration
             error = null
             loading = true
@@ -573,24 +629,39 @@ class MainActivity : ComponentActivity() {
             parkingLoad = if (settings.showParking) PoiLoadStatus(PoiLoadPhase.QUEUED) else PoiLoadStatus()
             duplicateExists = false
             driveIdentityKey = ""
-            scope.launch {
+            calculationJob = scope.launch {
                 val target = LocalDateTime.of(appointmentDate, appointmentTime)
                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 val result = runCatching {
             val cleanDestination = destination.trim()
             val request = RouteRequest(origin.trim(), cleanDestination, target)
             val identityKey = DriveEntryIdentity.key(cleanDestination, target)
+            val sourceIds = settings.sourceCalendarIds.mapNotNull { it.toLongOrNull() }.toSet()
+            val canReadCalendar = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+            val busy = if (sourceIds.isNotEmpty() && canReadCalendar)
+                calendarRepo.events(target - 86_400_000L, target + 86_400_000L, sourceIds, includeWithoutLocation = true)
+                else emptyList()
+            val selected = selectedTargetEvent?.takeIf {
+                it.startMillis == target && DriveEntryIdentity.normalizeLocation(it.location) == DriveEntryIdentity.normalizeLocation(cleanDestination)
+            } ?: busy.firstOrNull {
+                it.startMillis == target && DriveEntryIdentity.normalizeLocation(it.location) == DriveEntryIdentity.normalizeLocation(cleanDestination)
+            } ?: CalendarEventRef(-1, -1, "", cleanDestination, target, target)
+            previousEndMillis = listOfNotNull(explicitPreviousEndMillis, CalendarConflicts.previousEnd(busy, selected)).maxOrNull()
             val existingDrive = if (!settings.outputIcs && settings.targetCalendarId >= 0) {
                 runCatching {
                     calendarRepo.findExistingDrive(
                         settings.targetCalendarId,
                         cleanDestination,
                         target,
-                        identityKey
+                        identityKey,
+                        origin = origin.trim()
                     )
                 }.getOrNull()
             } else null
-            val route = RoutingServiceFactory.create(context, settings).route(request)
+            val routing = RoutingServiceFactory.create(context, settings)
+            activeRoutingService = routing as? CancelableRoutingService
+            val route = try { routing.route(request) }
+                finally { if (generation == calculationGeneration) activeRoutingService = null }
             InitialRouteCalculation(
                 route = route,
                 request = request,
@@ -607,6 +678,7 @@ class MainActivity : ComponentActivity() {
             applyRoutePlan(calculation.route, calculation.request.arrivalMillis, 0L, calculation.duplicateExists)
             loading = false
         }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
             if (generation != calculationGeneration) return@onFailure
             error = it.message ?: tr(settings.language, "Route calculation failed.", "Routenberechnung fehlgeschlagen.")
             loading = false
@@ -618,10 +690,72 @@ class MainActivity : ComponentActivity() {
                     settings.overpassEndpoints,
                     settings.overpassSplitRequests
                 )
+                val shared=if(settings.showChargingStations && settings.showParking) {
+                    chargingLoad=PoiLoadStatus(PoiLoadPhase.RUNNING)
+                    registryLoad=if(settings.chargingUseBNetzA) PoiLoadStatus(PoiLoadPhase.RUNNING) else PoiLoadStatus()
+                    parkingLoad=PoiLoadStatus(PoiLoadPhase.RUNNING)
+                    runCatching {
+                        val points=PolylineDecoder.decode(calculation.route.encodedPolyline)
+                        enrichmentClient.query(points,ParkingSearchOptions(settings.parkingResultLimit,settings.parkingMaxDistanceMeters,settings.parkingFreeOnly),ChargingSearchOptions.from(settings))
+                    }.also {result -> result.exceptionOrNull()?.let {if(it is kotlinx.coroutines.CancellationException)throw it}}
+                } else null
                 if (settings.showChargingStations) {
-                    loadChargingData(calculation.route, calculation.request, generation, enrichmentClient)
+                    loadChargingData(calculation.route, calculation.request, generation, enrichmentClient,shared)
                 }
-                if (settings.showParking) loadParkingData(calculation.route, generation, enrichmentClient)
+                if (settings.showParking) loadParkingData(calculation.route, generation, enrichmentClient,shared)
+            }
+        }
+
+        LaunchedEffect(historyRequest?.nonce) {
+            val request = historyRequest ?: return@LaunchedEffect
+            calculationGeneration += 1
+            calculationJob?.cancel()
+            activeRoutingService?.cancelActiveCalls()
+            activeRoutingService = null
+            loading = false
+            estimate = null
+            baseRoute = null
+            activeRequest = null
+            activeHistoryEntry = null
+            pois = emptyList()
+            previousEndMillis = null
+            explicitPreviousEndMillis = null
+            selectedTargetEvent = null
+            originEditRevision++; destinationEditRevision++
+            origin = request.entry.request.origin
+            originInitialized = true
+            destination = request.entry.request.destination
+            val past = request.entry.request.arrivalMillis <= System.currentTimeMillis()
+            val time = if (past) LocalDateTime.now().plusHours(1)
+                else Instant.ofEpochMilli(request.entry.request.arrivalMillis).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            appointmentDate = time.toLocalDate()
+            appointmentTime = time.toLocalTime().withSecond(0).withNano(0)
+            historyNeedsNewTime = past
+            if (past) {
+                error = tr(settings.language, "Choose a new appointment date and time, then calculate.",
+                    "Wähle eine neue Terminzeit und berechne anschließend die Fahrt.")
+                showDatePicker = true
+            } else {
+                error = null
+                if (request.recalculate) calculateRoute()
+            }
+            onHistoryRequestHandled()
+        }
+
+        LaunchedEffect(origin, destination, appointmentDate, appointmentTime, activeRequest) {
+            val request = activeRequest ?: return@LaunchedEffect
+            val time = LocalDateTime.of(appointmentDate, appointmentTime).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            if (request.origin != origin.trim() || request.destination != destination.trim() || request.arrivalMillis != time) {
+                calculationGeneration += 1
+                calculationJob?.cancel()
+                activeRoutingService?.cancelActiveCalls()
+                activeRoutingService = null
+                estimate = null
+                baseRoute = null
+                activeRequest = null
+                activeHistoryEntry = null
+                loading = false
+                pois = emptyList()
             }
         }
 
@@ -637,11 +771,21 @@ class MainActivity : ComponentActivity() {
                 nextDriveShortcutHandled = true
                 return@LaunchedEffect
             }
+            val requestedOrigin = origin
+            val requestedDestination = destination
+            val requestedRevision = originEditRevision to destinationEditRevision
+            val requestedArrival = appointmentDate to appointmentTime
             val now = System.currentTimeMillis()
             val next = runCatching {
                 calendarRepo.events(now, now + 21L * 24 * 60 * 60 * 1000, selected)
                     .firstOrNull { it.startMillis > now }
             }.getOrNull()
+            if (origin != requestedOrigin || destination != requestedDestination ||
+                requestedRevision != (originEditRevision to destinationEditRevision) ||
+                requestedArrival != (appointmentDate to appointmentTime)) {
+                nextDriveShortcutHandled = true
+                return@LaunchedEffect
+            }
             if (next == null) {
                 error = tr(settings.language, "No upcoming appointment with a location was found.", "Kein kommender Termin mit Ort gefunden.")
                 nextDriveShortcutHandled = true
@@ -685,7 +829,7 @@ class MainActivity : ComponentActivity() {
                 AddressAutocompleteField(
                     settings = settings,
                     value = origin,
-                    onValueChange = { origin = it; originInitialized = true; previousEndMillis = null },
+                    onValueChange = { originEditRevision++; origin = it; originInitialized = true; previousEndMillis = null },
                     label = tr(settings.language, "Start location", "Startort"),
                     leadingIcon = { Icon(Icons.Outlined.MyLocation, null) }
                 )
@@ -694,7 +838,9 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
+                        currentValue = origin, currentRevision = originEditRevision,
                         onSelect = { address ->
+                            originEditRevision++
                             origin = address
                             originInitialized = true
                             previousEndMillis = null
@@ -713,7 +859,7 @@ class MainActivity : ComponentActivity() {
                 AddressAutocompleteField(
                     settings = settings,
                     value = destination,
-                    onValueChange = { destination = it },
+                    onValueChange = { destinationEditRevision++; destination = it },
                     label = tr(settings.language, "Destination", "Ziel"),
                     leadingIcon = { Icon(Icons.Outlined.LocationOn, null) }
                 )
@@ -722,7 +868,8 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(10.dp))
                     QuickLocationChips(
                         settings = settings,
-                        onSelect = { destination = it }
+                        currentValue = destination, currentRevision = destinationEditRevision,
+                        onSelect = { destinationEditRevision++; destination = it }
                     )
                 }
 
@@ -831,6 +978,7 @@ class MainActivity : ComponentActivity() {
                         }
                         FilledTonalButton(
                             onClick = {
+                                val outputHistory = activeHistoryEntry
                                 val start = plannedStart ?: return@FilledTonalButton
                                 val end = plannedEnd ?: return@FilledTonalButton
                                 runCatching {
@@ -851,7 +999,9 @@ class MainActivity : ComponentActivity() {
                                         start,
                                         end,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                            appointmentMillis = activeRequest?.arrivalMillis,
+                            calculatedAtMillis = calculationRevision
                                     )
                                     context.startActivity(
                                         Intent.createChooser(
@@ -863,6 +1013,8 @@ class MainActivity : ComponentActivity() {
                                             tr(settings.language, "Export ICS", "ICS exportieren")
                                         )
                                     )
+                                }.onSuccess {
+                                    scope.launch { historyStore.markSafely(context, outputHistory, HistorySaveState.ICS) }
                                 }.onFailure { error = it.message }
                             },
                             modifier = Modifier.weight(1f).height(56.dp),
@@ -877,6 +1029,7 @@ class MainActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             if (calendarSaving || calendarSaved) return@Button
+                            val outputHistory = activeHistoryEntry
                             val start = plannedStart ?: return@Button
                             val end = plannedEnd ?: return@Button
                             calendarSaving = true
@@ -905,13 +1058,19 @@ class MainActivity : ComponentActivity() {
                                         end,
                                         settings.reminderLeadMinutes,
                                         resolvedDriveEventTitle(settings),
-                                        description
+                                        description,
+                                        destinationStartMillis = activeRequest?.arrivalMillis,
+                                        calculatedAtMillis = calculationRevision
                                     )
                                 }.onSuccess {
+                                    historyStore.markSafely(context, outputHistory, HistorySaveState.CALENDAR)
+                                    duplicateExists = true
                                     calendarSaved = true
                                     delay(1400)
                                     calendarSaved = false
                                 }.onFailure {
+                                    if (it is kotlinx.coroutines.CancellationException) throw it
+                                    historyStore.markSafely(context, outputHistory, HistorySaveState.FAILED)
                                     error = it.message ?: tr(
                                         settings.language,
                                         "Could not add the drive to the calendar.",
@@ -943,7 +1102,7 @@ class MainActivity : ComponentActivity() {
                             if (calendarSaved)
                                 tr(settings.language, "Added successfully", "Erfolgreich eingetragen")
                             else if (duplicateExists)
-                                tr(settings.language, "Save anyway", "Trotzdem speichern")
+                                tr(settings.language, "Update drive", "Fahrt aktualisieren")
                             else
                                 tr(settings.language, "Save drive to calendar", "Fahrt im Kalender speichern")
                         )
@@ -971,7 +1130,7 @@ class MainActivity : ComponentActivity() {
             AppDatePickerDialog(
                 initialDate = appointmentDate,
                 onDismiss = { showDatePicker = false },
-                onConfirm = { appointmentDate = it; showDatePicker = false }
+                onConfirm = { appointmentDate = it; showDatePicker = false; if (historyNeedsNewTime) showTimePicker = true }
             )
         }
         if (showTimePicker) {
@@ -981,7 +1140,7 @@ class MainActivity : ComponentActivity() {
                 cancelLabel = tr(settings.language, "Cancel", "Abbrechen"),
                 confirmLabel = tr(settings.language, "Apply", "Übernehmen"),
                 onDismiss = { showTimePicker = false },
-                onConfirm = { appointmentTime = it; showTimePicker = false }
+                onConfirm = { appointmentTime = it; showTimePicker = false; historyNeedsNewTime = false }
             )
         }
         if (showEventPicker) {
@@ -995,11 +1154,15 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { showEventPicker = false },
                 onSelect = { event ->
                     if (pickingStart) {
+                        originEditRevision++
                         origin = event.location
                         originInitialized = true
                         previousEndMillis = event.endMillis
+                        explicitPreviousEndMillis = event.endMillis
                     } else {
+                        destinationEditRevision++
                         destination = event.location
+                        selectedTargetEvent = event
                         val dt = Instant.ofEpochMilli(event.startMillis).atZone(ZoneId.systemDefault()).toLocalDateTime()
                         appointmentDate = dt.toLocalDate()
                         appointmentTime = dt.toLocalTime().withSecond(0).withNano(0)
@@ -1250,11 +1413,10 @@ class MainActivity : ComponentActivity() {
         Surface(shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
             androidx.compose.ui.viewinterop.AndroidView(
                 modifier = Modifier.fillMaxWidth().height(280.dp),
-                factory = { ctx ->
-                    MapView(ctx).apply {
-                        setMultiTouchControls(true)
-                        controller.setZoom(12.0)
-                    }
+                factory = { ctx -> de.drivetime.notifier.ui.createPlannerMap(ctx) },
+                onRelease = { map ->
+                    map.onPause()
+                    map.onDetach()
                 },
                 update = { map ->
                     runCatching {
@@ -1296,19 +1458,12 @@ class MainActivity : ComponentActivity() {
                             })
                         }
                         map.invalidate()
-                        map.post {
-                            runCatching {
-                                map.zoomToBoundingBox(
-                                    org.osmdroid.util.BoundingBox.fromGeoPoints(points),
-                                    true,
-                                    72
-                                )
-                            }
-                        }
+                        de.drivetime.notifier.ui.fitPlannerRoute(map, points)
                     }
                 }
             )
         }
+        Text("© OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall)
         selectedPoi?.let { poi ->
             PoiDetailsDialog(settings, poi) { selectedPoi = null }
         }
@@ -1409,10 +1564,18 @@ class MainActivity : ComponentActivity() {
         settings: AppSettings,
         keyStore: SecureApiKeyStore,
         calendarRepo: CalendarRepository,
+        historySettingsRequested: Boolean,
         hasCalendarPermission: Boolean,
         onRequestCalendarPermission: () -> Unit,
         onChange: (AppSettings) -> Unit
     ) {
+        val historyRequester = remember { BringIntoViewRequester() }
+        LaunchedEffect(historySettingsRequested) {
+            if (historySettingsRequested) {
+                withFrameNanos { }
+                historyRequester.bringIntoView()
+            }
+        }
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         val uriHandler = LocalUriHandler.current
@@ -1426,7 +1589,9 @@ class MainActivity : ComponentActivity() {
         var showAddPlace by remember { mutableStateOf(false) }
         var calendarPlaceAssignmentRaw by remember { mutableStateOf<String?>(null) }
         var showAddExclusion by remember { mutableStateOf(false) }
+        var parkingRadiusRevision by rememberSaveable { mutableLongStateOf(0L) }
         var showParkingSettings by remember { mutableStateOf(false) }
+        var chargingRadiusRevision by rememberSaveable { mutableLongStateOf(0L) }
         var showChargingSettings by remember { mutableStateOf(false) }
         var showFallbackSettings by remember { mutableStateOf(false) }
         var showFallbackPicker by remember { mutableStateOf(false) }
@@ -1443,12 +1608,18 @@ class MainActivity : ComponentActivity() {
         var pendingReselectedSourceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
         var restoreAutomaticAfterCalendarSelection by remember { mutableStateOf(false) }
         var automationToken by remember { mutableStateOf(AutomationTokenStore(context).token()) }
-        var homeNameDraft by remember { mutableStateOf(settings.homeName) }
-        var homeDraft by remember { mutableStateOf(settings.homeAddress) }
-        var calendarTitleDraft by remember { mutableStateOf(settings.calendarEventTitle) }
-        var osrmDraft by remember { mutableStateOf(settings.osrmBaseUrl) }
-        var valhallaDraft by remember { mutableStateOf(settings.valhallaBaseUrl) }
-        var photonDraft by remember { mutableStateOf(settings.photonBaseUrl) }
+        val homeNameDraftState = rememberTextDraft(settings.homeName)
+        var homeNameDraft by homeNameDraftState
+        val homeDraftState = rememberTextDraft(settings.homeAddress)
+        var homeDraft by homeDraftState
+        val calendarTitleDraftState = rememberTextDraft(settings.calendarEventTitle)
+        var calendarTitleDraft by calendarTitleDraftState
+        val osrmDraftState = rememberTextDraft(settings.osrmBaseUrl)
+        var osrmDraft by osrmDraftState
+        val valhallaDraftState = rememberTextDraft(settings.valhallaBaseUrl)
+        var valhallaDraft by valhallaDraftState
+        val photonDraftState = rememberTextDraft(settings.photonBaseUrl)
+        var photonDraft by photonDraftState
         val operatorCatalog = remember { ChargingOperatorCatalog(context) }
         var operatorOptions by remember { mutableStateOf(operatorCatalog.operators()) }
         var operatorRefreshing by remember { mutableStateOf(false) }
@@ -1534,31 +1705,25 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(homeNameDraft) {
             delay(500)
-            if (homeNameDraft != latestSettings.homeName) {
+            if (homeNameDraftState.edited && homeNameDraft != latestSettings.homeName) {
                 onChange(latestSettings.copy(homeName = homeNameDraft))
-            }
-        }
-        LaunchedEffect(homeDraft) {
-            delay(500)
-            if (homeDraft != latestSettings.homeAddress) {
-                onChange(latestSettings.copy(homeAddress = homeDraft))
             }
         }
         LaunchedEffect(calendarTitleDraft) {
             delay(500)
-            if (calendarTitleDraft != latestSettings.calendarEventTitle) {
+            if (calendarTitleDraftState.edited && calendarTitleDraft != latestSettings.calendarEventTitle) {
                 onChange(latestSettings.copy(calendarEventTitle = calendarTitleDraft))
             }
         }
         LaunchedEffect(osrmDraft) {
             delay(600)
-            if (osrmDraft != latestSettings.osrmBaseUrl) {
+            if (osrmDraftState.edited && osrmDraft != latestSettings.osrmBaseUrl) {
                 onChange(latestSettings.copy(osrmBaseUrl = osrmDraft))
             }
         }
         LaunchedEffect(valhallaDraft) {
             delay(600)
-            if (valhallaDraft != latestSettings.valhallaBaseUrl) {
+            if (valhallaDraftState.edited && valhallaDraft != latestSettings.valhallaBaseUrl) {
                 onChange(latestSettings.copy(valhallaBaseUrl = valhallaDraft))
             }
         }
@@ -1568,6 +1733,7 @@ class MainActivity : ComponentActivity() {
         ) {
             Spacer(Modifier.height(4.dp))
 
+            Spacer(Modifier.height(12.dp))
             SettingsCard(
                 title = tr(settings.language, "Appearance", "Darstellung"),
                 icon = Icons.Outlined.Palette
@@ -1646,10 +1812,20 @@ class MainActivity : ComponentActivity() {
                 AddressAutocompleteField(
                     settings = settings,
                     value = homeDraft,
-                    onValueChange = { homeDraft = it },
+                    onValueChange = {
+                        homeDraft = it
+                        // Empty keyboard drafts must never erase a saved default.
+                        if (it.isNotBlank()) onChange(latestSettings.copy(homeAddress = it.trim()))
+                    },
                     label = tr(settings.language, "Default start location", "Standard-Startort"),
-                    leadingIcon = { Icon(Icons.Outlined.Home, null) }
+                    leadingIcon = { Icon(Icons.Outlined.Home, null) },
+                    clearAvailable = homeDraft.isNotEmpty() || settings.homeAddress.isNotBlank(),
+                    onClear = {
+                        homeDraftState.reset("")
+                        onChange(latestSettings.copy(homeAddress = ""))
+                    }
                 )
+
 
                 Spacer(Modifier.height(6.dp))
                 Text(tr(settings.language, "Saved start locations", "Weitere Startpunkte"), style = MaterialTheme.typography.labelLarge)
@@ -1823,6 +1999,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 NumberDraftField(
                     initialValue = settings.bufferMinutes,
+                    minimum = 0, maximum = 180,
                     label = tr(settings.language, "Arrival buffer (minutes)", "Ankunftspuffer (Minuten)"),
                     onValid = { onChange(settings.copy(bufferMinutes = it.coerceIn(0, 180))) }
                 )
@@ -1863,6 +2040,7 @@ class MainActivity : ComponentActivity() {
                 }
                 NumberDraftField(
                     initialValue = settings.reminderLeadMinutes,
+                    minimum = 0, maximum = 180,
                     label = tr(settings.language, "Departure reminder lead (minutes)", "Benachrichtigung vor Abfahrt (Minuten)"),
                     onValid = { onChange(settings.copy(reminderLeadMinutes = it.coerceIn(0, 180))) }
                 )
@@ -1922,6 +2100,7 @@ class MainActivity : ComponentActivity() {
                             )
                             NumberDraftField(
                                 initialValue = settings.chargingResultLimit,
+                    minimum = 1, maximum = 50,
                                 label = tr(settings.language, "Number of charging stations (1–50)", "Anzahl der Ladesäulen (1–50)"),
                                 onValid = { onChange(settings.copy(chargingResultLimit = it.coerceIn(1, 50))) }
                             )
@@ -1978,13 +2157,15 @@ class MainActivity : ComponentActivity() {
                                 listOf(250, 500, 750, 1000, 1500, 2000).forEach { meters ->
                                     FilterChip(
                                         selected = settings.chargingMaxDistanceMeters == meters,
-                                        onClick = { onChange(settings.copy(chargingMaxDistanceMeters = meters)) },
+                                        onClick = { chargingRadiusRevision++; onChange(settings.copy(chargingMaxDistanceMeters = meters)) },
                                         label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
                                     )
                                 }
                             }
                             NumberDraftField(
                                 initialValue = settings.chargingMaxDistanceMeters,
+                    editSessionKey = chargingRadiusRevision,
+                    minimum = 100, maximum = 10000,
                                 label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
                                 onValid = { onChange(settings.copy(chargingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
                             )
@@ -2114,162 +2295,19 @@ class MainActivity : ComponentActivity() {
                     onClick = { showAutomationTimePicker = true },
                     leadingIcon = Icons.Outlined.Schedule
                 )
+
             }
 
-            SettingsCard(
-                title = tr(settings.language, "Routing provider", "Routingdienst"),
-                icon = Icons.Outlined.Route
-            ) {
-                RoutingProvider.entries.forEach { provider ->
-                    ProviderCard(
-                        provider = provider,
-                        selected = settings.routingProvider == provider,
-                        settings = settings,
-                        keyStore = keyStore,
-                        interfaceHealthStore = interfaceHealthStore,
-                        healthRevision = healthRevision,
-                        onHealthChanged = { healthRevision++ },
-                        onSelect = {
-                            onChange(
-                                settings.copy(
-                                    routingProvider = provider,
-                                    fallbackProviderIds = settings.fallbackProviderIds.filterNot { it == provider.id }
-                                )
-                            )
-                        },
-                        onCap = { cap ->
-                    onChange(settings.copy(providerCaps = settings.providerCaps.withProvider(provider, cap)))
-                },
-                onTimeout = { seconds ->
-                    onChange(
-                        settings.copy(
-                            providerTimeoutSeconds = settings.providerTimeoutSeconds.withProvider(provider, seconds)
-                        )
-                    )
+            SettingsCard(title=tr(settings.language,"Routing services","Routingdienste"),icon=Icons.Outlined.Route) {
+                RoutingServiceList(settings,keyStore,onChange)
+            }
+            SettingsCard(title=tr(settings.language,"Address and map data services","Adress- und Kartendienste"),icon=Icons.Outlined.Map) {
+                MapServiceLists(settings,onChange)
+            }
+            Box(Modifier.fillMaxWidth().bringIntoViewRequester(historyRequester)) {
+                SettingsCard(title=tr(settings.language,"Search history","Suchhistorie"),icon=Icons.Outlined.History) {
+                    HistoryPreferencesCard(settings.language)
                 }
-                    )
-                    Spacer(Modifier.height(10.dp))
-                }
-
-                OutlinedButton(
-                    onClick = { showFallbackSettings = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Outlined.AltRoute, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (settings.fallbackProviderIds.isEmpty())
-                            tr(settings.language, "Configure fallback routing", "Fallback-Routing konfigurieren")
-                        else tr(
-                            settings.language,
-                            "Fallback routing (${settings.fallbackProviderIds.size})",
-                            "Fallback-Routing (${settings.fallbackProviderIds.size})"
-                        )
-                    )
-                }
-                if (showFallbackSettings) {
-                    Dialog(onDismissRequest = { showFallbackSettings = false }) {
-                    Surface(
-                        shape = MaterialTheme.shapes.extraLarge,
-                        tonalElevation = 6.dp,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)
-                    ) {
-                    Column(
-                        Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                Text(
-                    tr(settings.language, "Fallback routing", "Fallback-Routing"),
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Text(
-                    tr(
-                        settings.language,
-                        "If the primary provider reaches its local cap or fails, providers below are tried in this order.",
-                        "Wenn der primäre Dienst sein lokales Limit erreicht oder fehlschlägt, werden die folgenden Dienste in dieser Reihenfolge versucht."
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                settings.fallbackProviderIds.forEachIndexed { index, id ->
-                    val fallback = RoutingProvider.entries.firstOrNull { it.id == id }
-                    if (fallback != null && fallback != settings.routingProvider) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("${index + 1}.", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.width(8.dp))
-                            ProviderMonochromeMark(fallback)
-                            Spacer(Modifier.width(8.dp))
-                            Text(fallback.displayName, Modifier.weight(1f))
-                            IconButton(
-                                enabled = index > 0,
-                                onClick = {
-                                    val list = settings.fallbackProviderIds.toMutableList()
-                                    val item = list.removeAt(index)
-                                    list.add(index - 1, item)
-                                    onChange(settings.copy(fallbackProviderIds = list))
-                                }
-                            ) { Icon(Icons.Outlined.KeyboardArrowUp, null) }
-                            IconButton(
-                                enabled = index < settings.fallbackProviderIds.lastIndex,
-                                onClick = {
-                                    val list = settings.fallbackProviderIds.toMutableList()
-                                    val item = list.removeAt(index)
-                                    list.add(index + 1, item)
-                                    onChange(settings.copy(fallbackProviderIds = list))
-                                }
-                            ) { Icon(Icons.Outlined.KeyboardArrowDown, null) }
-                            IconButton(onClick = {
-                                onChange(settings.copy(fallbackProviderIds = settings.fallbackProviderIds - id))
-                            }) {
-                                Icon(Icons.Outlined.DeleteOutline, tr(settings.language, "Remove", "Entfernen"))
-                            }
-                        }
-                    }
-                }
-                FilledTonalButton(onClick = { showFallbackPicker = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(tr(settings.language, "Add fallback provider", "Fallback-Dienst hinzufügen"))
-                }
-                Button(onClick = { showFallbackSettings = false }, modifier = Modifier.fillMaxWidth()) {
-                    Text(tr(settings.language, "Done", "Fertig"))
-                }
-                    }
-                    }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-
-                ProviderKeyAndEndpoints(
-                    settings = settings,
-                    keyStore = keyStore,
-                    osrmDraft = osrmDraft,
-                    valhallaDraft = valhallaDraft,
-                    photonDraft = photonDraft,
-                    interfaceHealthStore = interfaceHealthStore,
-                    healthRevision = healthRevision,
-                    onHealthChanged = { healthRevision++ },
-                    onOsrmDraft = { osrmDraft = it },
-                    onValhallaDraft = { valhallaDraft = it },
-                    onPhotonDraft = { photonDraft = it },
-                    onNetworkDataConfig = { photon, endpoints, split ->
-                        val sanitized = OsmEnrichmentClient.normalizeConfiguredEndpoints(endpoints)
-                        onChange(
-                            settings.copy(
-                                photonBaseUrl = photon,
-                                overpassBaseUrl = sanitized.first(),
-                                overpassEndpoints = sanitized,
-                                overpassSplitRequests = split
-                            )
-                        )
-                    },
-                    onOpenUrl = { uriHandler.openUri(it) }
-                )
-
             }
 
             SettingsCard(
@@ -2400,6 +2438,8 @@ class MainActivity : ComponentActivity() {
                     appendLine("Bundesnetzagentur: ${settings.chargingUseBNetzA}")
                     appendLine()
                     append(RequestDebugLog.format(debugEntries))
+                    append("\n\n")
+                    append(de.drivetime.notifier.automation.AutomationRunLog.format(context))
                 }
                 SettingsCard(
                     title = tr(settings.language, "Network debug", "Netzwerk-Debug"),
@@ -2420,7 +2460,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Copy", "Kopieren"))
                         }
-                        TextButton(onClick = { RequestDebugLog.clear() }) {
+                        TextButton(onClick = { RequestDebugLog.clear(); de.drivetime.notifier.automation.AutomationRunLog.clear(context) }) {
                             Icon(Icons.Outlined.DeleteOutline, null)
                             Spacer(Modifier.width(5.dp))
                             Text(tr(settings.language, "Clear", "Leeren"))
@@ -2653,12 +2693,12 @@ class MainActivity : ComponentActivity() {
                                                 calendarStartLocations = emptySet(),
                                                 automaticEnabled = false
                                             )
-                                            homeNameDraft = restored.homeName
-                                            homeDraft = restored.homeAddress
-                                            calendarTitleDraft = restored.calendarEventTitle
-                                            osrmDraft = restored.osrmBaseUrl
-                                            valhallaDraft = restored.valhallaBaseUrl
-                                            photonDraft = restored.photonBaseUrl
+                                            homeNameDraftState.reset(restored.homeName)
+                                            homeDraftState.reset(restored.homeAddress)
+                                            calendarTitleDraftState.reset(restored.calendarEventTitle)
+                                            osrmDraftState.reset(restored.osrmBaseUrl)
+                                            valhallaDraftState.reset(restored.valhallaBaseUrl)
+                                            photonDraftState.reset(restored.photonBaseUrl)
                                             pendingImportedSettings = restored
                                             pendingReselectedSourceIds = emptySet()
                                             restoreAutomaticAfterCalendarSelection = imported.settings.automaticEnabled
@@ -2829,6 +2869,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         NumberDraftField(
                             initialValue = settings.parkingResultLimit,
+                    minimum = 1, maximum = 50,
                             label = tr(settings.language, "Number of parking spaces (1–50)", "Anzahl der Parkplätze (1–50)"),
                             onValid = { onChange(settings.copy(parkingResultLimit = it.coerceIn(1, 50))) }
                         )
@@ -2843,13 +2884,15 @@ class MainActivity : ComponentActivity() {
                             listOf(250, 500, 750, 1000, 1500, 2000, 3000).forEach { meters ->
                                 FilterChip(
                                     selected = settings.parkingMaxDistanceMeters == meters,
-                                    onClick = { onChange(settings.copy(parkingMaxDistanceMeters = meters)) },
+                                    onClick = { parkingRadiusRevision++; onChange(settings.copy(parkingMaxDistanceMeters = meters)) },
                                     label = { Text(if (meters < 1000) "$meters m" else "${meters / 1000.0}".replace(".0", "") + " km") }
                                 )
                             }
                         }
                         NumberDraftField(
                             initialValue = settings.parkingMaxDistanceMeters,
+                    editSessionKey = parkingRadiusRevision,
+                    minimum = 100, maximum = 10000,
                             label = tr(settings.language, "Custom distance (m)", "Benutzerdefinierte Entfernung (m)"),
                             onValid = { onChange(settings.copy(parkingMaxDistanceMeters = it.coerceIn(100, 10_000))) }
                         )
@@ -3087,12 +3130,14 @@ class MainActivity : ComponentActivity() {
         if (advancedExpanded) {
             NumberDraftField(
                 initialValue = settings.providerCaps.forProvider(provider),
+                minimum = 1, maximum = 1_000_000,
                 label = tr(settings.language, "Daily request limit", "Tägliches Anfrage-Limit"),
                 onValid = { onCap(it.coerceIn(1, 1_000_000)) }
             )
             Spacer(Modifier.height(8.dp))
             NumberDraftField(
                 initialValue = settings.providerTimeoutSeconds.forProvider(provider),
+                minimum = 1, maximum = 300,
                 label = tr(settings.language, "Timeout in seconds", "Timeout in Sekunden"),
                 onValid = { onTimeout(it.coerceIn(1, 300)) }
             )
@@ -3294,10 +3339,10 @@ class MainActivity : ComponentActivity() {
         var testingId by remember { mutableStateOf<String?>(null) }
         var confirmProvider by remember { mutableStateOf<RoutingProvider?>(null) }
         var showOverpassConfig by remember { mutableStateOf(false) }
-        var overpassEndpointDrafts by remember(settings.overpassEndpoints) {
+        var overpassEndpointDrafts by rememberSaveable {
             mutableStateOf(settings.overpassEndpoints.ifEmpty { listOf(settings.overpassBaseUrl) })
         }
-        var splitOverpassDraft by remember(settings.overpassSplitRequests) {
+        var splitOverpassDraft by rememberSaveable {
             mutableStateOf(settings.overpassSplitRequests)
         }
 
@@ -3818,10 +3863,11 @@ class MainActivity : ComponentActivity() {
         testing: Boolean,
         onTest: (String) -> Unit
     ) {
-        var keyDraft by remember(provider) { mutableStateOf(keyStore.read(provider).orEmpty()) }
+        val keyDraftState = rememberTextDraft(keyStore.read(provider).orEmpty(), provider.id)
+        var keyDraft by keyDraftState
         LaunchedEffect(provider, keyDraft) {
             delay(700)
-            keyStore.save(provider, keyDraft.trim())
+            if (keyDraftState.edited) keyStore.save(provider, keyDraft.trim())
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
@@ -4219,13 +4265,15 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun QuickLocationChips(
         settings: AppSettings,
+        currentValue: String,
+        currentRevision: Long,
         onSelect: (String) -> Unit
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            CurrentLocationChip(settings.language, onSelect)
+            CurrentLocationChip(settings.language, currentValue, currentRevision, onSelect)
             if (settings.homeAddress.isNotBlank()) {
                 AssistChip(
                     onClick = { onSelect(settings.homeAddress) },
@@ -4327,38 +4375,6 @@ class MainActivity : ComponentActivity() {
             Text(label, Modifier.weight(1f))
             Switch(checked, onCheckedChange = onCheckedChange)
         }
-    }
-
-    @Composable
-    private fun NumberDraftField(initialValue: Int, label: String, onValid: (Int) -> Unit) {
-        var text by remember(label) { mutableStateOf(initialValue.toString()) }
-        var userEditing by remember(label) { mutableStateOf(false) }
-        val latestOnValid by rememberUpdatedState(onValid)
-        val latestInitial by rememberUpdatedState(initialValue)
-        LaunchedEffect(text, userEditing) {
-            if (!userEditing) return@LaunchedEffect
-            delay(450)
-            val submitted = text
-            val parsed = submitted.toIntOrNull()
-            if (parsed != null && parsed != latestInitial) latestOnValid(parsed)
-            delay(120)
-            if (text == submitted) userEditing = false
-        }
-        LaunchedEffect(initialValue, userEditing) {
-            if (!userEditing && text.toIntOrNull() != initialValue) text = initialValue.toString()
-        }
-        OutlinedTextField(
-            value = text,
-            onValueChange = {
-                if (it.all(Char::isDigit)) {
-                    text = it
-                    userEditing = true
-                }
-            },
-            label = { Text(label) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
     }
 
     @Composable

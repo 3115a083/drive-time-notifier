@@ -27,10 +27,17 @@ Builds:
     gradle:
       - release
 
+  - versionName: 1.4.0
+    versionCode: 23
+    commit: v1.4.0
+    subdir: app
+    gradle:
+      - release
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9].*
-CurrentVersion: 1.0.0
-CurrentVersionCode: 1
+CurrentVersion: 1.4.0
+CurrentVersionCode: 23
 
 MaintainerNotes: |-
   No proprietary routing SDKs are embedded. Commercial providers are optional HTTPS APIs configured by the user; free/open routing alternatives are available.

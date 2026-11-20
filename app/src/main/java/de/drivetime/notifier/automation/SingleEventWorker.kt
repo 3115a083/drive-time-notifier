@@ -8,14 +8,11 @@ import de.drivetime.notifier.calendar.DriveEntryIdentity
 import de.drivetime.notifier.calendar.DriveEventDescriptionBuilder
 import de.drivetime.notifier.core.DrivePlanner
 import de.drivetime.notifier.core.DynamicArrivalBuffer
-import de.drivetime.notifier.data.SettingsStore
+import de.drivetime.notifier.data.*
 import de.drivetime.notifier.export.IcsExporter
 import de.drivetime.notifier.model.RouteEstimate
 import de.drivetime.notifier.model.RouteRequest
 import de.drivetime.notifier.routing.ChargingRoutePlanner
-import de.drivetime.notifier.routing.ChargingSearchOptions
-import de.drivetime.notifier.routing.OsmEnrichmentClient
-import de.drivetime.notifier.routing.PolylineDecoder
 import de.drivetime.notifier.routing.RoutingService
 import de.drivetime.notifier.routing.RoutingServiceFactory
 import de.drivetime.notifier.ui.resolvedDriveEventTitle
@@ -27,47 +24,40 @@ class SingleEventWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
+    private var historyEntry: RouteHistoryEntry? = null
+    override suspend fun doWork(): Result = try {
+        process()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        RouteHistoryStore(applicationContext).markSafely(applicationContext, historyEntry, HistorySaveState.FAILED)
+        val settings = SettingsStore(applicationContext).flow.first()
+        AutomationRunLog.add(applicationContext, "single-event", "failed", error.javaClass.simpleName)
+        AutomationNotifier.notifyBackgroundActionProblem(applicationContext, settings.language,
+            "The drive could not be processed or saved. Check calendar access and the diagnostic log.",
+            "Die Fahrt konnte nicht verarbeitet oder gespeichert werden. Prüfe Kalenderzugriff und Diagnoseprotokoll.")
+        Result.failure()
+    }
+
+    private suspend fun process(): Result {
+        val calculationRevision = System.currentTimeMillis()
         val settings = SettingsStore(applicationContext).flow.first()
         val destination = inputData.getString("destination").orEmpty().trim()
         val arrival = inputData.getLong("arrival_millis", -1L)
         val previousEnd = inputData.getLong("previous_end_millis", -1L).takeIf { it > 0 }
         val origin = inputData.getString("origin").orEmpty().trim().ifBlank { settings.homeAddress }
-        val allowDuplicate = inputData.getBoolean("allow_duplicate", false)
         if (origin.isBlank() || destination.isBlank() || arrival <= 0) return Result.failure()
 
         setForeground(AutomationNotifier.processingForegroundInfo(applicationContext, settings.language, id))
-        val identityKey = inputData.getString("identity_key").orEmpty()
-            .ifBlank { DriveEntryIdentity.key(destination, arrival) }
+        val identityKey = DriveEntryIdentity.key(destination, arrival)
+        AutomationRunLog.add(applicationContext, "single-event", "started", identityKey)
         val calendar = CalendarRepository(applicationContext)
-
-        if (!allowDuplicate && !settings.outputIcs) {
-            val duplicate = runCatching {
-                calendar.findExistingDrive(
-                    settings.targetCalendarId,
-                    destination,
-                    arrival,
-                    identityKey
-                )
-            }.getOrNull()
-            if (duplicate != null) {
-                AutomationNotifier.notifyDuplicateDecision(
-                    applicationContext,
-                    settings.language,
-                    origin,
-                    destination,
-                    arrival,
-                    previousEnd,
-                    identityKey
-                )
-                return Result.success()
-            }
-        }
 
         val routes = RoutingServiceFactory.create(applicationContext, settings, automated = true)
         val request = RouteRequest(origin, destination, arrival)
         val initialRoute = routeWithRetry(routes, request)
         if (initialRoute == null) {
+            AutomationRunLog.add(applicationContext, "single-event", "routing-failed", identityKey)
             AutomationNotifier.notifyRoutingFailure(
                 applicationContext,
                 settings.language,
@@ -79,7 +69,7 @@ class SingleEventWorker(
             return Result.failure()
         }
 
-        return runCatching {
+        return run {
             val enriched = ChargingRoutePlanner.prepare(
                 context = applicationContext,
                 settings = settings,
@@ -94,6 +84,13 @@ class SingleEventWorker(
                 DynamicArrivalBuffer.totalMinutes(settings, route.durationSeconds, route.trafficDelaySeconds),
                 previousEnd
             )
+            historyEntry = RouteHistoryStore(applicationContext).recordSafely(applicationContext) {
+                RouteHistoryEntry.create(
+                    inputData.getString("history_id") ?: id.toString(),
+                    inputData.getLong("requested_at", calculationRevision),
+                    HistoryTrigger.APP_ACTION, request, route, plan, enriched.walkingDurationSeconds
+                )
+            }
             val pois = enriched.pois
             val description = DriveEntryIdentity.attach(
                 DriveEventDescriptionBuilder.build(
@@ -118,7 +115,9 @@ class SingleEventWorker(
                     plan.departureMillis,
                     plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                     title,
-                    description
+                    description,
+                    appointmentMillis = arrival,
+                    calculatedAtMillis = calculationRevision
                 )
             } else {
                 calendar.insertDrive(
@@ -129,9 +128,13 @@ class SingleEventWorker(
                     plan.arrivalMillis + enriched.walkingDurationSeconds * 1_000L,
                     settings.reminderLeadMinutes,
                     title,
-                    description
+                    description,
+                    destinationStartMillis = arrival,
+                    calculatedAtMillis = calculationRevision
                 )
             }
+            RouteHistoryStore(applicationContext).markSafely(applicationContext, historyEntry,
+                if (settings.outputIcs) HistorySaveState.ICS else HistorySaveState.CALENDAR)
             if (overlapsPrevious) {
                 AutomationNotifier.notifyConflict(
                     applicationContext,
@@ -140,17 +143,8 @@ class SingleEventWorker(
                     plan.departureMillis
                 )
             }
+            AutomationRunLog.add(applicationContext, "single-event", "saved-or-newer-plan-preserved", identityKey)
             Result.success()
-        }.getOrElse {
-            AutomationNotifier.notifyRoutingFailure(
-                applicationContext,
-                settings.language,
-                origin,
-                destination,
-                arrival,
-                previousEnd
-            )
-            Result.failure()
         }
     }
 

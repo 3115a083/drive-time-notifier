@@ -52,7 +52,8 @@ class NextDriveWorker(
             calendar.events(
                 now - 24L * 60 * 60 * 1000,
                 now + 21L * 24 * 60 * 60 * 1000,
-                sourceIds
+                sourceIds,
+                includeWithoutLocation = true
             )
         }.getOrElse {
             AutomationNotifier.notifyBackgroundActionProblem(
@@ -88,15 +89,14 @@ class NextDriveWorker(
             return Result.failure()
         }
 
-        val previousEnd = events
-            .asSequence()
-            .filter { it.id != next.id && it.endMillis <= next.startMillis }
-            .maxOfOrNull { it.endMillis }
+        val previousEnd = de.drivetime.notifier.calendar.CalendarConflicts.previousEnd(events, next)
         val identityKey = DriveEntryIdentity.key(next.location, next.startMillis)
         val request = OneTimeWorkRequestBuilder<SingleEventWorker>()
             .setInputData(
                 workDataOf(
                     "origin" to origin,
+                    "history_id" to id.toString(),
+                    "requested_at" to inputData.getLong("requested_at", now),
                     "destination" to next.location,
                     "arrival_millis" to next.startMillis,
                     "previous_end_millis" to (previousEnd ?: -1L),
